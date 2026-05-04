@@ -304,11 +304,12 @@
                 document.getElementById('loadingText').textContent = `Loading from HuggingFace: ${hfRepo}...`;
                 
                 try {
-                    // Fetch config.json, meta-config.json, and config_meta.json in parallel
-                    const [configResp, metaResp, legacyMetaResp] = await Promise.allSettled([
+                    // Fetch config.json, meta-config.json, config_meta.json, and model info in parallel
+                    const [configResp, metaResp, legacyMetaResp, modelInfoResp] = await Promise.allSettled([
                         fetch(`${hfBase}/config.json`),
                         fetch(`${hfBase}/meta-config.json`),
-                        fetch(`${hfBase}/config_meta.json`)
+                        fetch(`${hfBase}/config_meta.json`),
+                        fetch(`https://huggingface.co/api/models/${hfRepo}`)
                     ]);
 
                     if (configResp.status !== 'fulfilled' || !configResp.value.ok) {
@@ -326,9 +327,18 @@
                         try { meta = await legacyMetaResp.value.json(); console.log('Loaded config_meta.json from HF'); } catch(e) {}
                     }
 
+                    // Fetch model info for parameter count
+                    let modelInfo = null;
+                    if (modelInfoResp.status === 'fulfilled' && modelInfoResp.value.ok) {
+                        try { 
+                            modelInfo = await modelInfoResp.value.json(); 
+                            console.log('Loaded model info from HF API'); 
+                        } catch(e) {}
+                    }
+
                     // Use meta (original config) for visualization if available
                     const effectiveConfig = meta || config;
-                    modelConfig = parseConfig(effectiveConfig, meta ? config : null);
+                    modelConfig = parseConfig(effectiveConfig, meta ? config : null, modelInfo);
                     document.getElementById('loadingText').textContent = `Loading ${modelConfig.name}...`;
                     return modelConfig;
                 } catch (error) {
@@ -367,7 +377,7 @@
 
                 // Use meta (original config) for visualization if available
                 const effectiveConfig = meta || config;
-                modelConfig = parseConfig(effectiveConfig, meta ? config : null);
+                modelConfig = parseConfig(effectiveConfig, meta ? config : null, null);
                 document.getElementById('loadingText').textContent = `Loading ${modelConfig.name}...`;
                 return modelConfig;
             } catch (error) {
@@ -376,7 +386,7 @@
             }
         }
 
-        function parseConfig(config, meta = null) {
+        function parseConfig(config, meta = null, modelInfo = null) {
             const textConfig = config.text_config || config;
             const visionConfig = config.vision_config || {};
             
@@ -431,61 +441,69 @@
             const tieWordEmbeddings = config.tie_word_embeddings || textConfig.tie_word_embeddings || false;
             
             // Calculate total parameters
-            let totalParams = vocabSize * hiddenSize; // Embedding
-            if (!tieWordEmbeddings) {
-                totalParams += hiddenSize * vocabSize; // LM Head
-            }
+            let totalParams = null;
             
-            // Calculate per-layer parameters
-            let layerParams = 0;
-            
-            if (isDeepSeekV4 && qLoraRank > 0) {
-                // DeepSeek V4 MLA attention
-                // Q projection: hiddenSize -> qLoraRank -> numHeads * headDim
-                const qParams = hiddenSize * qLoraRank + qLoraRank * (numHeads * headDim);
-                // K/V projection: hiddenSize -> numKvHeads * vHeadDim
-                const kvParams = 2 * hiddenSize * (numKvHeads * vHeadDim);
-                // O projection: numHeads * headDim -> hiddenSize
-                const oParams = (numHeads * headDim) * hiddenSize;
-                layerParams += qParams + kvParams + oParams;
-            } else {
-                // Standard attention
-                layerParams += hiddenSize * 3 * hiddenSize; // QKV projection
-                layerParams += hiddenSize * hiddenSize; // Output projection
-            }
-            
-            // LayerNorm parameters (2 * hiddenSize per layer)
-            layerParams += 2 * hiddenSize;
-            
-            if (isMoE) {
-                // Mixed architecture: first_k_dense layers are dense, rest are MoE
-                let denseLayerParams = 0;
-                let moeLayerParams = 0;
-                
-                // Dense FFN (SwiGLU: up, gate, down)
-                denseLayerParams += 3 * hiddenSize * intermediateSize;
-                
-                // MoE FFN
-                // Router
-                moeLayerParams += hiddenSize * numExperts;
-                // Shared experts
-                if (nSharedExperts > 0) {
-                    moeLayerParams += nSharedExperts * 3 * hiddenSize * expertSize;
+            // Priority 1: Use modelInfo from HuggingFace API (most accurate)
+            if (modelInfo && modelInfo.safetensors && modelInfo.safetensors.parameters) {
+                const params = modelInfo.safetensors.parameters;
+                totalParams = 0;
+                for (const [dtype, count] of Object.entries(params)) {
+                    totalParams += count;
                 }
-                // Routed experts
-                moeLayerParams += numExperts * 3 * hiddenSize * expertSize;
+                console.log(`Using parameter count from HF API: ${totalParams}`);
+            }
+            
+            // Priority 2: Calculate from config if no modelInfo
+            if (totalParams === null) {
+                totalParams = vocabSize * hiddenSize; // Embedding
+                if (!tieWordEmbeddings) {
+                    totalParams += hiddenSize * vocabSize; // LM Head
+                }
                 
-                // Add layer params based on architecture
-                const denseLayers = Math.min(firstKDense, numLayers);
-                const moeLayers = numLayers - denseLayers;
+                // Calculate per-layer parameters
+                let layerParams = 0;
                 
-                totalParams += denseLayers * (layerParams + denseLayerParams);
-                totalParams += moeLayers * (layerParams + moeLayerParams);
-            } else {
-                // Standard dense FFN
-                layerParams += intermediateSize * hiddenSize; // FFN up
-                layerParams += hiddenSize * intermediateSize; // FFN down
-                totalParams += layerParams * numLayers;
+                if (isDeepSeekV4 && qLoraRank > 0) {
+                    // DeepSeek V4 MLA attention
+                    const qParams = hiddenSize * qLoraRank + qLoraRank * (numHeads * headDim);
+                    const kvParams = 2 * hiddenSize * (numKvHeads * vHeadDim);
+                    const oParams = (numHeads * headDim) * hiddenSize;
+                    layerParams += qParams + kvParams + oParams;
+                } else {
+                    // Standard attention
+                    layerParams += hiddenSize * 3 * hiddenSize; // QKV projection
+                    layerParams += hiddenSize * hiddenSize; // Output projection
+                }
+                
+                // LayerNorm parameters (2 * hiddenSize per layer)
+                layerParams += 2 * hiddenSize;
+                
+                if (isMoE) {
+                    // Mixed architecture: first_k_dense layers are dense, rest are MoE
+                    let denseLayerParams = 0;
+                    let moeLayerParams = 0;
+                    
+                    // Dense FFN (SwiGLU: up, gate, down)
+                    denseLayerParams += 3 * hiddenSize * intermediateSize;
+                    
+                    // MoE FFN
+                    moeLayerParams += hiddenSize * numExperts; // Router
+                    if (nSharedExperts > 0) {
+                        moeLayerParams += nSharedExperts * 3 * hiddenSize * expertSize;
+                    }
+                    moeLayerParams += numExperts * 3 * hiddenSize * expertSize; // Routed experts
+                    
+                    const denseLayers = Math.min(firstKDense, numLayers);
+                    const moeLayers = numLayers - denseLayers;
+                    
+                    totalParams += denseLayers * (layerParams + denseLayerParams);
+                    totalParams += moeLayers * (layerParams + moeLayerParams);
+                } else {
+                    // Standard dense FFN
+                    layerParams += intermediateSize * hiddenSize; // FFN up
+                    layerParams += hiddenSize * intermediateSize; // FFN down
+                    totalParams += layerParams * numLayers;
+                }
             }
             
             return {
