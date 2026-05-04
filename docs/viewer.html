@@ -211,6 +211,41 @@
         <button onclick="exportPNGViz()" class="control-btn text-xs justify-center" title="Save as PNG">📷 PNG</button>
         <button onclick="exportHTMLViz()" class="control-btn text-xs justify-center" title="Export Standalone HTML">📦 HTML</button>
     </div>
+    
+    <!-- Model Preset Selector -->
+    <div class="fixed top-4 right-4 glass-panel p-2 z-20" id="modelPresetPanel" style="max-width: 380px;">
+        <div class="text-xs text-gray-400 uppercase mb-2 px-2">🚀 Quick Load Model</div>
+        <select id="modelPresetSelect" onchange="loadModelPreset(this.value)" 
+                class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 mb-2">
+            <option value="">-- Select a model to visualize --</option>
+            <optgroup label="🌟 Vitriol Demo Models">
+                <option value="isLinXu/Qwen3.5-397B-A17B-Vitriol-ultra-dummy">Qwen3.5-397B-A17B (Vitriol Demo)</option>
+            </optgroup>
+            <optgroup label="🔥 Latest Flagship Models">
+                <option value="Qwen/Qwen3.6-27B">Qwen3.6-27B (Hybrid Attn + VL)</option>
+                <option value="deepseek-ai/DeepSeek-V4-Pro">DeepSeek-V4-Pro 862B (MLA + MoE)</option>
+                <option value="XiaomiMiMo/MiMo-V2.5-Pro">MiMo-V2.5-Pro (GQA + MoE)</option>
+            </optgroup>
+            <optgroup label="🦙 LLaMA Family">
+                <option value="meta-llama/Llama-3.1-8B">LLaMA 3.1 8B</option>
+                <option value="meta-llama/Llama-3.2-3B">LLaMA 3.2 3B</option>
+            </optgroup>
+            <optgroup label="🌬️ Mistral Family">
+                <option value="mistralai/Mistral-7B-v0.3">Mistral 7B v0.3</option>
+                <option value="mistralai/Mixtral-8x7B-v0.1">Mixtral 8x7B (MoE)</option>
+            </optgroup>
+            <optgroup label="🌸 Qwen Family">
+                <option value="Qwen/Qwen2.5-7B">Qwen 2.5 7B</option>
+                <option value="Qwen/Qwen2.5-VL-7B-Instruct">Qwen 2.5 VL 7B (Multimodal)</option>
+            </optgroup>
+            <optgroup label="🔬 Other Architectures">
+                <option value="microsoft/Phi-3-mini-4k-instruct">Phi-3 Mini (Microsoft)</option>
+                <option value="google/gemma-2-9b">Gemma 2 9B (Google)</option>
+                <option value="THUDM/glm-4-9b">GLM-4 9B (THUDM)</option>
+            </optgroup>
+        </select>
+        <div class="text-[10px] text-gray-500 px-2">Or use URL: <code class="text-blue-400">?hf=owner/repo</code></div>
+    </div>
 
     <!-- Inference Status Panel -->
     <div class="fixed top-20 left-1/2 -translate-x-1/2 glass-panel px-6 py-3 z-10" id="inferencePanel" style="display: none;">
@@ -450,7 +485,6 @@
             const isMiMo = config.model_type === 'mimo_v2' || textConfig.model_type === 'mimo_v2';
             const isQwen35 = config.model_type === 'qwen3_5' || textConfig.model_type === 'qwen3_5' || /Qwen3[\.\-]/.test(name);
             const tieWordEmbeddings = config.tie_word_embeddings || textConfig.tie_word_embeddings || false;
-            const isMultimodal = config.language_model_only === false || /VL|Omni|Vision|Janus/.test(name);
             
             // Calculate total parameters
             let totalParams = null;
@@ -1909,6 +1943,24 @@
         // ============================================
         function updateStatsPanel(cfg) {
             const panel = document.getElementById('statsPanel');
+            
+            // Detect architecture type for badge
+            let archBadge = 'Transformer';
+            let archColor = '#60a5fa';
+            if (cfg.isQwen35) { archBadge = 'Hybrid Attn'; archColor = '#06b6d4'; }
+            else if (cfg.isDeepSeekV4) { archBadge = 'MLA + MoE'; archColor = '#f59e0b'; }
+            else if (cfg.isMiMo) { archBadge = 'GQA + MoE'; archColor = '#f59e0b'; }
+            else if (cfg.isMoE) { archBadge = 'MoE'; archColor = '#f59e0b'; }
+            
+            // Count layer types for hybrid architectures
+            let linearCount = 0, fullCount = 0;
+            if (cfg.textLayerTypes) {
+                cfg.textLayerTypes.forEach(t => {
+                    if (t === 'linear_attention') linearCount++;
+                    else if (t === 'full_attention' || t === 'dense' || t === 'hash_attention') fullCount++;
+                });
+            }
+            
             panel.innerHTML = `
                 <div class="stat-card">
                     <div class="stat-value">${formatParams(cfg.totalParams)}</div>
@@ -1923,13 +1975,29 @@
                     <div class="stat-label">Hidden</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-value">${cfg.numHeads}</div>
-                    <div class="stat-label">Heads</div>
+                    <div class="stat-value">${cfg.numHeads}${cfg.numKvHeads && cfg.numKvHeads !== cfg.numHeads ? '/' + cfg.numKvHeads : ''}</div>
+                    <div class="stat-label">${cfg.numKvHeads && cfg.numKvHeads !== cfg.numHeads ? 'Q/KV Heads (GQA)' : 'Heads'}</div>
+                </div>
+                <div class="stat-card" style="border-color: ${archColor}40;">
+                    <div class="stat-value" style="color: ${archColor};">${archBadge}</div>
+                    <div class="stat-label">Architecture</div>
                 </div>
                 ${cfg.isMoE ? `
                 <div class="stat-card">
-                    <div class="stat-value">${cfg.numExperts}</div>
-                    <div class="stat-label">Experts</div>
+                    <div class="stat-value">${cfg.numExperts}<span style="font-size:12px;color:#94a3b8;">/${cfg.expertsPerTok}</span></div>
+                    <div class="stat-label">Experts (Total/Active)</div>
+                </div>
+                ` : ''}
+                ${cfg.isQwen35 && linearCount > 0 ? `
+                <div class="stat-card">
+                    <div class="stat-value" style="color:#06b6d4;">${linearCount}<span style="font-size:12px;color:#94a3b8;">/${fullCount}</span></div>
+                    <div class="stat-label">Linear/Full Attn</div>
+                </div>
+                ` : ''}
+                ${cfg.isMultimodal ? `
+                <div class="stat-card">
+                    <div class="stat-value" style="color:#a855f7;">${cfg.visionLayers}</div>
+                    <div class="stat-label">Vision Layers</div>
                 </div>
                 ` : ''}
             `;
@@ -2421,6 +2489,37 @@
             
             gsapTo(camera.position, { x: totalHeight * 0.8, y: centerY, z: totalHeight }, 1.0);
             gsapTo(controls.target, { x: 0, y: centerY, z: 0 }, 1.0);
+        }
+
+        // ============================================
+        // Model Preset Loader
+        // ============================================
+        function loadModelPreset(hfRepo) {
+            if (!hfRepo) return;
+            // Update URL and reload viewer with new model
+            const newUrl = `${window.location.pathname}#?hf=${encodeURIComponent(hfRepo)}`;
+            window.location.href = newUrl;
+            // Force reload to re-initialize everything
+            setTimeout(() => window.location.reload(), 100);
+        }
+        
+        // Sync model preset dropdown with current model on load
+        function syncModelPreset() {
+            const hash = window.location.hash;
+            const hfMatch = hash.match(/hf=([^&]+)/);
+            if (hfMatch) {
+                const currentRepo = decodeURIComponent(hfMatch[1]);
+                const select = document.getElementById('modelPresetSelect');
+                if (select) {
+                    // Try to set matching option
+                    for (const option of select.options) {
+                        if (option.value === currentRepo) {
+                            select.value = currentRepo;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         function setPresetView(viewType) {
@@ -2930,6 +3029,9 @@
                         setTimeout(() => {
                             document.getElementById('loading').style.display = 'none';
                         }, 500);
+                        
+                        // Sync model preset dropdown
+                        syncModelPreset();
                         
                         animate();
                     } catch (e) {
