@@ -1,0 +1,279 @@
+"""
+Model comparison tool for architecture analysis.
+
+This module provides utilities for comparing multiple model architectures
+and generating comparison reports.
+"""
+
+import logging
+from typing import List, Dict
+from pathlib import Path
+
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+
+from ..arch_viz.visualizer import ArchitectureVisualizer
+from ..arch_viz.core import Architecture
+
+logger = logging.getLogger(__name__)
+
+
+class ModelComparator:
+    """
+    Compare multiple model architectures.
+    
+    This class provides comprehensive comparison of model architectures,
+    including parameter counts, layer structures, and feature sets.
+    
+    Example:
+        >>> comparator = ModelComparator(["Qwen/Qwen2.5-7B", "meta-llama/Llama-2-7b"])
+        >>> comparator.analyze_all()
+        >>> table = comparator.compare_table()
+        >>> console.print(table)
+    """
+    
+    def __init__(self, model_ids: List[str]):
+        """
+        Initialize comparator.
+        
+        Args:
+            model_ids: List of model identifiers to compare
+        """
+        self.model_ids = model_ids
+        self.analyses: Dict[str, Architecture] = {}
+        self.console = Console()
+    
+    def analyze_all(self) -> None:
+        """Analyze all models."""
+        logger.info(f"Analyzing {len(self.model_ids)} models...")
+        
+        for model_id in self.model_ids:
+            try:
+                viz = ArchitectureVisualizer(model_id)
+                self.analyses[model_id] = viz.architecture
+                logger.info(f"Analyzed {model_id}: {viz.architecture.model_type}")
+            except Exception as e:
+                logger.error(f"Failed to analyze {model_id}: {e}")
+                raise
+    
+    def compare_table(self) -> Table:
+        """
+        Generate a comparison table.
+        
+        Returns:
+            Rich Table object for display
+        """
+        table = Table(title="Model Architecture Comparison")
+        
+        # Add columns
+        table.add_column("Metric", style="cyan", no_wrap=True)
+        for model_id in self.model_ids:
+            # Use short name (last part of model_id)
+            short_name = model_id.split("/")[-1]
+            table.add_column(short_name, justify="right")
+        
+        # Define metrics to compare
+        metrics = [
+            ("Model Type", lambda a: a.model_type),
+            ("Arch Type", lambda a: a.arch_type),
+            ("Total Params", lambda a: format_params(a.total_params)),
+            ("Layers", lambda a: str(a.total_layers)),
+            ("Hidden Size", lambda a: format_number(a.parameters.get("hidden_size", 0))),
+            ("Attention Heads", lambda a: str(a.parameters.get("num_heads", "N/A"))),
+            ("KV Heads", lambda a: str(a.parameters.get("num_kv_heads", "N/A"))),
+            ("Vocab Size", lambda a: format_number(a.parameters.get("vocab_size", 0))),
+            ("Features", lambda a: ", ".join(a.features) if a.features else "Standard"),
+        ]
+        
+        # Add rows
+        for metric_name, getter in metrics:
+            row = [metric_name]
+            for model_id in self.model_ids:
+                if model_id in self.analyses:
+                    analysis = self.analyses[model_id]
+                    try:
+                        value = getter(analysis)
+                        row.append(value)
+                    except Exception as e:
+                        logger.debug("Failed to get comparison value for %s: %s", model_id, e)
+                        row.append("N/A")
+                else:
+                    row.append("N/A")
+            table.add_row(*row)
+        
+        return table
+    
+    def compare_memory_footprint(self) -> Table:
+        """
+        Compare memory footprint of models.
+        
+        Returns:
+            Rich Table showing memory usage
+        """
+        table = Table(title="Memory Footprint Comparison")
+        
+        table.add_column("Model", style="cyan")
+        table.add_column("FP16 (GB)", justify="right")
+        table.add_column("FP32 (GB)", justify="right")
+        table.add_column("INT8 (GB)", justify="right")
+        
+        for model_id in self.model_ids:
+            if model_id in self.analyses:
+                analysis = self.analyses[model_id]
+                params = analysis.total_params
+                
+                row = [
+                    model_id.split("/")[-1],
+                    f"{params * 2 / 1e9:.2f}",
+                    f"{params * 4 / 1e9:.2f}",
+                    f"{params * 1 / 1e9:.2f}",
+                ]
+                table.add_row(*row)
+        
+        return table
+    
+    def generate_diff_report(self, output_path: str) -> None:
+        """
+        Generate a detailed diff report in Markdown.
+        
+        Args:
+            output_path: Output file path
+        """
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        lines = [
+            "# Model Architecture Comparison Report",
+            "",
+            "Generated by Vitriol",
+            "",
+            "## Overview",
+            "",
+        ]
+        
+        # Summary table
+        lines.append("| Model | Type | Parameters | Layers |")
+        lines.append("|-------|------|------------|--------|")
+        
+        for model_id in self.model_ids:
+            if model_id in self.analyses:
+                a = self.analyses[model_id]
+                lines.append(
+                    f"| {model_id} | {a.model_type} | "
+                    f"{format_params(a.total_params)} | {a.total_layers} |"
+                )
+        
+        lines.append("")
+        
+        # Detailed comparison
+        lines.append("## Detailed Comparison")
+        lines.append("")
+        
+        # Compare each metric
+        metrics_to_compare = [
+            ("hidden_size", "Hidden Size"),
+            ("num_heads", "Attention Heads"),
+            ("num_kv_heads", "KV Heads"),
+            ("vocab_size", "Vocabulary Size"),
+        ]
+        
+        for key, name in metrics_to_compare:
+            lines.append(f"### {name}")
+            lines.append("")
+            
+            values = {}
+            for model_id in self.model_ids:
+                if model_id in self.analyses:
+                    values[model_id] = self.analyses[model_id].parameters.get(key, "N/A")
+            
+            # Check if all values are the same
+            unique_values = set(str(v) for v in values.values())
+            
+            if len(unique_values) == 1:
+                lines.append(f"All models have {name} = {list(values.values())[0]}")
+            else:
+                lines.append("| Model | Value |")
+                lines.append("|-------|-------|")
+                for model_id, value in values.items():
+                    lines.append(f"| {model_id} | {value} |")
+            
+            lines.append("")
+        
+        # Feature comparison
+        lines.append("## Features")
+        lines.append("")
+        
+        all_features = set()
+        for model_id in self.model_ids:
+            if model_id in self.analyses:
+                all_features.update(self.analyses[model_id].features)
+        
+        if all_features:
+            lines.append("| Feature | " + " | ".join(m.split("/")[-1] for m in self.model_ids) + " |")
+            lines.append("|---------" + "|------" * len(self.model_ids) + "|")
+            
+            for feature in sorted(all_features):
+                row = [feature]
+                for model_id in self.model_ids:
+                    if model_id in self.analyses:
+                        has_feature = "✓" if feature in self.analyses[model_id].features else "✗"
+                        row.append(has_feature)
+                    else:
+                        row.append("?")
+                lines.append("| " + " | ".join(row) + " |")
+        
+        # Write to file
+        with open(output_file, "w") as f:
+            f.write("\n".join(lines))
+        
+        logger.info(f"Diff report saved to {output_path}")
+    
+    def print_summary(self):
+        """Print a summary to console."""
+        self.console.print(
+            Panel.fit(
+                f"[bold cyan]Comparing {len(self.model_ids)} Models[/bold cyan]\n"
+                + "\n".join(f"  • {mid}" for mid in self.model_ids),
+                title="Model Comparison"
+            )
+        )
+        
+        # Print comparison table
+        self.console.print(self.compare_table())
+        
+        # Print memory comparison
+        self.console.print(self.compare_memory_footprint())
+
+
+def format_params(num_params: int) -> str:
+    """
+    Format parameter count in human-readable form.
+    
+    Args:
+        num_params: Number of parameters
+    
+    Returns:
+        Formatted string (e.g., "7.2B")
+    """
+    if num_params >= 1e9:
+        return f"{num_params / 1e9:.2f}B"
+    elif num_params >= 1e6:
+        return f"{num_params / 1e6:.2f}M"
+    elif num_params >= 1e3:
+        return f"{num_params / 1e3:.2f}K"
+    else:
+        return str(num_params)
+
+
+def format_number(num: int) -> str:
+    """
+    Format large number with comma separators.
+    
+    Args:
+        num: Number to format
+    
+    Returns:
+        Formatted string (e.g., "4,096")
+    """
+    return f"{num:,}"

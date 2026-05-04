@@ -1,0 +1,1943 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vitriol Ultra - Model Architecture Visualizer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #fafbfc;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f5f6f8;
+            --text-primary: #1a1a2e;
+            --text-secondary: #5c5c6e;
+            --text-tertiary: #9898a6;
+            --accent-blue: #2563eb;
+            --accent-purple: #7c3aed;
+            --accent-cyan: #0891b2;
+            --accent-orange: #ea580c;
+            --accent-green: #059669;
+            --accent-red: #dc2626;
+            --border-color: #e5e7eb;
+            --shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 24px 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-badge {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .model-input {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .model-input input {
+            width: 400px;
+            padding: 10px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            background: var(--bg-tertiary);
+        }
+
+        .model-input input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow);
+        }
+
+        /* Main Layout */
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 24px;
+            padding: 24px 40px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Architecture Diagram */
+        .diagram-section {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            padding: 32px;
+            box-shadow: var(--shadow);
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 24px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        /* SVG Architecture */
+        .architecture-svg {
+            width: 100%;
+            height: 800px;
+            overflow-y: auto;
+        }
+
+        /* Component Styles */
+        .component {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .component:hover {
+            filter: brightness(1.1);
+        }
+
+        .component-box {
+            rx: 8;
+            ry: 8;
+            stroke-width: 2;
+        }
+
+        .component-label {
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            fill: white;
+        }
+
+        .component-sublabel {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            fill: rgba(255,255,255,0.8);
+        }
+
+        .connector {
+            stroke: #d1d5db;
+            stroke-width: 2;
+            fill: none;
+        }
+
+        .arrow-marker {
+            fill: #d1d5db;
+        }
+
+        /* Stats Sidebar */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Same-origin / file:// hint */
+        .origin-hint {
+            background: rgba(234, 88, 12, 0.10);
+            border: 1px solid rgba(234, 88, 12, 0.25);
+            color: #7c2d12;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin: 16px 40px 0;
+            box-shadow: var(--shadow);
+            display: none;
+        }
+        .origin-hint strong { color: #9a3412; }
+        .origin-hint code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            background: rgba(234, 88, 12, 0.10);
+            padding: 2px 6px;
+            border-radius: 8px;
+        }
+        .origin-hint .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .btn-ghost {
+            background: rgba(255,255,255,0.8);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+        .btn-ghost:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow);
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .stat-card h3 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .stat-item.full {
+            grid-column: span 2;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Layer List */
+        .layer-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .layer-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 4px;
+        }
+
+        .layer-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .layer-item.active {
+            background: rgba(37, 99, 235, 0.1);
+            border: 1px solid rgba(37, 99, 235, 0.3);
+        }
+
+        .layer-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 3px;
+        }
+
+        .layer-info {
+            flex: 1;
+        }
+
+        .layer-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .layer-params {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Details Panel */
+        .details-panel {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .details-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .details-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .details-row:last-child {
+            border-bottom: none;
+        }
+
+        .details-label {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .details-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        /* Truthfulness / Source badges */
+        .source-badges {
+            margin-top: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .source-badge {
+            display: none; /* shown by JS when available */
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .source-badge.estimated {
+            display: inline-flex;
+            border-color: rgba(234, 88, 12, 0.35);
+            background: rgba(234, 88, 12, 0.08);
+            color: var(--accent-orange);
+        }
+
+        .source-badge.real {
+            display: inline-flex;
+            border-color: rgba(5, 150, 105, 0.35);
+            background: rgba(5, 150, 105, 0.08);
+            color: var(--accent-green);
+        }
+
+        .source-badge.demo {
+            display: inline-flex;
+            border-color: rgba(124, 58, 237, 0.35);
+            background: rgba(124, 58, 237, 0.08);
+            color: var(--accent-purple);
+        }
+
+        .source-badge.blocked {
+            display: inline-flex;
+            border-color: rgba(220, 38, 38, 0.35);
+            background: rgba(220, 38, 38, 0.08);
+            color: var(--accent-red);
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+            .model-input input {
+                width: 250px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-title">
+            <h1>Vitriol Model Visualizer</h1>
+            <span class="header-badge">Paper Style</span>
+            <span class="header-badge" id="vizModeBadge" style="display:none;"></span>
+        </div>
+        <div class="model-input">
+            <input type="text" id="modelPath" value="output/Qwen3.5-397B-A17B-Vitriol-ultra-dummy">
+            <button class="btn btn-primary" onclick="loadModel()">Load Model</button>
+        </div>
+    </header>
+
+    <div id="originHint" class="origin-hint" role="note" aria-label="same-origin hint">
+        <div>
+            <strong>Hint:</strong> You are opening this page via <code>file://</code>. Due to the browser's
+            <strong>same-origin restrictions</strong>, cross-page sync (2D⇄3D) cannot communicate with the 3D page
+            served from <code>http://localhost:*</code>.
+        </div>
+        <div class="actions">
+            <button class="btn btn-primary" id="openSameOriginBtn" type="button">Open via HTTP (demo)</button>
+            <button class="btn btn-ghost" id="copySameOriginUrlBtn" type="button">Copy HTTP link</button>
+        </div>
+        <div style="margin-top:8px; color: var(--text-tertiary); font-size: 12px;">
+            Tip: start 2D via <code>vitriol viz --2d</code> (opens via an HTTP server and injects config), or open
+            this file under the same <code>http://localhost</code> origin.
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="diagram-section">
+            <div class="section-title">Figure 1: Model Architecture Overview</div>
+            <svg class="architecture-svg" id="architectureSvg">
+                <!-- Will be populated by JavaScript -->
+            </svg>
+        </div>
+
+        <div class="sidebar">
+            <div class="stat-card">
+                <h3>Table 1: Model Statistics</h3>
+                <div class="stat-grid">
+                    <div class="stat-item full">
+                        <div class="stat-value" id="totalParams">-</div>
+                        <div class="stat-label">Total Parameters</div>
+                        <div class="source-badges">
+                            <span id="paramsSourceBadge" class="source-badge"></span>
+                            <span id="configSourceBadge" class="source-badge"></span>
+                        </div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="hiddenSize">-</div>
+                        <div class="stat-label">Hidden Size</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="numLayers">-</div>
+                        <div class="stat-label">Layers</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="numExperts">-</div>
+                        <div class="stat-label">Experts</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="headDim">-</div>
+                        <div class="stat-label">Head Dim</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <h3>Layer Components</h3>
+                <div class="layer-list" id="layerList"></div>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="layer-dot" style="background: #8b5cf6;"></div>
+                    Vision
+                </div>
+                <div class="legend-item">
+                    <div class="layer-dot" style="background: #f97316;"></div>
+                    MoE
+                </div>
+                <div class="legend-item">
+                    <div class="layer-dot" style="background: #0891b2;"></div>
+                    Linear Attn
+                </div>
+                <div class="legend-item">
+                    <div class="layer-dot" style="background: #059669;"></div>
+                    Norm
+                </div>
+                <div class="legend-item">
+                    <div class="layer-dot" style="background: #ec4899;"></div>
+                    Embedding
+                </div>
+            </div>
+
+            <!-- 2D <-> 3D playback sync status (read-only, Phase 1) -->
+            <div class="stat-card" id="playbackStatusPanel">
+                <h3>Inference Playback Sync Status (Read-only)</h3>
+                <div class="details-row">
+                    <span class="details-label">Connection</span>
+                    <span class="details-value" id="playbackConnectionText">Not connected</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Token</span>
+                    <span class="details-value" id="currentTokenText">-</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Layer</span>
+                    <span class="details-value" id="currentLayerText">-</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">State</span>
+                    <span class="details-value" id="playbackPausedText">-</span>
+                </div>
+                <div class="details-row" style="border-bottom: none;">
+                    <span class="details-label">Speed</span>
+                    <span class="details-value" id="playbackSpeedText">-</span>
+                </div>
+            </div>
+
+            <div class="details-panel" id="detailsPanel" style="display: none;">
+                <div class="details-title" id="detailsTitle">Layer Details</div>
+                <div id="detailsContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // INLINE_CONFIG_MARKER
+        // INLINE_ARCH_MARKER
+
+        // ============================================
+        // Model Parser (same as 3D version)
+        // ============================================
+        class UltraModelParser {
+            constructor() {
+                this.config = null;
+                this.modelData = null;
+                this.inlineModelConfig = null;
+                this.inlineArchData = null;
+                this.configSource = 'unknown';
+            }
+
+            _getHashParams() {
+                if (!window.location.hash) return new URLSearchParams();
+                const parts = window.location.hash.split('?');
+                return new URLSearchParams(parts[1] || '');
+            }
+
+            isDemoEnabled() {
+                const params = this._getHashParams();
+                return params.get('demo') === '1';
+            }
+
+            async loadFromPath(path) {
+                // Check for inline config first (set by CLI to avoid fetch on file:// protocol)
+                if (window.__INLINE_MODEL_CONFIG__) {
+                    this.inlineModelConfig = window.__INLINE_MODEL_CONFIG__;
+                    this.inlineArchData = window.__INLINE_ARCH_DATA__ || null;
+                    this.configSource = 'inline';
+                    this.config = window.__INLINE_MODEL_CONFIG__.raw || window.__INLINE_MODEL_CONFIG__;
+                    this.modelData = this.parseConfig();
+                    return this.modelData;
+                }
+
+                try {
+                    const configUrl = path.endsWith('/') ? path + 'config.json' : path + '/config.json';
+                    const metaConfigUrl = path.endsWith('/') ? path + 'meta-config.json' : path + '/meta-config.json';
+                    const legacyMetaUrl = path.endsWith('/') ? path + 'config_meta.json' : path + '/config_meta.json';
+                    
+                    // Fetch all config files in parallel
+                    const [configResp, metaResp, legacyResp] = await Promise.allSettled([
+                        fetch(configUrl),
+                        fetch(metaConfigUrl),
+                        fetch(legacyMetaUrl)
+                    ]);
+                    
+                    if (configResp.status !== 'fulfilled' || !configResp.value.ok) {
+                        throw new Error('Config not found');
+                    }
+                    
+                    const config = await configResp.value.json();
+                    
+                    // Priority: meta-config.json > config_meta.json > config.json
+                    let metaConfig = null;
+                    let source = 'config.json';
+                    if (metaResp.status === 'fulfilled' && metaResp.value.ok) {
+                        try {
+                            metaConfig = await metaResp.value.json();
+                            source = 'meta-config.json';
+                        } catch(e) {}
+                    }
+                    if (!metaConfig && legacyResp.status === 'fulfilled' && legacyResp.value.ok) {
+                        try {
+                            metaConfig = await legacyResp.value.json();
+                            source = 'config_meta.json';
+                        } catch(e) {}
+                    }
+                    
+                    // Use meta config (original HF config) for visualization if available
+                    this.config = metaConfig || config;
+                    this.configSource = source;
+                    this.modelData = this.parseConfig();
+                    return this.modelData;
+                } catch (error) {
+                    console.warn('Cannot load config.json/meta-config.json:', error);
+                    if (this.isDemoEnabled()) {
+                        this.configSource = 'demo';
+                        return this.getDemoData();
+                    }
+                    throw error;
+                }
+            }
+
+            parseConfig() {
+                if (!this.config) return null;
+
+                // Prefer the CLI-injected inline model config (closest to backend canonical fields).
+                const inline = this.inlineModelConfig;
+                if (inline) {
+                    // If ArchitectureAnalyzer layer details are injected, prefer them (more accurate structure).
+                    if (this.inlineArchData && Array.isArray(this.inlineArchData.layers)) {
+                        const arch = this.inlineArchData;
+                        const p = arch.parameters || {};
+
+                        const layers = (arch.layers || []).map((l, idx) => {
+                            const t = String(l.type || 'other');
+                            let color = '#3b82f6';
+                            if (t === 'embedding') color = '#ec4899';
+                            else if (t === 'output') color = '#ec4899';
+                            else if (t === 'normalization' || t === 'norm') color = '#059669';
+                            else if (t === 'feedforward' || t === 'mlp') color = '#f97316';
+                            else if (t === 'attention') color = '#3b82f6';
+                            else if (t === 'block_start' || t === 'block_end') color = '#d1d5db';
+                            return {
+                                id: `arch_${idx}`,
+                                name: l.name || `Layer ${idx + 1}`,
+                                type: t,
+                                params: Number(l.params || 0) || 0,
+                                description: l.description || '',
+                                color
+                            };
+                        }).filter(l => l.type !== 'block_start' && l.type !== 'block_end');
+
+                        const modelType = arch.model_type || inline.name || inline.type || 'Unknown';
+                        const totalParams = Number(arch.total_params || inline.total_params || 0) || 0;
+                        const hiddenSize = Number(p.hidden_size || inline.hidden_size || 0) || 0;
+                        const numLayers = Number(arch.total_layers || inline.num_layers || 0) || 0;
+                        const numExperts = Number(p.num_experts || inline.num_experts || 0) || 0;
+                        // top-k / experts-per-token: field names vary across analyzers/models; use fallbacks.
+                        const expertsPerTok = Number(
+                            p.top_k_experts ||
+                            p.num_experts_per_tok ||
+                            inline.raw?.num_experts_per_tok ||
+                            inline.raw?.text_config?.num_experts_per_tok ||
+                            inline.text_config?.num_experts_per_tok ||
+                            0
+                        ) || 0;
+                        const numHeads = Number(p.num_heads || inline.num_attention_heads || 0) || 0;
+                        const numKvHeads = Number(p.num_kv_heads || inline.num_key_value_heads || 0) || 0;
+                        const headDim = Number(p.head_dim || inline.head_dim || 0) || 0;
+                        const vocabSize = Number(p.vocab_size || inline.vocab_size || 0) || 0;
+                        const maxPosition = Number(p.max_position || inline.max_position || 0) || 0;
+                        const activatedParams = Number(p.activated_params || inline.activated_params || 0) || 0;
+
+                        return {
+                            modelType,
+                            totalParams,
+                            vocabSize,
+                            hiddenSize,
+                            numLayers,
+                            numExperts,
+                            expertsPerTok,
+                            headDim,
+                            numHeads,
+                            numKvHeads,
+                            isMultimodal: false,
+                            visionLayers: 0,
+                            maxPosition,
+                            activatedParams,
+                            paramsSource: 'inline_arch',
+                            configSource: this.configSource,
+                            layers
+                        };
+                    }
+
+                    const textConfig = inline.text_config || inline.raw?.text_config || inline.raw || {};
+                    const visionConfig = inline.vision_config || inline.raw?.vision_config || null;
+                    const isMultimodal = !!visionConfig;
+
+                    const modelType = inline.name || inline.type || inline.raw?.architectures?.[0] || inline.raw?.model_type || 'Unknown';
+
+                    const vocabSize = Number(inline.vocab_size || textConfig.vocab_size || 0) || 0;
+                    const hiddenSize = Number(inline.hidden_size || textConfig.hidden_size || 0) || 0;
+                    const numLayers = Number(inline.num_layers || textConfig.num_hidden_layers || 0) || 0;
+                    const numHeads = Number(inline.num_attention_heads || textConfig.num_attention_heads || 0) || 0;
+                    const numKvHeads = Number(inline.num_key_value_heads || textConfig.num_key_value_heads || 0) || numHeads;
+                    const headDim = Number(inline.head_dim || textConfig.head_dim || (hiddenSize && numHeads ? Math.floor(hiddenSize / numHeads) : 0)) || 0;
+                    const numExperts = Number(inline.num_experts || textConfig.num_experts || 0) || 0;
+                    const expertsPerTok = Number(textConfig.num_experts_per_tok || 0) || 0;
+                    const maxPosition = Number(inline.max_position || textConfig.max_position_embeddings || 0) || 0;
+                    const activatedParams = Number(inline.activated_params || textConfig.activated_params || 0) || 0;
+
+                    // Visualization layers here are a conceptual representation, not a 1:1 mapping to real weights.
+                    // However, key model stats (total params / layers / experts / context) must match the inline config.
+                    const layers = [];
+                    if (isMultimodal && visionConfig) {
+                        const vHidden = Number(visionConfig.hidden_size || 0) || 0;
+                        const vPatch = Number(visionConfig.patch_size || 0) || 0;
+                        const vDepth = Number(visionConfig.depth || visionConfig.num_hidden_layers || 0) || 0;
+                        const vOut = Number(visionConfig.out_hidden_size || 0) || 0;
+
+                        layers.push({
+                            id: 'vision_embed',
+                            name: 'Vision Embedding',
+                            type: 'vision',
+                            params: 3 * vHidden * vPatch * vPatch,
+                            description: `Patch: ${vPatch}, Hidden: ${vHidden}`,
+                            color: '#8b5cf6'
+                        });
+
+                        for (let i = 0; i < vDepth; i++) {
+                            layers.push({
+                                id: `vision_${i}`,
+                                name: `Vision Block ${i}`,
+                                type: 'vision',
+                                params: this.estimateVisionLayerParams({ hidden_size: vHidden, intermediate_size: visionConfig.intermediate_size || vHidden * 2 }),
+                                description: `ViT Layer ${i + 1}/${vDepth}`,
+                                color: '#8b5cf6'
+                            });
+                        }
+
+                        if (vHidden && vOut) {
+                            layers.push({
+                                id: 'vision_proj',
+                                name: 'Vision Projector',
+                                type: 'vision',
+                                params: vHidden * vOut,
+                                description: `To ${vOut}D`,
+                                color: '#8b5cf6'
+                            });
+                        }
+                    }
+
+                    if (vocabSize && hiddenSize) {
+                        layers.push({
+                            id: 'embed',
+                                trace_id: 'embed',
+                            name: 'Token Embedding',
+                            type: 'embed',
+                            params: vocabSize * hiddenSize,
+                            description: `Vocab: ${vocabSize.toLocaleString()}`,
+                            color: '#ec4899'
+                        });
+                    }
+
+                    const layerTypes = textConfig.layer_types || [];
+                    for (let i = 0; i < numLayers; i++) {
+                        const lType = layerTypes[i] || (numExperts > 1 ? 'moe' : 'dense');
+                        layers.push({
+                            id: `ln1_${i}`,
+                            trace_id: `block:${i}:norm1`,
+                            name: `Layer Norm ${i + 1}`,
+                            type: 'norm',
+                            params: hiddenSize,
+                            description: 'Pre-attention normalization',
+                            color: '#059669'
+                        });
+                        layers.push({
+                            id: `attn_${i}`,
+                            trace_id: `block:${i}:attn`,
+                            name: `Attention ${i + 1}`,
+                            type: lType === 'linear_attention' ? 'linear' : 'attn',
+                            params: this.estimateAttentionParams({
+                                hidden_size: hiddenSize,
+                                num_attention_heads: numHeads,
+                                num_key_value_heads: numKvHeads,
+                                head_dim: headDim
+                            }),
+                            description: `${lType === 'linear_attention' ? 'Linear' : 'Full'} Attention, ${numHeads}H x ${headDim}D`,
+                            color: lType === 'linear_attention' ? '#0891b2' : '#3b82f6'
+                        });
+                        layers.push({
+                            id: `ln2_${i}`,
+                            trace_id: `block:${i}:norm2`,
+                            name: `Layer Norm ${i + 1}.2`,
+                            type: 'norm',
+                            params: hiddenSize,
+                            description: 'Pre-FFN normalization',
+                            color: '#059669'
+                        });
+                        layers.push({
+                            id: `ffn_${i}`,
+                            trace_id: `block:${i}:ffn`,
+                            name: (numExperts > 1 || lType === 'moe') ? `MoE FFN ${i + 1}` : `Dense FFN ${i + 1}`,
+                            type: 'moe',
+                            params: this.estimateFFNParams({
+                                hidden_size: hiddenSize,
+                                num_experts: numExperts,
+                                moe_intermediate_size: textConfig.moe_intermediate_size || textConfig.intermediate_size || hiddenSize * 4,
+                                intermediate_size: textConfig.intermediate_size || hiddenSize * 4,
+                                shared_expert_intermediate_size: textConfig.shared_expert_intermediate_size || 0
+                            }),
+                            description: (numExperts > 1 || lType === 'moe')
+                                ? `${numExperts} experts, top-${expertsPerTok || '?'}`
+                                : `Intermediate: ${(textConfig.intermediate_size || hiddenSize * 4)}`,
+                            color: '#f97316'
+                        });
+                    }
+
+                    if (vocabSize && hiddenSize) {
+                        layers.push({
+                            id: 'lm_head',
+                            trace_id: 'lm_head',
+                            name: 'LM Head',
+                            type: 'embed',
+                            params: vocabSize * hiddenSize,
+                            description: `Output: ${vocabSize.toLocaleString()}`,
+                            color: '#ec4899'
+                        });
+                    }
+
+                    return {
+                        modelType,
+                        totalParams: Number(inline.total_params || 0) || 0,
+                        vocabSize,
+                        hiddenSize,
+                        numLayers,
+                        numExperts,
+                        expertsPerTok,
+                        headDim,
+                        numHeads,
+                        numKvHeads,
+                        isMultimodal,
+                        visionLayers: Number(visionConfig?.depth || 0) || 0,
+                        maxPosition,
+                        activatedParams,
+                        paramsSource: 'inline_total_params',
+                        configSource: this.configSource,
+                        layers
+                    };
+                }
+
+                const isMultimodal = this.config.vision_config;
+                const textConfig = this.config.text_config || this.config;
+                const visionConfig = this.config.vision_config;
+
+                const modelType = this.config.architectures?.[0] || this.config.model_type || 'Unknown';
+                const vocabSize = textConfig.vocab_size || 248320;
+                const hiddenSize = textConfig.hidden_size || 256;
+                const numLayers = textConfig.num_hidden_layers || 2;
+                const numHeads = textConfig.num_attention_heads || 16;
+                const numKvHeads = textConfig.num_key_value_heads || 2;
+                const headDim = textConfig.head_dim || 256;
+                const moeInter = textConfig.moe_intermediate_size || 64;
+                const sharedInter = textConfig.shared_expert_intermediate_size || 64;
+                const numExperts = textConfig.num_experts || 8;
+                const expertsPerTok = textConfig.num_experts_per_tok || 2;
+                const layerTypes = textConfig.layer_types || ['moe', 'moe'];
+                const visionLayers = visionConfig?.depth || 27;
+
+                const layers = [];
+
+                if (isMultimodal) {
+                    layers.push({
+                        id: 'vision_embed',
+                        name: 'Vision Embedding',
+                        type: 'vision',
+                        params: 3 * visionConfig.hidden_size * visionConfig.patch_size * visionConfig.patch_size,
+                        description: `Patch: ${visionConfig.patch_size}, Hidden: ${visionConfig.hidden_size}`,
+                        color: '#8b5cf6'
+                    });
+
+                    for (let i = 0; i < visionLayers; i++) {
+                        layers.push({
+                            id: `vision_${i}`,
+                            name: `Vision Block ${i}`,
+                            type: 'vision',
+                            params: this.estimateVisionLayerParams(visionConfig),
+                            description: `ViT Layer ${i + 1}/${visionLayers}`,
+                            color: '#8b5cf6'
+                        });
+                    }
+
+                    layers.push({
+                        id: 'vision_proj',
+                        name: 'Vision Projector',
+                        type: 'vision',
+                        params: visionConfig.hidden_size * visionConfig.out_hidden_size,
+                        description: `To ${visionConfig.out_hidden_size}D`,
+                        color: '#8b5cf6'
+                    });
+                }
+
+                layers.push({
+                    id: 'embed',
+                    name: 'Token Embedding',
+                    type: 'embed',
+                    params: vocabSize * hiddenSize,
+                    description: `Vocab: ${vocabSize.toLocaleString()}`,
+                    color: '#ec4899'
+                });
+
+                for (let i = 0; i < numLayers; i++) {
+                    const lType = layerTypes[i] || 'moe';
+
+                    layers.push({
+                        id: `ln1_${i}`,
+                        name: `Layer Norm ${i + 1}`,
+                        type: 'norm',
+                        params: hiddenSize,
+                        description: 'Pre-attention normalization',
+                        color: '#059669'
+                    });
+
+                    const attnType = lType === 'linear_attention' ? 'Linear Attention' : 'Full Attention';
+                    layers.push({
+                        id: `attn_${i}`,
+                        name: `Attention ${i + 1}`,
+                        type: lType === 'linear_attention' ? 'linear' : 'attn',
+                        params: this.estimateAttentionParams(textConfig),
+                        description: `${attnType}, ${numHeads}H x ${headDim}D`,
+                        color: lType === 'linear_attention' ? '#0891b2' : '#3b82f6'
+                    });
+
+                    layers.push({
+                        id: `ln2_${i}`,
+                        name: `Layer Norm ${i + 1}.2`,
+                        type: 'norm',
+                        params: hiddenSize,
+                        description: 'Pre-FFN normalization',
+                        color: '#059669'
+                    });
+
+                    const isMoE = lType === 'moe';
+                    layers.push({
+                        id: `ffn_${i}`,
+                        name: isMoE ? `MoE FFN ${i + 1}` : `Dense FFN ${i + 1}`,
+                        type: 'moe',
+                        params: this.estimateFFNParams(textConfig),
+                        description: isMoE
+                            ? `${numExperts} experts, top-${expertsPerTok}, shared: ${sharedInter}`
+                            : `Intermediate: ${moeInter}`,
+                        color: '#f97316'
+                    });
+                }
+
+                layers.push({
+                    id: 'final_norm',
+                    name: 'Final Norm',
+                    type: 'norm',
+                    params: hiddenSize,
+                    description: 'Post-processing',
+                    color: '#059669'
+                });
+
+                layers.push({
+                    id: 'lm_head',
+                    name: 'LM Head',
+                    type: 'embed',
+                    params: vocabSize * hiddenSize,
+                    description: `Output: ${vocabSize.toLocaleString()}`,
+                    color: '#ec4899'
+                });
+
+                // Parameter count semantics:
+                // - If CLI injected __INLINE_MODEL_CONFIG__.total_params, prefer it (backend-canonical).
+                // - Otherwise use a JS heuristic estimate and label it as "Estimated (JS)" in the UI.
+                let totalParams = 0;
+                let paramsSource = 'estimated_js';
+                const inlineTotalParams = this.inlineModelConfig?.total_params;
+                if (inlineTotalParams && Number(inlineTotalParams) > 0) {
+                    totalParams = Number(inlineTotalParams);
+                    paramsSource = 'inline_total_params';
+                } else if (this.config.total_params && Number(this.config.total_params) > 0) {
+                    totalParams = Number(this.config.total_params);
+                    paramsSource = 'config_total_params';
+                } else {
+                    totalParams = this.estimateTotalParams(textConfig, isMultimodal, visionLayers);
+                    paramsSource = 'estimated_js';
+                }
+
+                return {
+                    modelType,
+                    totalParams,
+                    vocabSize,
+                    hiddenSize,
+                    numLayers,
+                    numExperts,
+                    expertsPerTok,
+                    headDim,
+                    numHeads,
+                    numKvHeads,
+                    isMultimodal,
+                    visionLayers,
+                    paramsSource,
+                    configSource: this.configSource,
+                    layers
+                };
+            }
+
+            estimateVisionLayerParams(visionConfig) {
+                const hidden = visionConfig.hidden_size;
+                const intermediate = visionConfig.intermediate_size || hidden * 2;
+                return 4 * hidden * hidden + hidden * hidden + 2 * hidden * intermediate;
+            }
+
+            estimateAttentionParams(config) {
+                const hidden = config.hidden_size;
+                const numHeads = config.num_attention_heads;
+                const numKvHeads = config.num_key_value_heads;
+                const headDim = config.head_dim || hidden / numHeads;
+                return hidden * (numHeads * headDim) + hidden * (numKvHeads * headDim) +
+                       hidden * (numKvHeads * headDim) + (numHeads * headDim) * hidden;
+            }
+
+            estimateFFNParams(config) {
+                const hidden = config.hidden_size;
+                const numExperts = config.num_experts || 1;
+                const moeInter = config.moe_intermediate_size || config.intermediate_size || hidden * 4;
+                const sharedInter = config.shared_expert_intermediate_size || 0;
+                if (numExperts > 1) {
+                    return hidden * numExperts + numExperts * 3 * hidden * moeInter +
+                           (sharedInter > 0 ? 3 * hidden * sharedInter : 0);
+                }
+                return 3 * hidden * moeInter;
+            }
+
+            estimateTotalParams(config, isMultimodal, visionLayers) {
+                const hidden = config.hidden_size;
+                const vocab = config.vocab_size;
+                const numLayers = config.num_hidden_layers;
+                const numExperts = config.num_experts || 1;
+                const moeInter = config.moe_intermediate_size || hidden * 4;
+                const sharedInter = config.shared_expert_intermediate_size || 0;
+
+                let total = vocab * hidden;
+
+                if (isMultimodal) {
+                    const visionHidden = config.vision_config?.hidden_size || hidden;
+                    total += 3 * visionHidden * 16 * 16;
+                    total += visionLayers * this.estimateVisionLayerParams(config.vision_config);
+                    total += visionHidden * config.vision_config?.out_hidden_size;
+                }
+
+                for (let i = 0; i < numLayers; i++) {
+                    total += 2 * hidden;
+                    total += this.estimateAttentionParams(config);
+                    total += this.estimateFFNParams(config);
+                }
+
+                total += hidden + vocab * hidden;
+                return total;
+            }
+
+            getDemoData() {
+                return {
+                    modelType: 'Qwen3.5 MoE (A3B)',
+                    totalParams: 397000000000,
+                    vocabSize: 248320,
+                    hiddenSize: 256,
+                    numLayers: 2,
+                    numExperts: 8,
+                    expertsPerTok: 2,
+                    headDim: 256,
+                    numHeads: 16,
+                    numKvHeads: 2,
+                    isMultimodal: true,
+                    visionLayers: 27,
+                    paramsSource: 'demo',
+                    configSource: 'demo',
+                    layers: this.generateDemoLayers()
+                };
+            }
+
+            generateDemoLayers() {
+                const layers = [];
+                const visionLayers = 27;
+                const langLayers = 2;
+                const numExperts = 8;
+                const hiddenSize = 256;
+                const vocabSize = 248320;
+
+                layers.push({
+                    id: 'vision_embed',
+                    name: 'Vision Embedding',
+                    type: 'vision',
+                    params: 3 * 256 * 16 * 16,
+                    description: 'Patch extraction',
+                    color: '#8b5cf6'
+                });
+
+                for (let i = 0; i < visionLayers; i++) {
+                    layers.push({
+                        id: `vision_${i}`,
+                        name: `Vision Block ${i}`,
+                        type: 'vision',
+                        params: 4 * 256 * 256 + 256 * 256 + 2 * 256 * 512,
+                        description: `Transformer Layer ${i + 1}`,
+                        color: '#8b5cf6'
+                    });
+                }
+
+                layers.push({
+                    id: 'vision_proj',
+                    name: 'Vision Projector',
+                    type: 'vision',
+                    params: 256 * 4096,
+                    description: 'To 4096D',
+                    color: '#8b5cf6'
+                });
+
+                layers.push({
+                    id: 'embed',
+                    name: 'Token Embedding',
+                    type: 'embed',
+                    params: vocabSize * hiddenSize,
+                    description: `Vocab: ${vocabSize.toLocaleString()}`,
+                    color: '#ec4899'
+                });
+
+                layers.push({
+                    id: 'ln1_0',
+                    name: 'Layer Norm 1',
+                    type: 'norm',
+                    params: hiddenSize,
+                    description: 'Pre-attention',
+                    color: '#059669'
+                });
+
+                layers.push({
+                    id: 'attn_0',
+                    name: 'Linear Attention 1',
+                    type: 'linear',
+                    params: 4 * hiddenSize * hiddenSize,
+                    description: 'Mamba/SSM style',
+                    color: '#0891b2'
+                });
+
+                layers.push({
+                    id: 'ln2_0',
+                    name: 'Layer Norm 1.2',
+                    type: 'norm',
+                    params: hiddenSize,
+                    description: 'Pre-FFN',
+                    color: '#059669'
+                });
+
+                layers.push({
+                    id: 'ffn_0',
+                    name: 'MoE FFN 1',
+                    type: 'moe',
+                    params: hiddenSize * numExperts + numExperts * 3 * hiddenSize * 64 + 3 * hiddenSize * 64,
+                    description: `${numExperts} experts, top-2, shared`,
+                    color: '#f97316'
+                });
+
+                layers.push({
+                    id: 'ln1_1',
+                    name: 'Layer Norm 2',
+                    type: 'norm',
+                    params: hiddenSize,
+                    description: 'Pre-attention',
+                    color: '#059669'
+                });
+
+                layers.push({
+                    id: 'attn_1',
+                    name: 'Attention 2',
+                    type: 'attn',
+                    params: 4 * hiddenSize * hiddenSize,
+                    description: 'Full Attention, GQA',
+                    color: '#3b82f6'
+                });
+
+                layers.push({
+                    id: 'ln2_1',
+                    name: 'Layer Norm 2.2',
+                    type: 'norm',
+                    params: hiddenSize,
+                    description: 'Pre-FFN',
+                    color: '#059669'
+                });
+
+                layers.push({
+                    id: 'ffn_1',
+                    name: 'MoE FFN 2',
+                    type: 'moe',
+                    params: hiddenSize * numExperts + numExperts * 3 * hiddenSize * 64 + 3 * hiddenSize * 64,
+                    description: `${numExperts} experts, top-2, shared`,
+                    color: '#f97316'
+                });
+
+                layers.push({
+                    id: 'final_norm',
+                    name: 'Final Norm',
+                    type: 'norm',
+                    params: hiddenSize,
+                    description: 'Output normalization',
+                    color: '#059669'
+                });
+
+                layers.push({
+                    id: 'lm_head',
+                    name: 'LM Head',
+                    type: 'embed',
+                    params: vocabSize * hiddenSize,
+                    description: `Output: ${vocabSize.toLocaleString()}`,
+                    color: '#ec4899'
+                });
+
+                return layers;
+            }
+        }
+
+        // ============================================
+        // SVG Renderer
+        // ============================================
+        class SVGVisualizer {
+            constructor(svgElement) {
+                this.svg = svgElement;
+                this.layerComponents = [];
+                this._lastHighlighted = null;
+            }
+
+            render(modelData) {
+                this.svg.innerHTML = '';
+                this.layerComponents = [];
+
+                const layers = modelData.layers;
+                const startY = 40;
+                const componentHeight = 60; // allow room for fine-grained submodules (q/k/v/o, gate/up/down)
+                const gap = 8;
+                const startX = 50;
+                const width = this.svg.clientWidth - 100;
+                const centerX = width / 2 + startX;
+
+                // Title
+                const title = this.createText(
+                    centerX, 25,
+                    `Figure 1: ${modelData.modelType} Architecture (${this.formatParams(modelData.totalParams)} params)`,
+                    '18px Inter', '#1a1a2e', 'bold', 'middle'
+                );
+                title.setAttribute('font-family', 'Inter, sans-serif');
+                this.svg.appendChild(title);
+
+                // Draw components
+                layers.forEach((layer, index) => {
+                    const y = startY + 50 + index * (componentHeight + gap);
+                    const group = this.createLayerComponent(layer, centerX, y, width, componentHeight);
+                    this.svg.appendChild(group);
+                    this.layerComponents.push({ element: group, layer, index });
+                });
+
+                // Draw connections
+                for (let i = 0; i < layers.length - 1; i++) {
+                    const y1 = startY + 50 + i * (componentHeight + gap) + componentHeight;
+                    const y2 = startY + 50 + (i + 1) * (componentHeight + gap);
+                    this.drawConnector(centerX, y1, centerX, y2);
+                }
+            }
+
+            _layerKey(layer) {
+                return layer.trace_id || layer.id;
+            }
+
+            createLayerComponent(layer, x, y, width, height = 60) {
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.setAttribute('class', 'component');
+                group.setAttribute('data-id', this._layerKey(layer));
+
+                // Background
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', x - width / 2);
+                rect.setAttribute('y', y);
+                rect.setAttribute('width', width);
+                rect.setAttribute('height', height);
+                rect.setAttribute('rx', 8);
+                rect.setAttribute('fill', layer.color);
+                rect.setAttribute('filter', 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))');
+                group.appendChild(rect);
+
+                // Name
+                const name = this.createText(
+                    x - width / 2 + 16, y + 22,
+                    layer.name,
+                    '13px Inter', 'white', 'bold', 'start'
+                );
+                group.appendChild(name);
+
+                // Description
+                const desc = this.createText(
+                    x - width / 2 + 16, y + 40,
+                    layer.description,
+                    '11px JetBrains Mono', 'rgba(255,255,255,0.8)', 'normal', 'start'
+                );
+                group.appendChild(desc);
+
+                // Params
+                const params = this.createText(
+                    x + width / 2 - 16, y + 30,
+                    this.formatParams(layer.params),
+                    '12px JetBrains Mono', 'rgba(255,255,255,0.9)', 'bold', 'end'
+                );
+                group.appendChild(params);
+
+                // Fine-grained submodules (best-effort, aligns with trace node_path)
+                const traceId = this._layerKey(layer);
+                const _mkSub = (subId, label, bx, by, bw = 26, bh = 14) => {
+                    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                    g.setAttribute('class', 'component');
+                    g.setAttribute('data-id', subId);
+
+                    const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    r.setAttribute('x', bx);
+                    r.setAttribute('y', by);
+                    r.setAttribute('width', bw);
+                    r.setAttribute('height', bh);
+                    r.setAttribute('rx', 6);
+                    r.setAttribute('fill', 'rgba(255,255,255,0.18)');
+                    r.setAttribute('stroke', 'rgba(255,255,255,0.22)');
+                    r.setAttribute('stroke-width', '1');
+                    g.appendChild(r);
+
+                    const t = this.createText(
+                        bx + bw / 2,
+                        by + bh / 2 + 1,
+                        label,
+                        '10px JetBrains Mono',
+                        'rgba(255,255,255,0.92)',
+                        'bold',
+                        'middle'
+                    );
+                    g.appendChild(t);
+
+                    g.addEventListener('click', (evt) => {
+                        evt.stopPropagation();
+                        showDetails({
+                            id: subId,
+                            trace_id: subId,
+                            name: `${layer.name} • ${label}`,
+                            type: 'submodule',
+                            params: 0,
+                            description: subId,
+                            color: layer.color
+                        });
+                        // Cross-page sync: publish focus command to 3D (fine-grained nodes)
+                        try {
+                            const sync = window.__VITRIOL_CROSS_PAGE_SYNC_2D__;
+                            if (sync && typeof sync.publishCommand === 'function') {
+                                sync.publishCommand({ name: 'focus_node', nodeId: subId, pause: true });
+                            }
+                        } catch (e) {}
+                    });
+                    return g;
+                };
+
+                // Layout for sub boxes: bottom-right, left of params area
+                const baseX = x + width / 2 - 16;
+                const boxY = y + height - 18;
+
+                const attnM = String(traceId).match(/^block:(\d+):attn$/);
+                if (attnM) {
+                    const i = attnM[1];
+                    const gap = 4;
+                    const bw = 26;
+                    const total = bw * 4 + gap * 3;
+                    let bx = baseX - total - 56; // reserve some room for params text
+                    group.appendChild(_mkSub(`block:${i}:attn:q_proj`, 'Q', bx, boxY, bw)); bx += bw + gap;
+                    group.appendChild(_mkSub(`block:${i}:attn:k_proj`, 'K', bx, boxY, bw)); bx += bw + gap;
+                    group.appendChild(_mkSub(`block:${i}:attn:v_proj`, 'V', bx, boxY, bw)); bx += bw + gap;
+                    group.appendChild(_mkSub(`block:${i}:attn:o_proj`, 'O', bx, boxY, bw));
+                }
+
+                const ffnM = String(traceId).match(/^block:(\d+):ffn$/);
+                if (ffnM) {
+                    const i = ffnM[1];
+                    const gap = 4;
+                    const bw = 32;
+                    const total = bw * 3 + gap * 2;
+                    let bx = baseX - total - 56;
+                    group.appendChild(_mkSub(`block:${i}:ffn:gate_proj`, 'GATE', bx, boxY, bw)); bx += bw + gap;
+                    group.appendChild(_mkSub(`block:${i}:ffn:up_proj`, 'UP', bx, boxY, bw)); bx += bw + gap;
+                    group.appendChild(_mkSub(`block:${i}:ffn:down_proj`, 'DOWN', bx, boxY, bw));
+                }
+
+                // Click handler
+                group.addEventListener('click', () => {
+                    this.selectComponent(layer); // includes showDetails(layer)
+                    // Cross-page sync: publish focus command to 3D
+                    try {
+                        const sync = window.__VITRIOL_CROSS_PAGE_SYNC_2D__;
+                        if (sync && typeof sync.publishCommand === 'function') {
+                            sync.publishCommand({ name: 'focus_node', nodeId: traceId, pause: true });
+                        }
+                    } catch (e) {}
+                });
+
+                return group;
+            }
+
+            createText(x, y, content, fontSize, fill, fontWeight, anchor) {
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', x);
+                text.setAttribute('y', y);
+                text.setAttribute('fill', fill);
+                text.setAttribute('font-size', fontSize);
+                text.setAttribute('font-weight', fontWeight);
+                text.setAttribute('text-anchor', anchor);
+                text.setAttribute('dominant-baseline', 'middle');
+                text.textContent = content;
+                return text;
+            }
+
+            drawConnector(x1, y1, x2, y2) {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', x1);
+                line.setAttribute('y1', y1);
+                line.setAttribute('x2', x2);
+                line.setAttribute('y2', y2);
+                line.setAttribute('stroke', '#d1d5db');
+                line.setAttribute('stroke-width', 2);
+                line.setAttribute('stroke-dasharray', '4,4');
+                this.svg.appendChild(line);
+            }
+
+            selectComponent(layer) {
+                document.querySelectorAll('.component').forEach(el => {
+                    el.style.filter = '';
+                });
+
+                const key = this._layerKey(layer);
+                const component = this.layerComponents.find(c => this._layerKey(c.layer) === key);
+                if (component) {
+                    component.element.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.5))';
+                    showDetails(layer);
+                }
+            }
+
+            /**
+             * Highlight a 2D node by trace nodeId (fine-grained alignment).
+             * - If nodeId is a subnode like block:i:attn:q_proj, try an exact match first.
+             * - If not found, fall back to block:i:attn / block:i:ffn.
+             */
+            selectByNodeId(nodeId) {
+                const id = String(nodeId || '');
+                if (!id || !this.svg) return;
+
+                const candidates = [id];
+                if (id.includes(':attn:')) candidates.push(id.replace(/:attn:.*$/, ':attn'));
+                if (id.includes(':ffn:')) candidates.push(id.replace(/:ffn:.*$/, ':ffn'));
+
+                // Clear previous highlight
+                if (this._lastHighlighted) {
+                    try { this._lastHighlighted.style.filter = ''; } catch (e) {}
+                    this._lastHighlighted = null;
+                }
+
+                for (const c of candidates) {
+                    const el = this.svg.querySelector(`[data-id="${c}"]`);
+                    if (el) {
+                        el.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.55))';
+                        this._lastHighlighted = el;
+                        break;
+                    }
+                }
+            }
+
+            formatParams(params) {
+                if (params >= 1e9) return (params / 1e9).toFixed(1) + 'B';
+                if (params >= 1e6) return (params / 1e6).toFixed(1) + 'M';
+                if (params >= 1e3) return (params / 1e3).toFixed(1) + 'K';
+                return params.toString();
+            }
+        }
+
+        // ============================================
+        // UI Functions
+        // ============================================
+        let parser;
+        let visualizer;
+        let currentModelData;
+
+        function setVizModeBadge(mode, message = '') {
+            const badge = document.getElementById('vizModeBadge');
+            if (!badge) return;
+            badge.style.display = 'inline-block';
+            badge.textContent = mode;
+            if (mode === '⛔ BLOCKED') {
+                badge.style.background = 'rgba(220, 38, 38, 0.12)';
+                badge.style.color = '#dc2626';
+            } else if (mode.startsWith('🧪')) {
+                badge.style.background = 'rgba(124, 58, 237, 0.12)';
+                badge.style.color = '#7c3aed';
+            } else {
+                badge.style.background = 'rgba(5, 150, 105, 0.12)';
+                badge.style.color = '#059669';
+            }
+            if (message) badge.title = message;
+        }
+
+        function showBlockedIndicator(message) {
+            setVizModeBadge('⛔ BLOCKED', message);
+            const totalEl = document.getElementById('totalParams');
+            if (totalEl) totalEl.textContent = 'N/A';
+            const pBadge = document.getElementById('paramsSourceBadge');
+            if (pBadge) {
+                pBadge.className = 'source-badge blocked';
+                pBadge.textContent = 'Blocked: missing config';
+            }
+            const cBadge = document.getElementById('configSourceBadge');
+            if (cBadge) {
+                cBadge.className = 'source-badge blocked';
+                cBadge.textContent = 'Config source: unknown';
+            }
+            const title = document.querySelector('.diagram-section .section-title');
+            if (title) title.textContent = message;
+        }
+
+        function formatNumber(num) {
+            if (num >= 1e12) return (num / 1e12).toFixed(2) + 'T';
+            if (num >= 1e9) return (num / 1e9).toFixed(1) + 'B';
+            if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M';
+            return num.toLocaleString();
+        }
+
+        /**
+         * Read-only sync panel for the 2D visualizer:
+         * - Reads window.__VITRIOL_PLAYBACK_STATE__ (written by the 3D PlaybackEngine)
+         * - If opened standalone / not connected, shows a "not connected" state
+         */
+        function updatePlaybackStatus(state) {
+            const tokenEl = document.getElementById('currentTokenText');
+            const layerEl = document.getElementById('currentLayerText');
+            const connEl = document.getElementById('playbackConnectionText');
+            const pausedEl = document.getElementById('playbackPausedText');
+            const speedEl = document.getElementById('playbackSpeedText');
+
+            if (!tokenEl || !layerEl || !connEl) return;
+
+            const s = state || window.__VITRIOL_PLAYBACK_STATE__;
+            if (!s) {
+                connEl.textContent = 'Not connected';
+                tokenEl.textContent = '-';
+                layerEl.textContent = '-';
+                if (pausedEl) pausedEl.textContent = '-';
+                if (speedEl) speedEl.textContent = '-';
+                return;
+            }
+
+            connEl.textContent = 'Connected';
+            tokenEl.textContent = String(s.tokenIndex ?? '-');
+            layerEl.textContent = String(s.layerIndex ?? '-');
+            if (pausedEl) pausedEl.textContent = s.paused ? 'Paused' : 'Playing';
+            if (speedEl) speedEl.textContent = String(s.speed ?? '-');
+
+            // If nodeId is present, sync-highlight it in the 2D graph (fine-grained first).
+            if (s.nodeId && visualizer && typeof visualizer.selectByNodeId === 'function') {
+                visualizer.selectByNodeId(s.nodeId);
+            }
+        }
+
+        function showDetails(layer) {
+            const panel = document.getElementById('detailsPanel');
+            const title = document.getElementById('detailsTitle');
+            const content = document.getElementById('detailsContent');
+
+            panel.style.display = 'block';
+            panel.classList.add('fade-in');
+            title.textContent = layer.name;
+            content.innerHTML = `
+                <div class="details-row">
+                    <span class="details-label">Type</span>
+                    <span class="details-value">${layer.type}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Parameters</span>
+                    <span class="details-value">${layer.params.toLocaleString()}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Description</span>
+                    <span class="details-value">${layer.description}</span>
+                </div>
+            `;
+
+            // Update layer list active state
+            document.querySelectorAll('.layer-item').forEach(item => {
+                const k = layer.trace_id || layer.id;
+                item.classList.toggle('active', item.dataset.id === k);
+            });
+        }
+
+        function updateStats(modelData) {
+            document.getElementById('totalParams').textContent = formatNumber(modelData.totalParams);
+            document.getElementById('hiddenSize').textContent = modelData.hiddenSize;
+            document.getElementById('numLayers').textContent = modelData.numLayers;
+            document.getElementById('numExperts').textContent = modelData.numExperts;
+            document.getElementById('headDim').textContent = modelData.headDim;
+
+            // Truthfulness / source badges
+            const paramsBadge = document.getElementById('paramsSourceBadge');
+            const configBadge = document.getElementById('configSourceBadge');
+
+            if (paramsBadge) {
+                if (modelData.paramsSource === 'estimated_js') {
+                    paramsBadge.className = 'source-badge estimated';
+                    paramsBadge.textContent = 'Estimated (JS)';
+                    setVizModeBadge('⚠️ ESTIMATED', 'Parameter count is heuristically estimated in the frontend (not authoritative).');
+                } else if (modelData.paramsSource === 'demo') {
+                    paramsBadge.className = 'source-badge demo';
+                    paramsBadge.textContent = 'DEMO (explicit)';
+                    setVizModeBadge('🧪 DEMO', 'Explicit demo dataset enabled via #?demo=1.');
+                } else {
+                    paramsBadge.className = 'source-badge real';
+                    paramsBadge.textContent = 'REAL / backend';
+                    setVizModeBadge('✅ REAL', 'Parameter count comes from CLI injection / backend source of truth.');
+                }
+            }
+
+            if (configBadge) {
+                const src = modelData.configSource || 'unknown';
+                if (src === 'demo') {
+                    configBadge.className = 'source-badge demo';
+                    configBadge.textContent = 'Config: DEMO';
+                } else if (src === 'inline') {
+                    configBadge.className = 'source-badge real';
+                    configBadge.textContent = 'Config: INLINE';
+                } else if (src === 'meta-config.json') {
+                    configBadge.className = 'source-badge real';
+                    configBadge.textContent = 'Config: meta-config.json';
+                } else if (src === 'config_meta.json') {
+                    configBadge.className = 'source-badge real';
+                    configBadge.textContent = 'Config: config_meta.json';
+                } else {
+                    configBadge.className = 'source-badge estimated';
+                    configBadge.textContent = `Config: ${src}`;
+                }
+            }
+
+            // Add extra fields (active/context/etc.) under total params when available.
+            const totalEl = document.getElementById('totalParams');
+            if (totalEl) {
+                const ctx = modelData.maxPosition || 0;
+                const act = modelData.activatedParams || 0;
+                let extra = '';
+                if (act > 0) extra += ` <span style="font-size:11px; color:#6b7280;">(${formatNumber(act)} act)</span>`;
+                if (ctx > 0) extra += ` <span style="font-size:11px; color:#2563eb; display:block; margin-top:2px;">CTX: ${formatNumber(ctx)}</span>`;
+                // Avoid double-appending: only use innerHTML in REAL mode and when extra fields exist.
+                if (extra && (modelData.paramsSource === 'inline_total_params' || modelData.paramsSource === 'config_total_params')) {
+                    totalEl.innerHTML = `${formatNumber(modelData.totalParams)}${extra}`;
+                } else {
+                    totalEl.textContent = formatNumber(modelData.totalParams);
+                }
+            }
+        }
+
+        function updateLayerList(modelData) {
+            const list = document.getElementById('layerList');
+            list.innerHTML = '';
+
+            modelData.layers.forEach(layer => {
+                const item = document.createElement('div');
+                item.className = 'layer-item';
+                item.dataset.id = layer.trace_id || layer.id;
+
+                item.innerHTML = `
+                    <div class="layer-dot" style="background: ${layer.color};"></div>
+                    <div class="layer-info">
+                        <div class="layer-name">${layer.name}</div>
+                        <div class="layer-params">${formatNumber(layer.params)} params</div>
+                    </div>
+                `;
+
+                item.addEventListener('click', () => {
+                    visualizer.selectComponent(layer);
+                });
+
+                list.appendChild(item);
+            });
+        }
+
+        async function loadModel() {
+            const path = document.getElementById('modelPath').value;
+            parser = new UltraModelParser();
+            try {
+                currentModelData = await parser.loadFromPath(path);
+            } catch (e) {
+                showBlockedIndicator(
+                    `Failed to load model config (config.json / meta-config.json). ` +
+                    `Check that the model path is correct and that the directory is served via an HTTP server. ` +
+                    `For demo mode, explicitly add demo=1 to the URL hash (e.g., #?demo=1).`
+                );
+                return;
+            }
+
+            visualizer = new SVGVisualizer(document.getElementById('architectureSvg'));
+            visualizer.render(currentModelData);
+
+            updateStats(currentModelData);
+            updateLayerList(currentModelData);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // file:// hint (helps diagnose cross-page sync failures)
+            try {
+                if (window.location && window.location.protocol === 'file:') {
+                    const hint = document.getElementById('originHint');
+                    if (hint) hint.style.display = 'block';
+
+                    // Auto-detect the localhost port that is serving the 3D visualizer via iframe + postMessage handshake.
+                    // This avoids hardcoding ports like 8765/8002.
+                    const candidates = [8002, 8765, 8000, 8080, 5173];
+                    const timeoutMs = 1600;
+                    let detectedOrigin = null;
+                    let probing = true;
+
+                    const openBtn = document.getElementById('openSameOriginBtn');
+                    const copyBtn = document.getElementById('copySameOriginUrlBtn');
+                    if (openBtn) openBtn.textContent = 'Probing ports…';
+
+                    function makeUrl(origin) {
+                        const base = `${origin}/src/vitriol/viz/model_visualizer.html`;
+                        return base + '#?demo=1';
+                    }
+
+                    function setReady(origin) {
+                        detectedOrigin = origin;
+                        probing = false;
+                        const url = makeUrl(origin);
+                        if (openBtn) openBtn.textContent = `Open with ${origin} (demo)`;
+                        if (openBtn) {
+                            openBtn.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
+                        }
+                        if (copyBtn) {
+                            copyBtn.onclick = async () => {
+                                try {
+                                    await navigator.clipboard.writeText(url);
+                                    copyBtn.textContent = 'Copied';
+                                    window.setTimeout(() => (copyBtn.textContent = 'Copy HTTP link'), 1200);
+                                } catch (e) {
+                                    window.prompt('Copy this link:', url);
+                                }
+                            };
+                        }
+                    }
+
+                    function setFallback() {
+                        probing = false;
+                        const fallbackOrigin = 'http://localhost:8765';
+                        const url = makeUrl(fallbackOrigin);
+                        if (openBtn) openBtn.textContent = 'Not detected (open 8765)';
+                        if (openBtn) openBtn.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
+                        if (copyBtn) {
+                            copyBtn.onclick = async () => {
+                                try {
+                                    await navigator.clipboard.writeText(url);
+                                    copyBtn.textContent = 'Copied';
+                                    window.setTimeout(() => (copyBtn.textContent = 'Copy HTTP link'), 1200);
+                                } catch (e) {
+                                    window.prompt('Copy this link:', url);
+                                }
+                            };
+                        }
+                    }
+
+                    function probePort(port) {
+                        const iframe = document.createElement('iframe');
+                        iframe.style.position = 'absolute';
+                        iframe.style.left = '-9999px';
+                        iframe.style.top = '-9999px';
+                        iframe.style.width = '1px';
+                        iframe.style.height = '1px';
+                        iframe.style.opacity = '0';
+                        iframe.setAttribute('aria-hidden', 'true');
+                        iframe.src = `http://localhost:${port}/trace_3d.html#?handshake=1`;
+                        document.body.appendChild(iframe);
+                        // cleanup later (even if handshake succeeds)
+                        window.setTimeout(() => {
+                            try { iframe.remove(); } catch (e) {}
+                        }, timeoutMs + 500);
+                    }
+
+                    function onMessage(ev) {
+                        if (!probing) return;
+                        const data = ev && ev.data ? ev.data : null;
+                        if (!data || data.type !== 'vitriol_handshake' || data.source !== '3d') return;
+                        // Use event.origin as the truth (avoid trusting data.origin)
+                        if (ev.origin && String(ev.origin).startsWith('http://localhost:')) {
+                            detectedOrigin = ev.origin;
+                            window.removeEventListener('message', onMessage);
+                            setReady(ev.origin);
+                        }
+                    }
+
+                    window.addEventListener('message', onMessage);
+                    candidates.forEach(probePort);
+                    window.setTimeout(() => {
+                        if (!detectedOrigin) {
+                            window.removeEventListener('message', onMessage);
+                            setFallback();
+                        }
+                    }, timeoutMs);
+
+                }
+            } catch (e) {}
+
+            loadModel();
+            updatePlaybackStatus();
+            // Cross-page sync (optional):
+            // - Prefer BroadcastChannel when available
+            // - Fallback to localStorage "storage" event
+            // NOTE: We keep a low-rate polling as a fallback for embedded environments.
+            (function setupCrossPageSync2D() {
+                const key = 'VITRIOL_PLAYBACK_STATE';
+                const commandKey = 'VITRIOL_PLAYBACK_COMMAND';
+                const channelName = 'vitriol_playback_v1';
+                let bc = null;
+                try {
+                    // Reuse an existing channel if we already created one on this page.
+                    if (
+                        window.__VITRIOL_BROADCAST_CHANNEL__ &&
+                        window.__VITRIOL_BROADCAST_CHANNEL__.name === channelName
+                    ) {
+                        bc = window.__VITRIOL_BROADCAST_CHANNEL__;
+                    } else if (typeof BroadcastChannel !== 'undefined') {
+                        bc = new BroadcastChannel(channelName);
+                        window.__VITRIOL_BROADCAST_CHANNEL__ = bc;
+                    }
+                } catch (err) {
+                    bc = null;
+                }
+
+                // Publish command to 3D (bi-directional sync).
+                // Expected shape (3D consumer):
+                // { source:'2d', type:'command', command:{ name:'focus_node', nodeId, pause:true } }
+                function publishCommand(cmd) {
+                    const payload = {
+                        ts: Date.now(),
+                        source: '2d',
+                        type: 'command',
+                        command: cmd,
+                    };
+                    try { if (bc) bc.postMessage(payload); } catch (e) {}
+                    // Optional fallback (cross-tab): localStorage "storage" event
+                    try { localStorage.setItem(commandKey, JSON.stringify(payload)); } catch (e) {}
+                }
+
+                // Expose for SVG click handlers (and potential future UI).
+                window.__VITRIOL_CROSS_PAGE_SYNC_2D__ = {
+                    publishCommand,
+                };
+
+                function applyPayload(payload) {
+                    try {
+                        const p = payload && payload.state ? payload : null;
+                        if (!p) return;
+                        // Write into global so other parts (like status panel) can read it too
+                        window.__VITRIOL_PLAYBACK_STATE__ = p.state;
+                        updatePlaybackStatus(p.state);
+                    } catch (e) {}
+                }
+
+                if (bc) {
+                    bc.onmessage = (ev) => {
+                        const data = ev?.data;
+                        if (!data || data.source !== '3d' || data.type !== 'state') return;
+                        applyPayload(data);
+                    };
+                }
+
+                window.addEventListener('storage', (ev) => {
+                    try {
+                        if (!ev || ev.key !== key || !ev.newValue) return;
+                        const data = JSON.parse(ev.newValue);
+                        if (!data || data.source !== '3d' || data.type !== 'state') return;
+                        applyPayload(data);
+                    } catch (e) {}
+                });
+            })();
+
+            // Fallback polling (read-only).
+            window.setInterval(() => updatePlaybackStatus(), 400);
+        });
+    </script>
+</body>
+</html>

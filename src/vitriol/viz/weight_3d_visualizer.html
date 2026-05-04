@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Weights - Digital Matrix</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050510; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        .panel {
+            position: absolute;
+            background: rgba(15, 20, 30, 0.7);
+            border: 1px solid rgba(100, 150, 255, 0.3);
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 10;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+        }
+        
+        #left-panel { top: 20px; left: 20px; width: 300px; max-height: calc(100vh - 40px); overflow-y: auto; }
+        #top-panel { top: 20px; left: 340px; right: 20px; display: flex; justify-content: space-between; align-items: center; }
+        #info-panel { bottom: 20px; right: 20px; width: 340px; pointer-events: none; }
+        
+        h1, h2, h3 { margin-top: 0; font-weight: 600; letter-spacing: 1px; color: #ffffff; }
+        h1 { font-size: 1.1rem; border-bottom: 1px solid rgba(100, 150, 255, 0.3); padding-bottom: 10px; margin-bottom: 15px; }
+        h2 { font-size: 1rem; color: #a0c0ff; }
+        
+        .layer-item {
+            padding: 8px 10px;
+            margin-bottom: 5px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.85rem;
+            display: flex;
+            justify-content: space-between;
+            color: #b0c0d0;
+        }
+        
+        .layer-item:hover { background: rgba(100, 150, 255, 0.15); color: #ffffff; }
+        .layer-item.active { background: rgba(60, 120, 255, 0.25); border-color: rgba(100, 150, 255, 0.5); color: #ffffff; box-shadow: 0 0 10px rgba(60, 120, 255, 0.2); }
+        
+        .shape-badge { font-size: 0.7rem; color: #80a0c0; opacity: 0.8; font-family: monospace; }
+        .stats-badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+        .stats-badge.real { background: rgba(74,222,128,0.2); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+        .stats-badge.synthetic { background: rgba(96,165,250,0.2); color: #60a5fa; border: 1px solid rgba(96,165,250,0.3); }
+        .stats-badge.ultra { background: rgba(251,191,36,0.2); color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+        
+        .btn {
+            background: rgba(60, 120, 255, 0.15);
+            color: #e0f0ff;
+            border: 1px solid rgba(100, 150, 255, 0.4);
+            border-radius: 4px;
+            padding: 6px 15px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        
+        .btn:hover { background: rgba(60, 120, 255, 0.3); box-shadow: 0 0 10px rgba(100, 150, 255, 0.3); transform: translateY(-1px); }
+        
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.85rem; }
+        .stat-label { color: #90b0d0; }
+        .stat-value { font-weight: 600; color: #ffffff; font-family: monospace; }
+        .stat-value.highlight { color: #fbbf24; }
+        .stat-value.good { color: #4ade80; }
+        
+        .config-source {
+            font-size: 0.75rem; color: #64748b; margin-top: 8px; padding-top: 8px;
+            border-top: 1px solid rgba(100, 150, 255, 0.15);
+        }
+        
+        #loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #050510; z-index: 100;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            color: #a0c0ff;
+        }
+        
+        .matrix-loader { font-size: 1.5rem; margin-bottom: 20px; font-weight: 300; letter-spacing: 2px; }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(10, 15, 25, 0.5); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: rgba(100, 150, 255, 0.4); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(100, 150, 255, 0.6); }
+        
+        #tooltip {
+            position: absolute;
+            background: rgba(15, 20, 30, 0.9);
+            border: 1px solid rgba(100, 150, 255, 0.5);
+            border-radius: 6px;
+            padding: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 50;
+            font-size: 0.85rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(4px);
+        }
+        
+        .value-positive { color: #4ade80; }
+        .value-negative { color: #f87171; }
+        .value-zero { color: #60a5fa; }
+        .value-ultra { color: #fbbf24; }
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <script src="https://unpkg.com/stats.js@0.17.0/build/stats.min.js"></script>
+</head>
+<body>
+    <div id="loading">
+        <div class="matrix-loader">INITIALIZING DIGITAL MATRIX...</div>
+        <div id="loadingText">Connecting to neural pathways...</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <div class="panel" id="left-panel">
+        <h1>Model Architecture</h1>
+        <div id="layer-list"></div>
+    </div>
+
+    <div class="panel" id="top-panel" style="padding: 10px 20px;">
+        <div>
+            <span style="color: #80a0c0; margin-right: 10px; font-weight: 600;">SYSTEM:</span>
+            <span id="model-name-display" style="font-weight: bold; color: #a0c0ff; text-shadow: 0 0 8px rgba(160, 192, 255, 0.4);">Loading...</span>
+            <span id="stats-mode-badge" class="stats-badge synthetic" style="display:none;">SYNTHETIC</span>
+        </div>
+        <div>
+            <button class="btn" onclick="exportPNG()">Export PNG</button>
+            <button class="btn" onclick="exportHTML()">Export HTML</button>
+        </div>
+    </div>
+
+    <div class="panel" id="info-panel">
+        <h2>Tensor Data</h2>
+        <div class="stat-row">
+            <span class="stat-label">Selected Layer:</span>
+            <span class="stat-value" id="stat-layer">-</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Shape:</span>
+            <span class="stat-value" id="stat-shape">-</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Parameters:</span>
+            <span class="stat-value" id="stat-params">-</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">View Sample:</span>
+            <span class="stat-value" id="stat-sample">-</span>
+        </div>
+        <!-- Weight stats section (shown when real stats are available) -->
+        <div id="weight-stats-section" style="display: none;">
+            <hr style="border: 0; border-top: 1px solid rgba(100,150,255,0.2); margin: 12px 0;">
+            <div style="font-size: 0.75rem; color: #4ade80; font-weight: 600; margin-bottom: 8px;">▸ REAL WEIGHT STATS</div>
+            <div class="stat-row">
+                <span class="stat-label">Mean:</span>
+                <span class="stat-value" id="stat-mean">-</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Std Dev:</span>
+                <span class="stat-value" id="stat-std">-</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Sparsity:</span>
+                <span class="stat-value" id="stat-sparsity">-</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">L2 Norm:</span>
+                <span class="stat-value" id="stat-l2">-</span>
+            </div>
+            <div class="stat-row" id="stat-compression-row" style="display: none;">
+                <span class="stat-label">Compression:</span>
+                <span class="stat-value highlight" id="stat-compression">-</span>
+            </div>
+            <div class="stat-row" id="stat-strided-row" style="display: none;">
+                <span class="stat-label">Type:</span>
+                <span class="stat-value highlight" id="stat-strided">-</span>
+            </div>
+        </div>
+        <hr style="border: 0; border-top: 1px solid rgba(100,150,255,0.2); margin: 15px 0;">
+        <div style="font-size: 0.8rem; color: #90b0d0; font-weight: 500;">
+            <div style="margin-bottom: 8px;">Color Legend:</div>
+            <div style="display: flex; align-items: center; margin-top: 6px;">
+                <div style="width: 12px; height: 12px; background: #4ade80; border-radius: 2px; margin-right: 10px; box-shadow: 0 0 5px rgba(74,222,128,0.5);"></div> Positive Value
+            </div>
+            <div style="display: flex; align-items: center; margin-top: 6px;">
+                <div style="width: 12px; height: 12px; background: #f87171; border-radius: 2px; margin-right: 10px; box-shadow: 0 0 5px rgba(248,113,113,0.5);"></div> Negative Value
+            </div>
+            <div style="display: flex; align-items: center; margin-top: 6px;">
+                <div style="width: 12px; height: 12px; background: #60a5fa; border-radius: 2px; margin-right: 10px; box-shadow: 0 0 5px rgba(96,165,250,0.5);"></div> Near Zero
+            </div>
+            <div style="display: flex; align-items: center; margin-top: 6px;">
+                <div style="width: 12px; height: 12px; background: #fbbf24; border-radius: 2px; margin-right: 10px; box-shadow: 0 0 5px rgba(251,191,36,0.5);"></div> Ultra Strided (broadcast)
+            </div>
+        </div>
+        <div class="config-source" id="config-source-info"></div>
+    </div>
+
+    <div id="tooltip">
+        <div style="color: #a0c0ff; margin-bottom: 8px; font-weight: 600; font-size: 0.9rem; border-bottom: 1px solid rgba(100,150,255,0.3); padding-bottom: 4px;">Weight Info</div>
+        <div style="margin-bottom: 4px; color: #b0c0d0;">Index: <span id="tt-index" style="color: #ffffff; font-family: monospace;"></span></div>
+        <div style="color: #b0c0d0;">Value: <span id="tt-value" style="font-weight: 600; font-family: monospace;"></span></div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls, stats;
+        let instancedMesh;
+        let dummy = new THREE.Object3D();
+        let modelData = null;
+        let currentLayer = null;
+        let weightValues = [];
+        
+        // Matrix Rain effect particles
+        let rainParticles;
+        let rainGeometry;
+        
+        // Interaction
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let hoveredInstanceId = -1;
+        
+        const SAMPLE_SIZE = 64; // Max grid size to display (64x64 = 4096 cubes)
+
+        async function loadData() {
+            try {
+                const response = await fetch('/weight_data.json?t=' + new Date().getTime());
+                modelData = await response.json();
+                
+                document.getElementById('model-name-display').textContent = modelData.model_name;
+
+                // Show stats mode badge
+                const badge = document.getElementById('stats-mode-badge');
+                if (modelData.weight_stats_available) {
+                    badge.textContent = 'REAL STATS';
+                    badge.className = 'stats-badge real';
+                    badge.style.display = 'inline';
+                } else {
+                    badge.textContent = 'SYNTHETIC';
+                    badge.className = 'stats-badge synthetic';
+                    badge.style.display = 'inline';
+                }
+
+                // Show config source info
+                if (modelData.config_source) {
+                    const sourceInfo = document.getElementById('config-source-info');
+                    sourceInfo.textContent = `Config: ${modelData.config_source}`;
+                }
+
+                buildLayerList();
+                
+                init3D();
+                
+                // Select first layer by default
+                if (modelData.layers.length > 0) {
+                    selectLayer(modelData.layers[0]);
+                }
+                
+                document.getElementById('loading').style.opacity = '0';
+                setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
+            } catch (e) {
+                document.getElementById('loadingText').textContent = 'Error loading data: ' + e.message;
+                console.error(e);
+            }
+        }
+
+        function buildLayerList() {
+            const container = document.getElementById('layer-list');
+            
+            // Group layers
+            let currentGroup = '';
+            
+            modelData.layers.forEach((layer, idx) => {
+                // Extract group prefix (e.g. layers.0)
+                let group = layer.name.split('.')[0];
+                if (layer.name.startsWith('layers.')) {
+                    group = layer.name.split('.').slice(0, 2).join('.');
+                }
+                
+                if (group !== currentGroup) {
+                    const header = document.createElement('div');
+                    header.style.color = '#fff';
+                    header.style.marginTop = '10px';
+                    header.style.marginBottom = '5px';
+                    header.style.fontSize = '0.9rem';
+                    header.style.fontWeight = 'bold';
+                    header.textContent = group.toUpperCase();
+                    container.appendChild(header);
+                    currentGroup = group;
+                }
+                
+                const div = document.createElement('div');
+                div.className = 'layer-item';
+                div.id = 'layer-' + idx;
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = layer.name.replace(currentGroup + '.', '');
+                
+                const shapeSpan = document.createElement('span');
+                shapeSpan.className = 'shape-badge';
+                shapeSpan.textContent = `[${layer.shape.join('×')}]`;
+
+                // Add stats badge if real stats are available
+                if (layer.stats) {
+                    const statsBadge = document.createElement('span');
+                    if (layer.stats.is_strided) {
+                        statsBadge.className = 'stats-badge ultra';
+                        statsBadge.textContent = '⚡';
+                    } else {
+                        statsBadge.className = 'stats-badge real';
+                        const sparsity = (layer.stats.sparsity * 100).toFixed(0);
+                        statsBadge.textContent = sparsity > 50 ? `${sparsity}% sparse` : '✓';
+                    }
+                    nameSpan.appendChild(statsBadge);
+                }
+                
+                div.appendChild(nameSpan);
+                div.appendChild(shapeSpan);
+                
+                div.onclick = () => selectLayer(layer, idx);
+                container.appendChild(div);
+            });
+        }
+
+        function selectLayer(layer, idx) {
+            document.querySelectorAll('.layer-item').forEach(el => el.classList.remove('active'));
+            if (idx !== undefined) {
+                document.getElementById('layer-' + idx).classList.add('active');
+            } else {
+                document.querySelector('.layer-item').classList.add('active');
+            }
+            
+            currentLayer = layer;
+            
+            // Update UI
+            document.getElementById('stat-layer').textContent = layer.name;
+            document.getElementById('stat-shape').textContent = `[${layer.shape.join(', ')}]`;
+            const params = layer.shape.reduce((a, b) => a * b, 1);
+            document.getElementById('stat-params').textContent = params.toLocaleString();
+
+            // Show weight stats if available
+            const statsSection = document.getElementById('weight-stats-section');
+            if (layer.stats) {
+                statsSection.style.display = 'block';
+                document.getElementById('stat-mean').textContent = layer.stats.mean.toFixed(6);
+                document.getElementById('stat-std').textContent = layer.stats.std.toFixed(6);
+                
+                const sparsity = layer.stats.sparsity;
+                const sparsityEl = document.getElementById('stat-sparsity');
+                sparsityEl.textContent = (sparsity * 100).toFixed(1) + '%';
+                sparsityEl.className = sparsity > 0.5 ? 'stat-value highlight' : 'stat-value good';
+
+                document.getElementById('stat-l2').textContent = layer.stats.l2_norm.toFixed(2);
+
+                // Compression ratio
+                const compRow = document.getElementById('stat-compression-row');
+                if (layer.stats.compression_ratio && layer.stats.compression_ratio > 1.1) {
+                    compRow.style.display = 'flex';
+                    document.getElementById('stat-compression').textContent = layer.stats.compression_ratio.toFixed(1) + '×';
+                } else {
+                    compRow.style.display = 'none';
+                }
+
+                // Strided info
+                const stridedRow = document.getElementById('stat-strided-row');
+                if (layer.stats.is_strided) {
+                    stridedRow.style.display = 'flex';
+                    document.getElementById('stat-strided').textContent = 'Ultra stride=0 (broadcast)';
+                } else {
+                    stridedRow.style.display = 'none';
+                }
+            } else {
+                statsSection.style.display = 'none';
+            }
+            
+            // Generate visual matrix
+            buildMatrixVisualization(layer);
+        }
+
+        // Pseudo-random number generator for consistent weights
+        function mulberry32(a) {
+            return function() {
+              var t = a += 0x6D2B79F5;
+              t = Math.imul(t ^ t >>> 15, t | 1);
+              t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+              return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+
+        // Generate normal distribution using Box-Muller transform
+        function randomNormal(rng) {
+            let u = 0, v = 0;
+            while(u === 0) u = rng();
+            while(v === 0) v = rng();
+            return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        function buildMatrixVisualization(layer) {
+            if (instancedMesh) {
+                scene.remove(instancedMesh);
+                instancedMesh.dispose();
+            }
+            
+            // Determine grid dimensions based on tensor shape
+            const rows = layer.shape[0] || 1;
+            const cols = layer.shape.length > 1 ? layer.shape[1] : 1;
+            
+            const visRows = Math.min(rows, SAMPLE_SIZE);
+            const visCols = Math.min(cols, SAMPLE_SIZE);
+            
+            document.getElementById('stat-sample').textContent = `${visRows} × ${visCols}`;
+            
+            const count = visRows * visCols;
+            
+            // Matrix block geometry
+            const geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+            
+            // Material
+            const material = new THREE.MeshLambertMaterial({ 
+                color: 0xffffff, 
+                transparent: true,
+                opacity: 0.9,
+                roughness: 0.2,
+                metalness: 0.8
+            });
+            
+            instancedMesh = new THREE.InstancedMesh(geometry, material, count);
+            
+            const color = new THREE.Color();
+            weightValues = [];
+            
+            // Seed based on layer name to keep it consistent
+            let seed = 0;
+            for(let i = 0; i < layer.name.length; i++) seed += layer.name.charCodeAt(i);
+            const rng = mulberry32(seed);
+            
+            let i = 0;
+            const spacing = 1.2;
+            
+            const startX = -((visCols - 1) * spacing) / 2;
+            const startY = ((visRows - 1) * spacing) / 2;
+
+            // Determine weight distribution parameters
+            // If real stats available, use them; otherwise, use He-init scale
+            let stdDev, meanVal, isStridedLayer, compressionRatio;
+            
+            if (layer.stats) {
+                stdDev = layer.stats.std || Math.sqrt(2.0 / cols);
+                meanVal = layer.stats.mean || 0;
+                isStridedLayer = layer.stats.is_strided || false;
+                compressionRatio = layer.stats.compression_ratio || 1.0;
+            } else {
+                stdDev = Math.sqrt(2.0 / cols);
+                meanVal = 0;
+                isStridedLayer = false;
+                compressionRatio = 1.0;
+            }
+            
+            for (let r = 0; r < visRows; r++) {
+                for (let c = 0; c < visCols; c++) {
+                    // Position
+                    const x = startX + c * spacing;
+                    const y = startY - r * spacing;
+                    const z = (Math.random() - 0.5) * 0.5; // slight depth variation
+                    
+                    dummy.position.set(x, y, z);
+                    dummy.updateMatrix();
+                    instancedMesh.setMatrixAt(i, dummy.matrix);
+                    
+                    // Generate weight value
+                    let val;
+                    if (isStridedLayer) {
+                        // Ultra stride=0: all elements have the same value
+                        val = meanVal;
+                    } else if (layer.stats) {
+                        // Real statistics available — use actual mean/std
+                        val = randomNormal(rng) * stdDev + meanVal;
+                    } else {
+                        // Synthetic — He initialization scale
+                        val = randomNormal(rng) * stdDev;
+                        // Artificial banding for visual flair
+                        if (layer.name.includes('q_proj') && c % 8 === 0) val += 0.05;
+                        if (layer.name.includes('k_proj') && r % 8 === 0) val -= 0.05;
+                    }
+                    
+                    // Store value
+                    const actualRow = Math.floor((r / visRows) * rows);
+                    const actualCol = Math.floor((c / visCols) * cols);
+                    weightValues.push({
+                        val: val,
+                        idx: `[${actualRow}, ${actualCol}]`
+                    });
+                    
+                    // Color based on value
+                    if (isStridedLayer) {
+                        // Ultra strided: gold/amber color
+                        color.setRGB(0.98, 0.75, 0.14);
+                    } else if (val > 0.01) {
+                        // Positive -> Soft Green
+                        const intensity = Math.min(1.0, 0.4 + (Math.abs(val) / stdDev) * 0.6);
+                        color.setRGB(0.2, intensity, 0.4);
+                    } else if (val < -0.01) {
+                        // Negative -> Soft Red/Coral
+                        const intensity = Math.min(1.0, 0.4 + (Math.abs(val) / stdDev) * 0.6);
+                        color.setRGB(intensity, 0.3, 0.3);
+                    } else {
+                        // Near zero -> Soft Blue/Grey
+                        color.setRGB(0.2, 0.4, 0.8);
+                    }
+                    
+                    instancedMesh.setColorAt(i, color);
+                    i++;
+                }
+            }
+            
+            instancedMesh.instanceMatrix.needsUpdate = true;
+            instancedMesh.instanceColor.needsUpdate = true;
+            
+            scene.add(instancedMesh);
+            
+            // Adjust camera to fit the matrix
+            const maxDim = Math.max(visRows, visCols) * spacing;
+            
+            new TWEEN.Tween(camera.position)
+                .to({ x: 0, y: 0, z: maxDim * 0.8 + 10 }, 1000)
+                .easing(TWEEN.Easing.Cubic.Out)
+                .start();
+                
+            new TWEEN.Tween(controls.target)
+                .to({ x: 0, y: 0, z: 0 }, 1000)
+                .easing(TWEEN.Easing.Cubic.Out)
+                .start();
+        }
+
+        function createMatrixRain() {
+            const particleCount = 2000;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const speeds = new Float32Array(particleCount);
+            
+            for (let i = 0; i < particleCount; i++) {
+                positions[i * 3] = (Math.random() - 0.5) * 150;
+                positions[i * 3 + 1] = (Math.random() - 0.5) * 100 + 50;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 50 - 20;
+                
+                speeds[i] = 0.1 + Math.random() * 0.5;
+            }
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('speed', new THREE.BufferAttribute(speeds, 1));
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = 16; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, 16, 64);
+            ctx.fillStyle = '#60a5fa';
+            ctx.font = '14px monospace';
+            ctx.fillText('1', 4, 15);
+            ctx.fillText('0', 4, 30);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('1', 4, 45);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            
+            const material = new THREE.PointsMaterial({
+                color: 0x80b0ff,
+                size: 2.0,
+                map: texture,
+                transparent: true,
+                opacity: 0.4,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            
+            rainParticles = new THREE.Points(geometry, material);
+            scene.add(rainParticles);
+        }
+
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.005);
+            
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 50);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x202530);
+            scene.add(ambientLight);
+            
+            const dirLight = new THREE.DirectionalLight(0xe0f0ff, 1);
+            dirLight.position.set(10, 20, 30);
+            scene.add(dirLight);
+            
+            const pointLight = new THREE.PointLight(0x80b0ff, 1.5, 100);
+            pointLight.position.set(0, 0, 10);
+            scene.add(pointLight);
+            
+            // Add Matrix Rain background
+            createMatrixRain();
+            
+            // Stats
+            stats = new Stats();
+            stats.dom.style.position = 'absolute';
+            stats.dom.style.bottom = '20px';
+            stats.dom.style.left = '20px';
+            stats.dom.style.top = 'auto';
+            document.body.appendChild(stats.dom);
+            
+            // Events
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            
+            animate();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            if (instancedMesh) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(instancedMesh);
+                
+                const tooltip = document.getElementById('tooltip');
+                
+                if (intersects.length > 0) {
+                    const instanceId = intersects[0].instanceId;
+                    
+                    if (hoveredInstanceId !== instanceId) {
+                        // Highlight current
+                        const color = new THREE.Color(0xffffff);
+                        instancedMesh.setColorAt(instanceId, color);
+                        instancedMesh.instanceColor.needsUpdate = true;
+                        
+                        hoveredInstanceId = instanceId;
+                    }
+                    
+                    // Show tooltip
+                    const weight = weightValues[instanceId];
+                    if (weight) {
+                        document.getElementById('tt-index').textContent = weight.idx;
+                        
+                        const valEl = document.getElementById('tt-value');
+                        valEl.textContent = weight.val.toFixed(6);
+                        // Color based on value type
+                        if (currentLayer && currentLayer.stats && currentLayer.stats.is_strided) {
+                            valEl.className = 'value-ultra';
+                        } else if (weight.val > 0.01) {
+                            valEl.className = 'value-positive';
+                        } else if (weight.val < -0.01) {
+                            valEl.className = 'value-negative';
+                        } else {
+                            valEl.className = 'value-zero';
+                        }
+                        
+                        tooltip.style.display = 'block';
+                        tooltip.style.left = (event.clientX + 15) + 'px';
+                        tooltip.style.top = (event.clientY + 15) + 'px';
+                        document.body.style.cursor = 'crosshair';
+                    }
+                } else {
+                    if (hoveredInstanceId !== -1) {
+                        // Restore color based on value
+                        const weight = weightValues[hoveredInstanceId];
+                        const color = new THREE.Color();
+
+                        if (currentLayer && currentLayer.stats && currentLayer.stats.is_strided) {
+                            color.setRGB(0.98, 0.75, 0.14);
+                        } else if (weight.val > 0.01) {
+                            const stdDev = currentLayer?.stats?.std || 0.05;
+                            color.setRGB(0.2, Math.min(1.0, 0.4 + (weight.val / stdDev) * 0.6), 0.4);
+                        } else if (weight.val < -0.01) {
+                            const stdDev = currentLayer?.stats?.std || 0.05;
+                            color.setRGB(Math.min(1.0, 0.4 + (Math.abs(weight.val) / stdDev) * 0.6), 0.3, 0.3);
+                        } else {
+                            color.setRGB(0.2, 0.4, 0.8);
+                        }
+                        instancedMesh.setColorAt(hoveredInstanceId, color);
+                        instancedMesh.instanceColor.needsUpdate = true;
+                        
+                        hoveredInstanceId = -1;
+                    }
+                    tooltip.style.display = 'none';
+                    document.body.style.cursor = 'default';
+                }
+            }
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            TWEEN.update(time);
+            controls.update();
+            
+            // Animate matrix rain
+            if (rainParticles) {
+                const positions = rainParticles.geometry.attributes.position.array;
+                const speeds = rainParticles.geometry.attributes.speed.array;
+                
+                for (let i = 0; i < positions.length / 3; i++) {
+                    positions[i * 3 + 1] -= speeds[i];
+                    
+                    if (positions[i * 3 + 1] < -50) {
+                        positions[i * 3 + 1] = 100;
+                    }
+                }
+                rainParticles.geometry.attributes.position.needsUpdate = true;
+            }
+            
+            // Slight pulse to the matrix blocks
+            if (instancedMesh) {
+                const timeFactor = Date.now() * 0.001;
+                instancedMesh.position.y = Math.sin(timeFactor) * 0.5;
+            }
+            
+            renderer.render(scene, camera);
+            stats.update();
+        }
+
+        // Export Functions
+        function exportPNG() {
+            renderer.render(scene, camera);
+            const dataURL = renderer.domElement.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = (modelData?.model_name || 'weights') + '_digital_matrix.png';
+            link.href = dataURL;
+            link.click();
+        }
+
+        function exportHTML() {
+            const htmlContent = document.documentElement.outerHTML;
+            
+            const dataScript = `
+            <script>
+                const INJECTED_DATA = ${JSON.stringify(modelData)};
+                window.fetch = async function() {
+                    return { json: async () => INJECTED_DATA };
+                };
+            <\/script>`;
+            
+            const standaloneHTML = htmlContent.replace('<script>', dataScript + '\n    <script>');
+            
+            const blob = new Blob([standaloneHTML], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.download = (modelData?.model_name || 'weights') + '_digital_matrix.html';
+            link.href = url;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Start
+        loadData();
+    </script>
+</body>
+</html>
