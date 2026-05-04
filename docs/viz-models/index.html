@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vitriol · Viz Models</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --panel: rgba(10, 20, 38, 0.78);
+      --line: rgba(144, 190, 255, 0.18);
+      --text: #edf5ff;
+      --muted: #9eb3cf;
+      --accent: #6ee7f9;
+      --accent-2: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 30%),
+        radial-gradient(circle at top right, rgba(110, 231, 249, 0.16), transparent 28%),
+        linear-gradient(180deg, #08111f 0%, #040916 100%);
+    }
+    .shell { max-width: 1100px; margin: 0 auto; padding: 40px 20px 64px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px; }
+    h1 { margin: 0 0 10px; font-size: 34px; letter-spacing: -0.03em; }
+    p { margin: 0; color: var(--muted); line-height: 1.7; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+    a.btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 10px 14px; border-radius: 12px; text-decoration: none; font-weight: 700;
+      border: 1px solid var(--line); color: var(--text); background: rgba(255,255,255,0.02);
+    }
+    a.btn.primary { color: #04101f; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: 0; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .card { border-radius: 16px; border: 1px solid var(--line); background: rgba(16, 28, 49, 0.9); padding: 16px; }
+    .meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #c9dbf7; }
+    .meta code { background: rgba(0,0,0,0.35); padding: 2px 8px; border-radius: 999px; }
+    .hint { margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .error { color: #fecaca; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="panel">
+      <h1>Viz Models</h1>
+      <p>
+        这里展示 Vitriol 的模型可视化入口（基于 <code>docs/data/&lt;model&gt;/config.json</code>）。
+        清单来自 <code>docs/manifests/viz_models.json</code>，可通过脚本自动同步生成。
+      </p>
+      <div class="row">
+        <a class="btn" href="../index.html">返回首页</a>
+        <a class="btn primary" href="../viewer.html#?model=data/qwen3-demo">打开 3D Viewer（Demo）</a>
+      </div>
+      <div class="hint" id="status">正在加载清单…</div>
+    </div>
+
+    <div class="grid" id="models"></div>
+  </div>
+
+  <script>
+    function el(tag, attrs = {}, children = []) {
+      const node = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") node.className = v;
+        else if (k === "text") node.textContent = v;
+        else node.setAttribute(k, v);
+      }
+      for (const c of children) node.appendChild(c);
+      return node;
+    }
+
+    async function main() {
+      const status = document.getElementById("status");
+      const container = document.getElementById("models");
+
+      try {
+        const resp = await fetch("../manifests/viz_models.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("无法读取 manifests/viz_models.json（请先运行 sync 脚本或确认已提交 docs/）");
+        const data = await resp.json();
+        const models = data.models || [];
+
+        if (!models.length) {
+          status.textContent = "清单为空：你可以运行 scripts/sync_github_pages_assets.py 生成并提交 docs/manifests。";
+          return;
+        }
+
+        status.textContent = `已加载 ${models.length} 个模型入口。`;
+
+        for (const m of models) {
+          const actions = el("div", { class: "row" }, []);
+          actions.appendChild(el("a", { class: "btn primary", href: "../" + (m.pages?.viewer_hash || "viewer.html") }, [document.createTextNode("3D Viewer")]));
+          if (m.pages?.architecture) {
+            actions.appendChild(el("a", { class: "btn", href: "../" + m.pages.architecture }, [document.createTextNode("2D 架构图")]));
+          }
+
+          const meta = el("div", { class: "meta" }, [
+            el("code", { text: `slug=${m.slug || "-"}` }),
+          ]);
+
+          container.appendChild(
+            el("div", { class: "card" }, [
+              el("div", { class: "tag", text: "Model" }),
+              el("h2", { text: m.title || m.slug || "Unknown" }),
+              el("p", { text: "点击进入 3D Viewer，或打开 2D 架构图（若已同步）。" }),
+              meta,
+              actions,
+            ])
+          );
+        }
+      } catch (e) {
+        status.textContent = String(e && e.message ? e.message : e);
+        status.classList.add("error");
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
+

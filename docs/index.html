@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vitriol — LLM Architecture Exploration Platform</title>
+    <meta name="description" content="Vitriol: LLM Architecture Exploration, Visualization & NAS Platform. Decouple structure from weights — explore 397B models on a laptop.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+        :root{--bg:#0a0f1a;--surf1:rgba(14,22,40,.82);--surf2:rgba(20,30,52,.92);--border:rgba(144,190,255,.12);--text:#e8f0ff;--sub:#8fa3c4;--cyan:#6ee7f9;--blue:#60a5fa;--orange:#f97316;--green:#22c55e;--purple:#a78bfa;--red:#ef4444;--pink:#ec4899;--r:16px}
+        *{box-sizing:border-box;margin:0}body{min-height:100vh;color:var(--text);font-family:"Space Grotesk",system-ui,sans-serif;line-height:1.6;background:var(--bg)}
+        body::before{content:'';position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 60% 50% at 25% 0%,rgba(96,165,250,.1),transparent),radial-gradient(ellipse 50% 40% at 75% 0%,rgba(110,231,249,.08),transparent),radial-gradient(ellipse 60% 40% at 50% 100%,rgba(139,92,246,.05),transparent);z-index:-1}
+        a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+        code{font-family:"IBM Plex Mono",monospace;font-size:.86em;background:rgba(0,0,0,.35);padding:1px 6px;border-radius:5px}
+        .wrap{max-width:1140px;margin:0 auto;padding:0 24px}
+
+        /* ── atoms ── */
+        .glass{background:var(--surf1);border:1px solid var(--border);border-radius:var(--r);backdrop-filter:blur(16px)}
+        .pill{display:inline-flex;gap:6px;align-items:center;padding:5px 12px;border-radius:999px;border:1px solid rgba(110,231,249,.18);color:var(--cyan);background:rgba(10,20,38,.7);font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+        .btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:10px 16px;border-radius:11px;font-weight:600;font-size:13px;cursor:pointer;border:none;transition:transform .15s,box-shadow .15s;text-decoration:none!important;white-space:nowrap}
+        .btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.3)}
+        .bp{color:#040e1f;background:linear-gradient(135deg,var(--cyan),var(--blue))}.bs{color:var(--text);background:rgba(255,255,255,.04);border:1px solid var(--border)}.bh{color:#fff;background:linear-gradient(135deg,var(--orange),#ea580c)}.bg{color:#fff;background:linear-gradient(135deg,var(--green),#15803d)}.bv{color:#fff;background:linear-gradient(135deg,var(--purple),#7c3aed)}
+        .sm{padding:7px 13px;font-size:12px;border-radius:9px}
+        .tag{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-family:"IBM Plex Mono",monospace;font-weight:500;width:fit-content}
+        .tag-c{background:rgba(110,231,249,.1);color:var(--cyan)}.tag-o{background:rgba(249,115,22,.1);color:var(--orange)}.tag-g{background:rgba(34,197,94,.1);color:var(--green)}.tag-p{background:rgba(168,139,250,.1);color:var(--purple)}.tag-b{background:rgba(96,165,250,.1);color:var(--blue)}
+        .meta{display:flex;flex-wrap:wrap;gap:5px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:#8a9dbf}
+        .meta span{padding:2px 7px;border-radius:5px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.05)}
+        .cb{padding:16px 18px;border-radius:12px;background:rgba(4,8,18,.92);border:1px solid rgba(110,231,249,.06);font-family:"IBM Plex Mono",monospace;font-size:12px;line-height:1.75;overflow-x:auto;color:#b8cde4;white-space:pre}.cb .c{color:#4b6a8a}.cb .u{color:var(--cyan)}.cb .p{color:var(--orange)}
+
+        /* ── layout ── */
+        .g2{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+        .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+        .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+        .g6{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+        .card{padding:20px;border-radius:var(--r);background:var(--surf2);border:1px solid var(--border);display:flex;flex-direction:column;transition:transform .12s,box-shadow .12s}
+        .card:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.2)}
+        .card h3{margin:8px 0 5px;font-size:17px}.card>p{margin:0 0 10px;color:var(--sub);font-size:13px;flex:1}
+
+        /* ── sections ── */
+        .sec{padding:48px 0}.sec:first-child{padding-top:40px}
+        .sec+.sec{border-top:1px solid var(--border)}
+        .sh{margin-bottom:18px}.sh h2{font-size:24px;margin-bottom:4px}.sh p{color:var(--sub);font-size:14px}
+        .sh-row{display:flex;align-items:end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+        /* ── hero ── */
+        .hero{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:stretch}
+        .hero-l{padding:28px}
+        .hero-r{padding:20px;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg,rgba(16,28,49,.96),rgba(7,13,25,.92))}
+        h1{font-size:clamp(30px,5vw,50px);line-height:1.05;letter-spacing:-.03em;font-weight:700;margin:14px 0 12px}
+        h1 em{font-style:normal;background:linear-gradient(135deg,var(--cyan),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .lead{color:var(--sub);font-size:15px;max-width:56ch}
+        .stat-g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+        .stat{padding:10px;border-radius:10px;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);text-align:center}
+        .stat b{display:block;font-size:20px;font-family:"IBM Plex Mono",monospace}.stat small{color:var(--sub);font-size:9px;text-transform:uppercase;letter-spacing:.08em}
+
+        /* ── hf ── */
+        .hf-box{margin-top:16px;padding:14px;border-radius:12px;background:rgba(249,115,22,.04);border:1px solid rgba(249,115,22,.12)}
+        .hf-row{display:flex;gap:6px}
+        .hf-in{flex:1;padding:9px 12px;border-radius:9px;border:1px solid rgba(249,115,22,.18);background:rgba(0,0,0,.4);color:var(--text);font-family:"IBM Plex Mono",monospace;font-size:12px;outline:none}.hf-in:focus{border-color:var(--orange)}.hf-in::placeholder{color:#5a6a7f}
+        .hf-s{margin-top:5px;font-size:11px;min-height:15px;color:var(--sub)}.hf-s.ok{color:var(--green)}.hf-s.er{color:var(--red)}
+        .hf-h{margin-top:5px;display:flex;flex-wrap:wrap;gap:4px}
+        .hf-c{padding:3px 8px;border-radius:6px;font-size:10px;background:rgba(249,115,22,.07);border:1px solid rgba(249,115,22,.12);color:#fdba74;cursor:pointer;font-family:"IBM Plex Mono",monospace}.hf-c:hover{background:rgba(249,115,22,.15)}
+
+        /* ── number cards ── */
+        .num{text-align:center;padding:18px 12px}
+        .num b{display:block;font-size:28px;font-weight:700;font-family:"IBM Plex Mono",monospace;margin-bottom:4px}
+        .num p{font-size:11px;color:var(--sub);margin:0;line-height:1.4}
+
+        /* ── footer ── */
+        .foot{padding:20px 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;color:var(--sub);font-size:12px;flex-wrap:wrap;gap:10px;margin-top:20px}
+
+        @media(max-width:900px){.hero{grid-template-columns:1fr}.g3,.g4,.g6{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}.stat-g{grid-template-columns:repeat(2,1fr)}}
+        @media(max-width:560px){.g3,.g4,.g6{grid-template-columns:1fr}}
+    </style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ━━━━━━━━━━ S1: HERO ━━━━━━━━━━ -->
+<section class="sec">
+<div class="hero">
+    <div class="glass hero-l">
+        <div class="pill">🏛️ Vitriol v0.3.0 · MIT License</div>
+        <h1>LLM 架构探索、<br><em>可视化与 NAS 平台</em></h1>
+        <p class="lead">将<b>结构</b>与<b>权重</b>彻底解耦——用 KB 级体积探索 TB 级模型。12 种压缩策略、10 种分析器、4 种 NAS 算法、16 个 CLI 命令，145 Python 文件。</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+            <a class="btn bp" href="./viewer.html#?model=data/Qwen3.5-397B-A17B-Vitriol-ultra-dummy">🚀 3D Viewer</a>
+            <a class="btn bg sm" href="./evolution-tree.html">🌳 进化树</a>
+            <a class="btn bv sm" href="./innovation-timeline.html">📅 时间线</a>
+            <a class="btn bs sm" href="https://github.com/isLinXu/Vitriol" target="_blank">⭐ GitHub</a>
+        </div>
+        <div class="hf-box">
+            <div style="font-size:11px;font-weight:600;color:var(--orange);margin-bottom:6px">🤗 从 HuggingFace 远程加载任意模型</div>
+            <div class="hf-row">
+                <input id="hfI" class="hf-in" placeholder="org/model  例: Qwen/Qwen3.5-397B-A17B" onkeydown="if(event.key==='Enter')go()" autocomplete="off">
+                <button onclick="go()" class="btn bh sm">Load</button>
+                <button onclick="probe()" class="btn bs sm" title="检测 config.json 是否存在">🔍</button>
+            </div>
+            <div id="st" class="hf-s"></div>
+            <div id="hh" class="hf-h"></div>
+        </div>
+    </div>
+    <aside class="glass hero-r">
+        <div class="pill" style="font-size:9px">Platform Overview</div>
+        <div class="stat-g">
+            <div class="stat"><b style="color:var(--cyan)">12</b><small>策略</small></div>
+            <div class="stat"><b style="color:var(--blue)">10</b><small>分析器</small></div>
+            <div class="stat"><b style="color:var(--orange)">4</b><small>NAS</small></div>
+            <div class="stat"><b style="color:var(--green)">16</b><small>CLI 命令</small></div>
+            <div class="stat"><b style="color:var(--purple)">145</b><small>源文件</small></div>
+            <div class="stat"><b style="color:var(--red)">0</b><small>GPU 需求</small></div>
+        </div>
+        <div class="cb" style="font-size:11px;padding:12px;flex:1;min-height:0;overflow-y:auto">
+<span class="c"># 三阶段解耦</span>
+config.json (KB)
+  → Empty Skeleton (0 mem)
+  → Minimal Weights
+
+<span class="c"># 397B → 164 KB</span>
+<span class="u">vitriol generate</span> \
+  <span class="p">Qwen/Qwen3.5-397B-A17B</span> \
+  <span class="p">--strategy ultra</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+            <a href="./viewer.html#?model=data/qwen3-demo" class="btn bs sm">Qwen3</a>
+            <a href="./viewer.html#?model=data/deepseek-demo" class="btn bs sm">DeepSeek</a>
+            <a href="./viewer.html#?hf=isLinXu/Qwen3.5-397B-A17B-Vitriol-ultra-dummy" class="btn bh sm">HF Demo</a>
+        </div>
+    </aside>
+</div>
+</section>
+
+<!-- ━━━━━━━━━━ S2: 核心能力 + 数字 ━━━━━━━━━━ -->
+<section class="sec">
+    <!-- 数字亮点 -->
+    <div class="g4" style="margin-bottom:24px">
+        <div class="card num"><b style="color:var(--cyan)">4.5M:1</b><p>Ultra 压缩比<br>397B → 164 KB</p></div>
+        <div class="card num"><b style="color:var(--green)">~5 秒</b><p>72B 模型生成<br>原需 2-4 小时下载</p></div>
+        <div class="card num"><b style="color:var(--orange)">¥0</b><p>CI/CD GPU 成本<br>纯 CPU 运行</p></div>
+        <div class="card num"><b style="color:var(--purple)">8 GB</b><p>笔记本即可<br>探索 397B 架构</p></div>
+    </div>
+    <!-- 核心能力 -->
+    <div class="sh"><h2>核心能力</h2></div>
+    <div class="g3">
+        <div class="card">
+            <span class="tag tag-c">⚡ Generation</span>
+            <h3>最小权重生成</h3>
+            <p>12 种策略：Random · Compact · Ultra(stride=0) · Sparse · Ternary · Binary · Quantized · LowRank · Learned · Quantum。全兼容 transformers。</p>
+            <div class="meta"><span>Ultra 99.99%</span><span>Compact 99%</span></div>
+        </div>
+        <div class="card">
+            <span class="tag tag-b">🧊 Visualization</span>
+            <h3>3D 架构可视化</h3>
+            <p>Three.js + WebGL 浏览器端。10 种分析器自动检测 GQA/MQA/MLA、RoPE、MoE、多模态。支持 HF 远程加载。</p>
+            <div class="meta"><span>Three.js</span><span>HF remote</span></div>
+        </div>
+        <div class="card">
+            <span class="tag tag-o">🔬 NAS</span>
+            <h3>神经架构搜索</h3>
+            <p>随机搜索 · 进化搜索(GA) · 定向搜索(约束+多目标) · 强化学习。Hybrid 评估器结合 Zero-Cost 代理与 Few-Shot 训练。</p>
+            <div class="meta"><span>4 algorithms</span><span>12+ metrics</span></div>
+        </div>
+        <div class="card">
+            <span class="tag tag-g">🌳 Evolution</span>
+            <h3>架构进化</h3>
+            <p>17 家族进化树(D3.js) · 创新时间线 · 架构比较 · VRAM/FLOPs 性能模拟 · 智能架构推荐。</p>
+            <div class="meta"><span>120+ models</span><span>17 families</span></div>
+        </div>
+        <div class="card">
+            <span class="tag tag-p">🧠 CIS</span>
+            <h3>压缩智能度</h3>
+            <p>多维评价 Ψ(S) = α·信息保留 + β·存储效率 + γ·表达能力 + δ·可训练性。统一度量与相变检测。</p>
+            <div class="meta"><span>4D scoring</span><span>radar chart</span></div>
+        </div>
+        <div class="card">
+            <span class="tag tag-c">🔑 Hash</span>
+            <h3>模型哈希指纹</h3>
+            <p>三层体系：Architecture Hash + Weight Distribution Hash + Behavioral DNA → Vitriol Signature。谱系追踪。</p>
+            <div class="meta"><span>3-layer</span><span>lineage</span></div>
+        </div>
+    </div>
+</section>
+
+<!-- ━━━━━━━━━━ S3: 在线演示 & 工具 ━━━━━━━━━━ -->
+<section class="sec">
+    <div class="sh sh-row">
+        <div><h2>在线演示 & 工具</h2><p>点击即用，无需安装。</p></div>
+    </div>
+    <!-- 模型卡片 -->
+    <div class="g3" style="margin-bottom:20px">
+        <div class="card">
+            <span class="tag tag-o">Multimodal MoE</span>
+            <h3>Qwen3.5-397B-A17B</h3>
+            <p>512 专家 × 60 层 + 27 层视觉。MLA + Linear Attention。</p>
+            <div class="meta" style="margin-bottom:8px"><span>397B</span><span>512 experts</span><span>MLA</span></div>
+            <a class="btn bp sm" href="./viewer.html#?model=data/Qwen3.5-397B-A17B-Vitriol-ultra-dummy">3D Viewer</a>
+        </div>
+        <div class="card">
+            <span class="tag tag-b">Dense</span>
+            <h3>Qwen3 Demo</h3>
+            <p>24 层 Decoder-only Transformer，GQA (16H/8KV)。</p>
+            <div class="meta" style="margin-bottom:8px"><span>24 layers</span><span>hidden=2048</span></div>
+            <a class="btn bp sm" href="./viewer.html#?model=data/qwen3-demo">3D Viewer</a>
+        </div>
+        <div class="card">
+            <span class="tag tag-b">MoE</span>
+            <h3>DeepSeek V3 Demo</h3>
+            <p>64 专家（6 激活），32 层。Router + Expert + MLA。</p>
+            <div class="meta" style="margin-bottom:8px"><span>32 layers</span><span>64 experts</span></div>
+            <a class="btn bp sm" href="./viewer.html#?model=data/deepseek-demo">3D Viewer</a>
+        </div>
+    </div>
+    <!-- 工具入口 -->
+    <div class="g6">
+        <a href="./evolution-tree.html" class="card" style="align-items:center;text-align:center;text-decoration:none;padding:16px">
+            <div style="font-size:24px">🌳</div><div style="font-size:12px;font-weight:600;margin-top:4px">进化树</div><div style="font-size:10px;color:var(--sub)">120 nodes</div>
+        </a>
+        <a href="./innovation-timeline.html" class="card" style="align-items:center;text-align:center;text-decoration:none;padding:16px">
+            <div style="font-size:24px">📅</div><div style="font-size:12px;font-weight:600;margin-top:4px">时间线</div><div style="font-size:10px;color:var(--sub)">2019-2024</div>
+        </a>
+        <a href="./data/Qwen3.5-397B-A17B-Vitriol-ultra-dummy/architecture.html" class="card" style="align-items:center;text-align:center;text-decoration:none;padding:16px">
+            <div style="font-size:24px">📐</div><div style="font-size:12px;font-weight:600;margin-top:4px">2D 架构图</div><div style="font-size:10px;color:var(--sub)">HTML report</div>
+        </a>
+        <a href="./viz-models/" class="card" style="align-items:center;text-align:center;text-decoration:none;padding:16px">
+            <div style="font-size:24px">📊</div><div style="font-size:12px;font-weight:600;margin-top:4px">Models 列表</div><div style="font-size:10px;color:var(--sub)">manifest</div>
+        </a>
+        <a href="./vocab-viz/" class="card" style="align-items:center;text-align:center;text-decoration:none;padding:16px">
+            <div style="font-size:24px">📝</div><div style="font-size:12px;font-weight:600;margin-top:4px">Vocab</div><div style="font-size:10px;color:var(--sub)">3D tokenizer</div>
+        </a>
+        <a href="javascript:void(0)" onclick="document.getElementById('hfI').focus();window.scrollTo({top:0,behavior:'smooth'})" class="card" style="align-items:center;text-align:center;text-decoration:none;padding:16px;border-color:rgba(249,115,22,.15)">
+            <div style="font-size:24px">🤗</div><div style="font-size:12px;font-weight:600;margin-top:4px;color:var(--orange)">HF Remote</div><div style="font-size:10px;color:var(--sub)">any model</div>
+        </a>
+    </div>
+</section>
+
+<!-- ━━━━━━━━━━ S4: 快速开始 & CLI ━━━━━━━━━━ -->
+<section class="sec">
+    <div class="g2">
+        <div>
+            <div class="sh"><h2>🚀 快速开始</h2></div>
+            <div class="cb">
+<span class="c"># 安装</span>
+git clone https://github.com/isLinXu/Vitriol.git
+cd Vitriol && pip install -e .
+
+<span class="c"># 生成 + 可视化</span>
+<span class="u">vitriol generate</span> <span class="p">Qwen/Qwen3.5-397B-A17B \
+  --strategy ultra -o output/qwen35</span>
+<span class="u">vitriol viz</span> <span class="p">output/qwen35 --3d</span>
+
+<span class="c"># NAS 搜索</span>
+<span class="u">vitriol nas</span> <span class="p">--algorithm evolutionary \
+  --generations 20 --population 30</span>
+
+<span class="c"># 进化树 & 比较</span>
+<span class="u">vitriol evolve tree</span> <span class="p">-o tree.html</span>
+<span class="u">vitriol evolve compare</span> <span class="p">Qwen/Qwen2.5-72B \
+  deepseek-ai/DeepSeek-V3</span></div>
+        </div>
+        <div>
+            <div class="sh"><h2>⌨️ 14 个 CLI 命令</h2></div>
+            <div class="cb">
+<span class="c">─── 生成 & 验证 ───</span>
+<span class="u">generate</span>    生成最小权重
+<span class="u">validate</span>    验证模型完整性
+<span class="u">export</span>      导出为 JSON/GGUF
+<span class="u">batch</span>       批量生成 (YAML)
+
+<span class="c">─── 分析 & 可视化 ───</span>
+<span class="u">analyze</span>     架构分析报告
+<span class="u">viz</span>         交互式 3D/2D 查看器
+<span class="u">arch-viz</span>    架构块图/详图/HTML
+<span class="u">weight-viz</span>  权重矩阵 3D 可视化
+<span class="u">vocab-viz</span>   词表分布 3D 可视化
+<span class="u">visualize</span>   权重统计报告 (7种图)
+
+<span class="c">─── NAS & 进化 ───</span>
+<span class="u">nas</span>         神经架构搜索
+<span class="u">evolve</span>      进化树/比较/模拟/时间线
+<span class="u">hash</span>        模型指纹哈希</div>
+        </div>
+    </div>
+</section>
+
+<!-- ━━━━━━━━━━ S5: 部署 ━━━━━━━━━━ -->
+<section class="sec">
+    <div class="sh sh-row">
+        <div><h2>📦 GitHub Pages 部署</h2><p>推送 <code>docs/</code> 到 main 分支即可自动发布。</p></div>
+        <a class="btn bs sm" href="https://github.com/isLinXu/Vitriol" target="_blank">查看仓库 →</a>
+    </div>
+    <div class="g2">
+        <div class="cb" style="font-size:11px">
+<span class="c"># 本地同步产物到 docs/</span>
+python3 scripts/sync_github_pages_assets.py
+
+<span class="c"># 预览</span>
+cd docs && python3 -m http.server 8000</div>
+        <div class="cb" style="font-size:11px">
+<span class="c"># URL 格式</span>
+viewer.html#?<span class="p">hf</span>=<span class="u">org/model</span>       <span class="c"># HF 远程</span>
+viewer.html#?<span class="p">model</span>=<span class="u">data/dir</span>    <span class="c"># 本地</span>
+
+<span class="c"># 示例</span>
+viewer.html#?<span class="p">hf</span>=<span class="u">Qwen/Qwen3.5-397B-A17B</span></div>
+    </div>
+</section>
+
+<!-- ━━━━━━━━━━ FOOTER ━━━━━━━━━━ -->
+<div class="foot">
+    <span>🏛️ Vitriol v0.3.0 · 160 files · MIT · <a href="https://github.com/isLinXu" target="_blank">isLinXu</a></span>
+    <span><a href="https://github.com/isLinXu/Vitriol" target="_blank">GitHub</a> · <a href="https://github.com/isLinXu/Vitriol/issues" target="_blank">Issues</a> · <a href="./viewer.html">Viewer</a></span>
+</div>
+
+</div>
+<script>
+const K='vitriol_hf_h';
+function go(){const v=document.getElementById('hfI').value.trim();if(!v)return;sv(v);location.href='./viewer.html#?hf='+encodeURIComponent(v)}
+async function probe(){const v=document.getElementById('hfI').value.trim(),s=document.getElementById('st');if(!v){s.textContent='请输入模型 ID';s.className='hf-s er';return}s.textContent='检查中…';s.className='hf-s';try{const r=await fetch('https://huggingface.co/'+v+'/resolve/main/config.json',{method:'HEAD'});s.textContent=r.ok?'✅ 可加载':r.status===401||r.status===403?'🔒 需认证':'❌ 未找到 ('+r.status+')';s.className='hf-s '+(r.ok?'ok':'er');if(r.ok)sv(v)}catch(e){s.textContent='⚠️ '+e.message;s.className='hf-s er'}}
+function sv(v){let h=JSON.parse(localStorage.getItem(K)||'[]');h=h.filter(x=>x!==v);h.unshift(v);localStorage.setItem(K,JSON.stringify(h.slice(0,8)));rh()}
+function rh(){const c=document.getElementById('hh'),h=JSON.parse(localStorage.getItem(K)||'[]');c.innerHTML=h.map(x=>'<span class="hf-c" onclick="document.getElementById(\'hfI\').value=\''+x+'\';go()">'+( x.length>36?x.slice(0,33)+'…':x)+'</span>').join('')}
+rh();
+</script>
+</body>
+</html>

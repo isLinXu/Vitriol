@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Architecture Innovation Timeline</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #eee;
+            padding-bottom: 60px;
+        }
+        .header {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            margin-bottom: 30px;
+        }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .header p { font-size: 1.2em; opacity: 0.9; }
+        .timeline-container { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        .stat {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px 30px;
+            border-radius: 12px;
+        }
+        .stat-value { font-size: 2.5em; font-weight: bold; color: #667eea; }
+        .stat-label { font-size: 0.9em; color: #aaa; margin-top: 5px; }
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .legend-color { width: 20px; height: 20px; border-radius: 4px; }
+        .legend-color.high { background: #ef4444; }
+        .legend-color.medium { background: #f59e0b; }
+        .legend-color.low { background: #10b981; }
+        .timeline { position: relative; padding: 20px 0; }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+        }
+        .year-section { margin-bottom: 40px; }
+        .year-label {
+            text-align: center;
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 20px;
+            text-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+        }
+        .events-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }
+        .event-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            width: 300px;
+            border-left: 4px solid;
+            transition: transform 0.3s, box-shadow 0.3s;
+            backdrop-filter: blur(10px);
+        }
+        .event-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        .event-card.high { border-color: #ef4444; }
+        .event-card.medium { border-color: #f59e0b; }
+        .event-card.low { border-color: #10b981; }
+        .event-innovation { font-size: 1.2em; font-weight: bold; margin-bottom: 8px; }
+        .event-card.high .event-innovation { color: #ef4444; }
+        .event-card.medium .event-innovation { color: #f59e0b; }
+        .event-card.low .event-innovation { color: #10b981; }
+        .event-model { font-size: 0.9em; color: #aaa; margin-bottom: 8px; }
+        .event-description { font-size: 0.95em; color: #ccc; margin-bottom: 10px; line-height: 1.4; }
+        .event-meta { display: flex; justify-content: space-between; align-items: center; }
+        .event-family { font-size: 0.8em; background: rgba(102, 126, 234, 0.3); padding: 4px 10px; border-radius: 20px; }
+        .event-impact { font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; }
+        .event-card.high .event-impact { color: #ef4444; }
+        .event-card.medium .event-impact { color: #f59e0b; }
+        .event-card.low .event-impact { color: #10b981; }
+        @media (max-width: 768px) {
+            .timeline::before { left: 20px; }
+            .event-card { width: calc(100% - 50px); margin-left: 40px; }
+            .events-row { justify-content: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>LLM Architecture Innovation Timeline</h1>
+        <p>Tracing the evolution of LLM architectures through key innovations</p>
+    </div>
+    <div class="timeline-container">
+        <div class="stats">
+            <div class="stat"><div class="stat-value">68</div><div class="stat-label">Total Innovations</div></div>
+            <div class="stat"><div class="stat-value">3</div><div class="stat-label">Years of Evolution</div></div>
+            <div class="stat"><div class="stat-value">17</div><div class="stat-label">Model Families</div></div>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><div class="legend-color high"></div><span>High Impact (MoE, GQA, SSM)</span></div>
+            <div class="legend-item"><div class="legend-color medium"></div><span>Medium Impact (RoPE, SwiGLU)</span></div>
+            <div class="legend-item"><div class="legend-color low"></div><span>Standard Features</span></div>
+        </div>
+        <div class="timeline">
+
+            <div class="year-section">
+                <div class="year-label">2022</div>
+                <div class="events-row">
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Multi-lingual</div>
+                        <div class="event-model">BLOOM</div>
+                        <div class="event-description">46 Languages</div>
+                        <div class="event-meta">
+                            <span class="event-family">bigscience</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">ODP</div>
+                        <div class="event-model">BLOOM</div>
+                        <div class="event-description">Open Scientific Preprint License</div>
+                        <div class="event-meta">
+                            <span class="event-family">bigscience</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">176B Params</div>
+                        <div class="event-model">BLOOM</div>
+                        <div class="event-description">Largest Open Multilingual Model</div>
+                        <div class="event-meta">
+                            <span class="event-family">bigscience</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="year-section">
+                <div class="year-label">2023</div>
+                <div class="events-row">
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">RoPE</div>
+                        <div class="event-model">LLaMA-2</div>
+                        <div class="event-description">Rotary Position Embedding</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">SwiGLU</div>
+                        <div class="event-model">LLaMA-2</div>
+                        <div class="event-description">SwiGLU Activation</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">RoPE</div>
+                        <div class="event-model">Qwen-7B</div>
+                        <div class="event-description">Rotary Position Embedding</div>
+                        <div class="event-meta">
+                            <span class="event-family">Qwen</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Sliding Window</div>
+                        <div class="event-model">Mistral-7B</div>
+                        <div class="event-description">Sliding Window Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">RoPE</div>
+                        <div class="event-model">Mistral-7B</div>
+                        <div class="event-description">Rotary Position Embedding</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Rope Scaling</div>
+                        <div class="event-model">Mistral-Instruct</div>
+                        <div class="event-description">Extended Context via RoPE Scaling</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">GLM Embedding</div>
+                        <div class="event-model">ChatGLM</div>
+                        <div class="event-description">General Language Model Pretraining</div>
+                        <div class="event-meta">
+                            <span class="event-family">GLM</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Multi-Query Attention</div>
+                        <div class="event-model">ChatGLM2</div>
+                        <div class="event-description">Multi-Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">GLM</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">ChatGLM2</div>
+                        <div class="event-description">32K Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">GLM</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">ChatGLM3</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">GLM</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Self-Extension</div>
+                        <div class="event-model">ChatGLM3</div>
+                        <div class="event-description">Extended Context 128K</div>
+                        <div class="event-meta">
+                            <span class="event-family">GLM</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">Yi</div>
+                        <div class="event-description">200K Context Window</div>
+                        <div class="event-meta">
+                            <span class="event-family">01-ai</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">RoPE</div>
+                        <div class="event-model">Yi</div>
+                        <div class="event-description">Rotary Position Embedding</div>
+                        <div class="event-meta">
+                            <span class="event-family">01-ai</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">Kimi</div>
+                        <div class="event-description">128K Context Window</div>
+                        <div class="event-meta">
+                            <span class="event-family">Kimi</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Textbooks</div>
+                        <div class="event-model">Phi-1</div>
+                        <div class="event-description">High-Quality Textbook Data</div>
+                        <div class="event-meta">
+                            <span class="event-family">microsoft</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Code Data</div>
+                        <div class="event-model">Phi-1</div>
+                        <div class="event-description">Synthetic Code Generation</div>
+                        <div class="event-meta">
+                            <span class="event-family">microsoft</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Small Scale</div>
+                        <div class="event-model">Phi-2</div>
+                        <div class="event-description">2.7B Parameter Efficiency</div>
+                        <div class="event-meta">
+                            <span class="event-family">microsoft</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">FIM</div>
+                        <div class="event-model">Starcoder</div>
+                        <div class="event-description">Fill-in-the-Middle</div>
+                        <div class="event-meta">
+                            <span class="event-family">bigcode</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">Starcoder</div>
+                        <div class="event-description">8K Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">bigcode</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Billion-scale</div>
+                        <div class="event-model">Falcon</div>
+                        <div class="event-description">Web Data Filtering</div>
+                        <div class="event-meta">
+                            <span class="event-family">tiiuae</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">LLM</div>
+                        <div class="event-model">Falcon</div>
+                        <div class="event-description">FlashAttention</div>
+                        <div class="event-meta">
+                            <span class="event-family">tiiuae</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">Falcon-40B</div>
+                        <div class="event-description">Grouped Query Attention (40B)</div>
+                        <div class="event-meta">
+                            <span class="event-family">tiiuae</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">WKV</div>
+                        <div class="event-model">RWKV</div>
+                        <div class="event-description">Weighted Key-Value</div>
+                        <div class="event-meta">
+                            <span class="event-family">RWKV</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">RNN-Transformer</div>
+                        <div class="event-model">RWKV</div>
+                        <div class="event-description">RNN-Transformer Hybrid</div>
+                        <div class="event-meta">
+                            <span class="event-family">RWKV</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Linear Complexity</div>
+                        <div class="event-model">RWKV</div>
+                        <div class="event-description">O(n) for Long Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">RWKV</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">InternLM</div>
+                        <div class="event-description">8K-32K Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">internlm</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Open Weights</div>
+                        <div class="event-model">InternLM</div>
+                        <div class="event-description">Fully Open Source</div>
+                        <div class="event-meta">
+                            <span class="event-family">internlm</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">BaiChuan</div>
+                        <div class="event-model">Baichuan</div>
+                        <div class="event-description">Bilingual (ZH/EN)</div>
+                        <div class="event-meta">
+                            <span class="event-family">baichuan-inc</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Dynamic NTK</div>
+                        <div class="event-model">Baichuan</div>
+                        <div class="event-description">Dynamic NTK Scaling</div>
+                        <div class="event-meta">
+                            <span class="event-family">baichuan-inc</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">2.0</div>
+                        <div class="event-model">Baichuan2</div>
+                        <div class="event-description">Improved Training Data</div>
+                        <div class="event-meta">
+                            <span class="event-family">baichuan-inc</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">Baichuan2</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">baichuan-inc</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Open Source</div>
+                        <div class="event-model">Skywork</div>
+                        <div class="event-description">Fully Open Weights</div>
+                        <div class="event-meta">
+                            <span class="event-family">Skywork</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">Skywork</div>
+                        <div class="event-description">4K-16K Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">Skywork</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="year-section">
+                <div class="year-label">2024</div>
+                <div class="events-row">
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">LLaMA-3</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">128K Context</div>
+                        <div class="event-model">LLaMA-3</div>
+                        <div class="event-description">Extended Context Length</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">LLaMA-3.1</div>
+                        <div class="event-description">128K Extended Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">LLaMA</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">Qwen1.5</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">Qwen</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">Qwen2</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">Qwen</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">BF16</div>
+                        <div class="event-model">Qwen2</div>
+                        <div class="event-description">BFloat16 Support</div>
+                        <div class="event-meta">
+                            <span class="event-family">Qwen</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">MoE</div>
+                        <div class="event-model">Qwen2.5</div>
+                        <div class="event-description">Mixture of Experts (optional)</div>
+                        <div class="event-meta">
+                            <span class="event-family">Qwen</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">Qwen2.5</div>
+                        <div class="event-description">128K Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">Qwen</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">MoE</div>
+                        <div class="event-model">DeepSeek-MoE</div>
+                        <div class="event-description">Mixture of Experts</div>
+                        <div class="event-meta">
+                            <span class="event-family">DeepSeek</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Fine-grained Expert</div>
+                        <div class="event-model">DeepSeek-MoE</div>
+                        <div class="event-description">Fine-grained Expert Partitioning</div>
+                        <div class="event-meta">
+                            <span class="event-family">DeepSeek</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">MLA</div>
+                        <div class="event-model">DeepSeek-V2</div>
+                        <div class="event-description">Multi-head Latent Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">DeepSeek</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">DeepSeek MoE</div>
+                        <div class="event-model">DeepSeek-V2</div>
+                        <div class="event-description">Custom MoE Architecture</div>
+                        <div class="event-meta">
+                            <span class="event-family">DeepSeek</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">VL</div>
+                        <div class="event-model">DeepSeek-V2.5</div>
+                        <div class="event-description">Vision-Language Integration</div>
+                        <div class="event-meta">
+                            <span class="event-family">DeepSeek</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">GLM-4</div>
+                        <div class="event-model">GLM-4</div>
+                        <div class="event-description">Full GLA Architecture</div>
+                        <div class="event-meta">
+                            <span class="event-family">GLM</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Tool Use</div>
+                        <div class="event-model">GLM-4</div>
+                        <div class="event-description">Function Calling</div>
+                        <div class="event-meta">
+                            <span class="event-family">GLM</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">Yi-1.5</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">01-ai</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Stronger Base</div>
+                        <div class="event-model">Yi-1.5</div>
+                        <div class="event-description">Improved Pretraining</div>
+                        <div class="event-meta">
+                            <span class="event-family">01-ai</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">3.8B > 7B</div>
+                        <div class="event-model">Phi-3</div>
+                        <div class="event-description">Outperform Larger Models</div>
+                        <div class="event-meta">
+                            <span class="event-family">microsoft</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Long Context</div>
+                        <div class="event-model">Phi-3</div>
+                        <div class="event-description">128K Context</div>
+                        <div class="event-meta">
+                            <span class="event-family">microsoft</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">Phi-3</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">microsoft</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Gemini Tech</div>
+                        <div class="event-model">Gemma</div>
+                        <div class="event-description">Based on Gemini Research</div>
+                        <div class="event-meta">
+                            <span class="event-family">google</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card medium">
+                        <div class="event-innovation">Open Weights</div>
+                        <div class="event-model">Gemma</div>
+                        <div class="event-description">Open Model Weights</div>
+                        <div class="event-meta">
+                            <span class="event-family">google</span>
+                            <span class="event-impact">medium</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Gemma 2</div>
+                        <div class="event-model">Gemma-2</div>
+                        <div class="event-description">Improved Architecture</div>
+                        <div class="event-meta">
+                            <span class="event-family">google</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">GQA</div>
+                        <div class="event-model">Gemma-2</div>
+                        <div class="event-description">Grouped Query Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">google</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">SSM</div>
+                        <div class="event-model">Mamba</div>
+                        <div class="event-description">State Space Model</div>
+                        <div class="event-meta">
+                            <span class="event-family">state-spaces</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Hardware-Aware</div>
+                        <div class="event-model">Mamba</div>
+                        <div class="event-description">Hardware-Aware Selection Scan</div>
+                        <div class="event-meta">
+                            <span class="event-family">state-spaces</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">Linear Complexity</div>
+                        <div class="event-model">Mamba</div>
+                        <div class="event-description">O(n) vs O(n²) Attention</div>
+                        <div class="event-meta">
+                            <span class="event-family">state-spaces</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">Slimp</div>
+                        <div class="event-model">Mamba-Slimp</div>
+                        <div class="event-description">Compression for Deployment</div>
+                        <div class="event-meta">
+                            <span class="event-family">state-spaces</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">MoE</div>
+                        <div class="event-model">InternLM2</div>
+                        <div class="event-description">Mixture of Experts</div>
+                        <div class="event-meta">
+                            <span class="event-family">internlm</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">100K Context</div>
+                        <div class="event-model">InternLM2</div>
+                        <div class="event-description">Extended to 100K</div>
+                        <div class="event-meta">
+                            <span class="event-family">internlm</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card high">
+                        <div class="event-innovation">MoE</div>
+                        <div class="event-model">Skywork-MoE</div>
+                        <div class="event-description">Mixture of Experts</div>
+                        <div class="event-meta">
+                            <span class="event-family">Skywork</span>
+                            <span class="event-impact">high</span>
+                        </div>
+                    </div>
+
+                    <div class="event-card low">
+                        <div class="event-innovation">SFT</div>
+                        <div class="event-model">Skywork-MoE</div>
+                        <div class="event-description">Supervised Fine-Tuning</div>
+                        <div class="event-meta">
+                            <span class="event-family">Skywork</span>
+                            <span class="event-impact">low</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+</body>
+</html>

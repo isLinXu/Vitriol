@@ -1,0 +1,16 @@
+{
+  "model_name": "Qwen3 Demo",
+  "model_type": "qwen2",
+  "architectures": ["Qwen2ForCausalLM"],
+  "vocab_size": 151936,
+  "hidden_size": 2048,
+  "intermediate_size": 5632,
+  "num_hidden_layers": 24,
+  "num_attention_heads": 16,
+  "num_key_value_heads": 8,
+  "tie_word_embeddings": false,
+  "hidden_act": "silu",
+  "rms_norm_eps": 1e-06,
+  "rope_theta": 1000000.0,
+  "max_position_embeddings": 32768
+}

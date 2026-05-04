@@ -1,0 +1,26 @@
+# Vitriol demo targets
+# One entry per line. Supports remote model IDs and local paths.
+# Lines starting with # are ignored.
+#
+# Public / commonly accessible examples by supported family:
+deepseek-ai/DeepSeek-V2-Lite
+tencent/Hy3-preview
+zai-org/GLM-5.1
+TinyLlama/TinyLlama-1.1B-Chat-v1.0
+MiniMaxAI/MiniMax-M2.7
+mistralai/Mistral-7B-v0.3
+microsoft/Phi-3.5-mini-instruct
+Qwen/Qwen2.5-7B-Instruct
+stabilityai/stablelm-2-1_6b
+
+# Cohere Aya is typically gated on HuggingFace.
+# Uncomment if your account already has access:
+# CohereForAI/aya-expanse-8b
+#
+# Gemma often requires model access approval on HuggingFace.
+# Uncomment if your environment already has access:
+# google/gemma-2-2b
+
+# Local model directory examples:
+# path:/absolute/path/to/local/model
+# ~/models/example-local-model

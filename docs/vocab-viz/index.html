@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vitriol · Vocab Viz</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --panel: rgba(10, 20, 38, 0.78);
+      --line: rgba(144, 190, 255, 0.18);
+      --text: #edf5ff;
+      --muted: #9eb3cf;
+      --accent: #6ee7f9;
+      --accent-2: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 30%),
+        radial-gradient(circle at top right, rgba(110, 231, 249, 0.16), transparent 28%),
+        linear-gradient(180deg, #08111f 0%, #040916 100%);
+    }
+    .shell { max-width: 1100px; margin: 0 auto; padding: 40px 20px 64px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px; }
+    h1 { margin: 0 0 10px; font-size: 34px; letter-spacing: -0.03em; }
+    p { margin: 0; color: var(--muted); line-height: 1.7; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+    a.btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 10px 14px; border-radius: 12px; text-decoration: none; font-weight: 700;
+      border: 1px solid var(--line); color: var(--text); background: rgba(255,255,255,0.02);
+    }
+    a.btn.primary { color: #04101f; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: 0; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .card { border-radius: 16px; border: 1px solid var(--line); background: rgba(16, 28, 49, 0.9); padding: 16px; }
+    .card h2 { margin: 6px 0 8px; font-size: 18px; }
+    .meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #c9dbf7; }
+    .meta code { background: rgba(0,0,0,0.35); padding: 2px 8px; border-radius: 999px; }
+    .hint { margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .error { color: #fecaca; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="panel">
+      <h1>Vocab Viz</h1>
+      <p>
+        这里展示 tokenizer 词表相关的静态可视化页面（例如 treemap、bar 等）。
+        页面文件通常由 Vitriol 生成在 <code>output/*.html</code>，再同步到 <code>docs/vocab-viz/pages/</code>。
+      </p>
+      <div class="row">
+        <a class="btn" href="../index.html">返回首页</a>
+        <a class="btn primary" href="pages/" title="需要先同步生成 pages/ 文件">打开页面目录</a>
+      </div>
+      <div class="hint" id="status">正在加载清单…</div>
+    </div>
+
+    <div class="grid" id="pages"></div>
+  </div>
+
+  <script>
+    function el(tag, attrs = {}, children = []) {
+      const node = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") node.className = v;
+        else if (k === "text") node.textContent = v;
+        else node.setAttribute(k, v);
+      }
+      for (const c of children) node.appendChild(c);
+      return node;
+    }
+
+    async function main() {
+      const status = document.getElementById("status");
+      const container = document.getElementById("pages");
+
+      try {
+        const resp = await fetch("../manifests/vocab_viz.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("无法读取 manifests/vocab_viz.json（请先运行 sync 脚本同步 vocab 页面）");
+        const data = await resp.json();
+        const pages = data.pages || [];
+
+        if (!pages.length) {
+          status.textContent = "未发现任何 vocab 页面：你可以运行 scripts/sync_github_pages_assets.py 同步 output/vocab_*.html 到 docs/vocab-viz/pages/。";
+          return;
+        }
+
+        status.textContent = `已加载 ${pages.length} 个页面。`;
+
+        for (const p of pages) {
+          const href = "../" + p.path;
+          container.appendChild(
+            el("div", { class: "card" }, [
+              el("div", { class: "meta" }, [el("code", { text: "HTML" })]),
+              el("h2", { text: p.title || p.path }),
+              el("p", { text: "打开后可直接在浏览器中交互查看。" }),
+              el("div", { class: "row" }, [
+                el("a", { class: "btn primary", href }, [document.createTextNode("打开")]),
+              ]),
+            ])
+          );
+        }
+      } catch (e) {
+        status.textContent = String(e && e.message ? e.message : e);
+        status.classList.add("error");
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
+

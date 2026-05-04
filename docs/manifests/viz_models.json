@@ -1,0 +1,38 @@
+{
+  "default": {
+    "slug": "Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+    "title": "Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+    "source_dir": "output/Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+    "pages": {
+      "viewer_hash": "viewer.html#?model=data/Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+      "architecture": "viz-models/Qwen3.5-397B-A17B-Vitriol-ultra-dummy/architecture.html"
+    },
+    "copied": {
+      "config.json": true,
+      "meta-config.json": true,
+      "config_meta.json": false,
+      "architecture.html": true,
+      "architecture.png": true,
+      "architecture_detail.png": true
+    }
+  },
+  "models": [
+    {
+      "slug": "Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+      "title": "Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+      "source_dir": "output/Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+      "pages": {
+        "viewer_hash": "viewer.html#?model=data/Qwen3.5-397B-A17B-Vitriol-ultra-dummy",
+        "architecture": "viz-models/Qwen3.5-397B-A17B-Vitriol-ultra-dummy/architecture.html"
+      },
+      "copied": {
+        "config.json": true,
+        "meta-config.json": true,
+        "config_meta.json": false,
+        "architecture.html": true,
+        "architecture.png": true,
+        "architecture_detail.png": true
+      }
+    }
+  ]
+}
