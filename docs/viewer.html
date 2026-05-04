@@ -242,9 +242,17 @@
 
     <!-- Header -->
     <div class="fixed top-0 left-0 right-0 p-4 flex justify-between items-start z-10 pointer-events-none">
-        <div class="glass-panel px-4 py-3 pointer-events-auto">
-            <h1 class="text-lg font-bold text-white" id="modelName">Vitriol Model Visualizer</h1>
-            <p class="text-xs text-gray-400 font-mono" id="modelPath"></p>
+        <div class="glass-panel px-4 py-3 pointer-events-auto flex items-center gap-3">
+            <div>
+                <h1 class="text-lg font-bold text-white" id="modelName">Vitriol Model Visualizer</h1>
+                <p class="text-xs text-gray-400 font-mono" id="modelPath"></p>
+            </div>
+            <div class="border-l border-white/10 pl-3 flex gap-1.5">
+                <a href="index.html" class="control-btn text-xs" title="返回主页 / Home" style="padding: 6px 10px;">🏠</a>
+                <a href="https://github.com/isLinXu/Vitriol" target="_blank" class="control-btn text-xs" title="GitHub 仓库" style="padding: 6px 10px;">⭐ GitHub</a>
+                <a href="arch-compare.html" class="control-btn text-xs" title="架构对比" style="padding: 6px 10px;">📊</a>
+                <a href="compare-3d.html" class="control-btn text-xs" title="双模 3D 对比" style="padding: 6px 10px;">⚖️</a>
+            </div>
         </div>
         
         <div class="glass-panel px-4 py-3 pointer-events-auto flex gap-4 text-xs" id="statsPanel">
@@ -281,6 +289,25 @@
         <div class="border-t border-white/10 my-1"></div>
         <button onclick="exportPNGViz()" class="control-btn text-xs justify-center" title="Save as PNG">📷 PNG</button>
         <button onclick="exportHTMLViz()" class="control-btn text-xs justify-center" title="Export Standalone HTML">📦 HTML</button>
+        <button onclick="showHashFingerprint()" class="control-btn text-xs justify-center" title="计算模型哈希指纹" style="background:rgba(132,204,22,0.2);border-color:rgba(132,204,22,0.3);">🔐 Hash</button>
+    </div>
+    
+    <!-- Hash Fingerprint Modal -->
+    <div id="hashModal" class="fixed inset-0 z-50 items-center justify-center" style="display:none; background:rgba(0,0,0,0.7); backdrop-filter:blur(8px);">
+        <div class="glass-panel p-6" style="max-width: 700px; width: 90vw; max-height: 85vh; overflow-y: auto;">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-white">🔐 模型哈希指纹</h2>
+                <button onclick="document.getElementById('hashModal').style.display='none'" class="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+            <div id="hashContent" class="space-y-3 text-sm">
+                <div class="text-gray-400">正在计算中...</div>
+            </div>
+            <div class="mt-4 flex gap-2 border-t border-white/10 pt-4">
+                <button onclick="copyHashReport()" class="control-btn text-xs" title="复制到剪贴板">📋 复制</button>
+                <button onclick="exportHashJSON()" class="control-btn text-xs" title="下载 JSON">📥 下载 JSON</button>
+                <button onclick="exportHashMarkdown()" class="control-btn text-xs" title="下载 Markdown">📝 下载 Markdown</button>
+            </div>
+        </div>
     </div>
     
     <!-- Model Preset Selector -->
@@ -368,7 +395,8 @@
         <button onclick="expandAll()" class="control-btn">▼ Expand</button>
         <button onclick="collapseAll()" class="control-btn">▶ Collapse</button>
         <button onclick="resetCamera()" class="control-btn">🎯 Reset</button>
-        <button onclick="toggleLayout()" class="control-btn" id="layoutBtn">📐 3D</button>
+        <button onclick="setViewMode('3d')" class="control-btn active" id="btn3D" title="3D 立体视图">📐 3D</button>
+        <button onclick="setViewMode('2d')" class="control-btn" id="btn2D" title="2D 平面结构图">📋 2D</button>
         <button onclick="toggleFlow()" class="control-btn active" id="flowBtn">🌊 Flow</button>
         <button onclick="toggleLabels()" class="control-btn active" id="labelsBtn">🏷️ Labels</button>
         <button onclick="toggleCompare()" class="control-btn" id="compareBtn">⚖️ Compare</button>
@@ -456,6 +484,9 @@
                             console.log('Loaded model info from HF API'); 
                         } catch(e) {}
                     }
+                    
+                    // Save to window for hash fingerprint computation
+                    window._hfModelInfo = modelInfo;
 
                     // Use meta (original config) for visualization if available
                     const effectiveConfig = meta || config;
@@ -3225,6 +3256,263 @@
         }
         
         // ============================================
+        // Model Hash Fingerprint (online calculation)
+        // ============================================
+        // Uses Web Crypto API (SHA-256) to fingerprint:
+        //   1. config.json content (architecture hash)
+        //   2. Key architecture signature (from parsed config)
+        //   3. HuggingFace safetensors metadata (if available)
+        let _currentHashReport = null;
+        
+        async function sha256(text) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(text);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+        
+        async function computeHashFingerprint(cfg) {
+            const report = {
+                generated_at: new Date().toISOString(),
+                model_name: cfg.name || 'unknown',
+                model_path: document.getElementById('modelPath')?.textContent || '',
+                hashes: {},
+                architecture_signature: {},
+                safetensors_metadata: null
+            };
+            
+            // 1. Architecture signature hash
+            const archSig = {
+                model_type: cfg.raw?.model_type || 'unknown',
+                architectures: cfg.raw?.architectures || [],
+                vocab_size: cfg.vocabSize,
+                hidden_size: cfg.hiddenSize,
+                num_layers: cfg.numLayers,
+                num_attention_heads: cfg.numHeads,
+                num_kv_heads: cfg.numKvHeads,
+                head_dim: cfg.headDim,
+                intermediate_size: cfg.intermediateSize,
+                num_experts: cfg.numExperts,
+                experts_per_tok: cfg.expertsPerTok,
+                is_moe: cfg.isMoE,
+                is_multimodal: cfg.isMultimodal,
+                sliding_window: cfg.slidingWindow || null,
+                tie_word_embeddings: cfg.raw?.tie_word_embeddings || false
+            };
+            report.architecture_signature = archSig;
+            
+            // Canonicalize JSON (sorted keys) for deterministic hash
+            const canonicalize = (obj) => {
+                if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+                if (Array.isArray(obj)) return '[' + obj.map(canonicalize).join(',') + ']';
+                const keys = Object.keys(obj).sort();
+                return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalize(obj[k])).join(',') + '}';
+            };
+            
+            report.hashes.architecture_sha256 = await sha256(canonicalize(archSig));
+            
+            // 2. Full config hash (if raw config available)
+            if (cfg.raw && Object.keys(cfg.raw).length > 0) {
+                report.hashes.config_sha256 = await sha256(canonicalize(cfg.raw));
+            }
+            
+            // 3. HuggingFace safetensors metadata (if loaded)
+            if (typeof window._hfModelInfo !== 'undefined' && window._hfModelInfo) {
+                const info = window._hfModelInfo;
+                if (info.safetensors) {
+                    report.safetensors_metadata = {
+                        total_parameters: info.safetensors.parameters,
+                        total_size_bytes: info.safetensors.total || null
+                    };
+                    
+                    // Hash the parameter distribution
+                    const paramStr = canonicalize(info.safetensors.parameters || {});
+                    report.hashes.parameters_sha256 = await sha256(paramStr);
+                }
+                
+                if (info.sha) {
+                    report.hashes.hf_commit_sha = info.sha;
+                }
+                
+                if (info.siblings) {
+                    // Combine all siblings (files) into a single string for hash
+                    const siblingsStr = info.siblings.map(s => s.rfilename).sort().join('|');
+                    report.hashes.files_manifest_sha256 = await sha256(siblingsStr);
+                }
+            }
+            
+            // 4. Composite "Vitriol Fingerprint" (combines arch + params + files)
+            const parts = [
+                report.hashes.architecture_sha256,
+                report.hashes.parameters_sha256 || '',
+                report.hashes.files_manifest_sha256 || ''
+            ].filter(Boolean);
+            report.hashes.vitriol_fingerprint = (await sha256(parts.join('::'))).substring(0, 32);
+            
+            return report;
+        }
+        
+        async function showHashFingerprint() {
+            const modal = document.getElementById('hashModal');
+            const content = document.getElementById('hashContent');
+            modal.style.display = 'flex';
+            content.innerHTML = `<div class="text-gray-400">⏳ 正在计算哈希指纹...</div>`;
+            
+            try {
+                const cfg = window._currentCfg;
+                if (!cfg) {
+                    content.innerHTML = `<div class="text-red-400">❌ 未加载模型配置</div>`;
+                    return;
+                }
+                
+                const report = await computeHashFingerprint(cfg);
+                _currentHashReport = report;
+                
+                // Render report
+                const hashRow = (label, value, color = '#60a5fa') => {
+                    if (!value) return '';
+                    return `
+                        <div style="display:flex;flex-direction:column;gap:4px;padding:8px;background:rgba(0,0,0,0.3);border-radius:8px;border-left:3px solid ${color};">
+                            <div style="font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase;">${label}</div>
+                            <div style="font-family:monospace;font-size:11px;color:${color};word-break:break-all;">${value}</div>
+                        </div>`;
+                };
+                
+                const sigRow = (key, val) => {
+                    if (val === null || val === undefined || val === '') return '';
+                    return `
+                        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+                            <span style="color:#94a3b8;font-size:12px;">${key}</span>
+                            <span style="color:#e2e8f0;font-family:monospace;font-size:12px;">${Array.isArray(val) ? val.join(', ') : val}</span>
+                        </div>`;
+                };
+                
+                let html = `
+                    <div style="background:rgba(132,204,22,0.1);border:1px solid rgba(132,204,22,0.3);border-radius:10px;padding:16px;">
+                        <div style="font-size:10px;color:#84cc16;font-weight:700;text-transform:uppercase;margin-bottom:4px;">🏷️ Vitriol Fingerprint</div>
+                        <div style="font-family:monospace;font-size:14px;color:#a3e635;font-weight:700;">${report.hashes.vitriol_fingerprint}</div>
+                        <div style="font-size:10px;color:#64748b;margin-top:4px;">综合指纹（架构+参数+文件清单的 SHA-256 截断至 32 字符）</div>
+                    </div>
+                    
+                    <div style="margin-top:12px;">
+                        <div style="font-weight:700;color:#e2e8f0;margin-bottom:8px;font-size:13px;">📋 Hash Digests</div>
+                        ${hashRow('Architecture SHA-256', report.hashes.architecture_sha256, '#06b6d4')}
+                        ${hashRow('Full Config SHA-256', report.hashes.config_sha256, '#60a5fa')}
+                        ${hashRow('Parameters SHA-256', report.hashes.parameters_sha256, '#f59e0b')}
+                        ${hashRow('Files Manifest SHA-256', report.hashes.files_manifest_sha256, '#a855f7')}
+                        ${hashRow('HF Commit SHA', report.hashes.hf_commit_sha, '#ec4899')}
+                    </div>
+                    
+                    <div style="margin-top:12px;">
+                        <div style="font-weight:700;color:#e2e8f0;margin-bottom:8px;font-size:13px;">🏛️ Architecture Signature</div>
+                        <div style="background:rgba(0,0,0,0.3);border-radius:8px;padding:10px;">
+                            ${sigRow('model_type', report.architecture_signature.model_type)}
+                            ${sigRow('architectures', report.architecture_signature.architectures)}
+                            ${sigRow('vocab_size', report.architecture_signature.vocab_size)}
+                            ${sigRow('hidden_size', report.architecture_signature.hidden_size)}
+                            ${sigRow('num_layers', report.architecture_signature.num_layers)}
+                            ${sigRow('num_attention_heads', report.architecture_signature.num_attention_heads)}
+                            ${sigRow('num_kv_heads', report.architecture_signature.num_kv_heads)}
+                            ${sigRow('head_dim', report.architecture_signature.head_dim)}
+                            ${sigRow('intermediate_size', report.architecture_signature.intermediate_size)}
+                            ${sigRow('num_experts', report.architecture_signature.num_experts || 'N/A')}
+                            ${sigRow('experts_per_tok', report.architecture_signature.experts_per_tok || 'N/A')}
+                            ${sigRow('sliding_window', report.architecture_signature.sliding_window || 'N/A')}
+                            ${sigRow('is_moe', report.architecture_signature.is_moe)}
+                            ${sigRow('is_multimodal', report.architecture_signature.is_multimodal)}
+                        </div>
+                    </div>`;
+                
+                if (report.safetensors_metadata) {
+                    const meta = report.safetensors_metadata;
+                    let paramsHtml = '';
+                    if (meta.total_parameters) {
+                        for (const [dtype, count] of Object.entries(meta.total_parameters)) {
+                            paramsHtml += sigRow(dtype.toUpperCase(), count.toLocaleString());
+                        }
+                    }
+                    html += `
+                        <div style="margin-top:12px;">
+                            <div style="font-weight:700;color:#e2e8f0;margin-bottom:8px;font-size:13px;">💾 Safetensors Metadata</div>
+                            <div style="background:rgba(0,0,0,0.3);border-radius:8px;padding:10px;">
+                                ${paramsHtml}
+                                ${meta.total_size_bytes ? sigRow('Total Size', (meta.total_size_bytes/1e9).toFixed(2) + ' GB') : ''}
+                            </div>
+                        </div>`;
+                }
+                
+                html += `
+                    <div style="margin-top:12px;font-size:11px;color:#64748b;text-align:center;">
+                        Generated at ${report.generated_at}<br>
+                        Model: <b style="color:#94a3b8;">${report.model_name}</b>
+                    </div>`;
+                
+                content.innerHTML = html;
+            } catch (e) {
+                console.error('Hash computation failed:', e);
+                content.innerHTML = `<div class="text-red-400">❌ 计算失败: ${e.message}</div>`;
+            }
+        }
+        
+        function copyHashReport() {
+            if (!_currentHashReport) return;
+            const text = JSON.stringify(_currentHashReport, null, 2);
+            navigator.clipboard.writeText(text).then(() => {
+                const btns = document.querySelectorAll('#hashModal button');
+                const copyBtn = Array.from(btns).find(b => b.textContent.includes('复制'));
+                if (copyBtn) {
+                    const orig = copyBtn.textContent;
+                    copyBtn.textContent = '✅ 已复制';
+                    setTimeout(() => copyBtn.textContent = orig, 1500);
+                }
+            });
+        }
+        
+        function exportHashJSON() {
+            if (!_currentHashReport) return;
+            const text = JSON.stringify(_currentHashReport, null, 2);
+            const filename = `vitriol-fingerprint-${_currentHashReport.model_name.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+            downloadBlob(filename, text, 'application/json');
+        }
+        
+        function exportHashMarkdown() {
+            if (!_currentHashReport) return;
+            const r = _currentHashReport;
+            let md = `# 🔐 Vitriol Model Fingerprint\n\n`;
+            md += `**Model**: \`${r.model_name}\`  \n`;
+            md += `**Path**: \`${r.model_path}\`  \n`;
+            md += `**Generated**: ${r.generated_at}\n\n`;
+            md += `## 🏷️ Vitriol Fingerprint\n\n`;
+            md += `\`\`\`\n${r.hashes.vitriol_fingerprint}\n\`\`\`\n\n`;
+            md += `## 📋 Hash Digests\n\n`;
+            md += `| Type | SHA-256 |\n|------|--------|\n`;
+            for (const [k, v] of Object.entries(r.hashes)) {
+                if (k !== 'vitriol_fingerprint' && v) md += `| ${k} | \`${v}\` |\n`;
+            }
+            md += `\n## 🏛️ Architecture Signature\n\n\`\`\`json\n${JSON.stringify(r.architecture_signature, null, 2)}\n\`\`\`\n\n`;
+            if (r.safetensors_metadata) {
+                md += `## 💾 Safetensors Metadata\n\n\`\`\`json\n${JSON.stringify(r.safetensors_metadata, null, 2)}\n\`\`\`\n\n`;
+            }
+            md += `---\n*Generated by [Vitriol 3D Viewer](https://islinxu.github.io/Vitriol/)*\n`;
+            const filename = `vitriol-fingerprint-${r.model_name.replace(/[^a-zA-Z0-9]/g, '_')}.md`;
+            downloadBlob(filename, md, 'text/markdown');
+        }
+        
+        function downloadBlob(filename, content, mime) {
+            const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // ============================================
         // Model Preset Loader (no page reload)
         // ============================================
         async function loadModelPreset(hfRepo) {
@@ -3397,8 +3685,13 @@
         }
 
         function toggleLayout() {
-            is3D = !is3D;
-            const btn = document.getElementById('layoutBtn');
+            setViewMode(is3D ? '2d' : '3d');
+        }
+        
+        function setViewMode(mode) {
+            is3D = (mode === '3d');
+            const btn3D = document.getElementById('btn3D');
+            const btn2D = document.getElementById('btn2D');
             
             // Get model bounds
             let minY = 0;
@@ -3411,16 +3704,31 @@
             const centerY = (minY + maxY) / 2;
             
             if (is3D) {
-                camera.position.set(totalHeight * 0.8, centerY, totalHeight);
-                btn.textContent = '📐 3D';
-                btn.classList.add('active');
+                // 3D perspective view
+                gsapTo(camera.position, { x: totalHeight * 0.8, y: centerY, z: totalHeight }, 0.8);
+                if (btn3D) btn3D.classList.add('active');
+                if (btn2D) btn2D.classList.remove('active');
+                
+                // Allow full rotation
+                if (controls) {
+                    controls.enableRotate = true;
+                    controls.minPolarAngle = 0;
+                    controls.maxPolarAngle = Math.PI;
+                }
             } else {
-                camera.position.set(0, centerY, totalHeight * 1.2);
-                btn.textContent = '📱 2D';
-                btn.classList.remove('active');
+                // 2D flat structure view (front)
+                gsapTo(camera.position, { x: 0, y: centerY, z: totalHeight * 1.4 }, 0.8);
+                if (btn3D) btn3D.classList.remove('active');
+                if (btn2D) btn2D.classList.add('active');
+                
+                // Lock camera to front view (no tilt)
+                if (controls) {
+                    controls.enableRotate = false;
+                    controls.minPolarAngle = Math.PI / 2;
+                    controls.maxPolarAngle = Math.PI / 2;
+                }
             }
-            controls.target.set(0, centerY, 0);
-            controls.update();
+            gsapTo(controls.target, { x: 0, y: centerY, z: 0 }, 0.8);
         }
 
         function toggleFlow() {
