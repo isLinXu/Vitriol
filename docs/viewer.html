@@ -1028,9 +1028,53 @@
             let currentY = 22; // Start position after embeddings
             const layerSpacing = cfg.isMoE ? 35 : 22; // Increased spacing for better visibility
             
+            // ========= LOD (Level of Detail) for large models =========
+            // When layers > 32, render only HEAD (first 4) + MIDDLE MARKER + TAIL (last 4)
+            // This prevents browser freeze for DeepSeek-V4 (64+ layers) etc.
+            const LOD_THRESHOLD = 32;
+            const LOD_HEAD = 4;
+            const LOD_TAIL = 4;
+            const useLOD = cfg.textLayers > LOD_THRESHOLD;
+            const lodSkippedCount = useLOD ? cfg.textLayers - LOD_HEAD - LOD_TAIL : 0;
+            
+            // Build list of layer indices to actually render
+            let layerIndicesToRender = [];
+            if (useLOD) {
+                // First LOD_HEAD layers
+                for (let i = 0; i < LOD_HEAD; i++) layerIndicesToRender.push(i);
+                // Middle marker (rendered as a single folded layer)
+                layerIndicesToRender.push(-1);  // -1 = LOD marker
+                // Last LOD_TAIL layers
+                for (let i = cfg.textLayers - LOD_TAIL; i < cfg.textLayers; i++) layerIndicesToRender.push(i);
+                console.log(`🔬 LOD activated: rendering ${LOD_HEAD}+${LOD_TAIL} of ${cfg.textLayers} layers (skipping ${lodSkippedCount})`);
+            } else {
+                for (let i = 0; i < cfg.textLayers; i++) layerIndicesToRender.push(i);
+            }
+            
             // TEXT ENCODER LAYERS
-            for (let i = 0; i < cfg.textLayers; i++) {
+            for (const i of layerIndicesToRender) {
                 const layerY = currentY;
+                
+                // LOD marker layer
+                if (i === -1) {
+                    modelLayers.push({
+                        name: `⋯ ${lodSkippedCount} Layers Skipped (LOD) ⋯`,
+                        y: layerY, type: 'attention',
+                        modules: [
+                            { name: 'LOD_Marker', pos: [0, 0, 0], size: [24, 4, 8], color: 0x64748b,
+                              data: { 
+                                  type: 'LOD (Level of Detail)',
+                                  skipped: lodSkippedCount,
+                                  total: cfg.textLayers,
+                                  rendered: LOD_HEAD + LOD_TAIL,
+                                  note: 'Middle layers collapsed for performance',
+                                  desc: `${lodSkippedCount} identical layers hidden for performance. Structure is homogeneous with the visible layers above and below.` }}
+                        ],
+                        connections: []
+                    });
+                    currentY -= layerSpacing;
+                    continue;
+                }
                 
                 let lType = cfg.textLayerTypes[i] || 'dense';
                 let layerName = `TEXT_ENCODER_L${i}`;
@@ -2518,6 +2562,12 @@
                 <div class="stat-card" style="border-color:#ec489940;">
                     <div class="stat-value" style="color:#ec4899;">${cfg.slidingWindow >= 1000 ? (cfg.slidingWindow/1000).toFixed(1) + 'K' : cfg.slidingWindow}</div>
                     <div class="stat-label">SWA Window</div>
+                </div>
+                ` : ''}
+                ${cfg.textLayers > 32 ? `
+                <div class="stat-card" style="border-color:#64748b40;">
+                    <div class="stat-value" style="color:#94a3b8;font-size:14px;">🔬 LOD Active</div>
+                    <div class="stat-label">Rendering 8 of ${cfg.textLayers}</div>
                 </div>
                 ` : ''}
                 ${cfg.isMultimodal ? `

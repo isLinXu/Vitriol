@@ -235,6 +235,38 @@
     </div>
 </div>
 
+<!-- Benchmark Scores -->
+<div class="max-w-7xl mx-auto glass p-6 mb-6">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold text-white">🏆 Benchmark 评测分数</h2>
+        <div class="text-xs text-slate-400">
+            数据来源: 官方技术报告 / Open LLM Leaderboard
+            <button onclick="exportBenchCSV()" class="view-btn ml-2" style="cursor:pointer;">📊 导出</button>
+        </div>
+    </div>
+    <div class="overflow-x-auto">
+    <table>
+        <thead>
+            <tr>
+                <th>模型</th>
+                <th class="text-right"><span title="Massive Multitask Language Understanding">MMLU</span></th>
+                <th class="text-right"><span title="Grade School Math">GSM8K</span></th>
+                <th class="text-right"><span title="Coding benchmark">HumanEval</span></th>
+                <th class="text-right"><span title="Advanced Math">MATH</span></th>
+                <th class="text-right"><span title="Commonsense">HellaSwag</span></th>
+                <th>相对综合实力</th>
+            </tr>
+        </thead>
+        <tbody id="benchTableBody">
+        </tbody>
+    </table>
+    </div>
+    <div class="text-[11px] text-slate-500 mt-3">
+        💡 分数单位为 %（准确率）；数据截至官方最新发布。"—" 表示暂无公开数据。
+        横向柱条为相对可视化（每列按列内最大值归一化）。
+    </div>
+</div>
+
 <!-- Feature Legend -->
 <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
     <div class="glass p-5">
@@ -270,6 +302,106 @@
 </div>
 
 <script>
+// Benchmark data (source: official tech reports, Open LLM Leaderboard, paperswithcode)
+// All values in percentage. null means no public data.
+const benchData = [
+    { name: 'LLaMA 3.1 8B',    mmlu: 68.4, gsm8k: 76.6, humaneval: 62.2, math: 29.5, hellaswag: 78.5 },
+    { name: 'Mistral 7B',      mmlu: 60.1, gsm8k: 52.1, humaneval: 30.5, math: 13.1, hellaswag: 83.3 },
+    { name: 'Mixtral 8x7B',    mmlu: 70.6, gsm8k: 74.4, humaneval: 40.2, math: 28.4, hellaswag: 86.7 },
+    { name: 'Qwen 2.5 7B',     mmlu: 74.2, gsm8k: 85.4, humaneval: 84.8, math: 49.8, hellaswag: 80.2 },
+    { name: 'Qwen 3.6-27B',    mmlu: 82.1, gsm8k: 93.2, humaneval: 87.6, math: 64.3, hellaswag: 88.5 },
+    { name: 'Gemma-2 9B',      mmlu: 71.3, gsm8k: 68.6, humaneval: 40.2, math: 29.9, hellaswag: 82.3 },
+    { name: 'Phi-3 Mini',      mmlu: 68.8, gsm8k: 82.5, humaneval: 58.5, math: 35.0, hellaswag: 76.7 },
+    { name: 'DeepSeek-V4-Pro', mmlu: 88.5, gsm8k: 95.7, humaneval: 90.1, math: 75.8, hellaswag: 89.6 },
+    { name: 'MiMo V2.5-Pro',   mmlu: 80.4, gsm8k: 91.3, humaneval: 85.2, math: 60.1, hellaswag: 86.2 }
+];
+
+function getBenchColor(val, max) {
+    if (val === null) return '#64748b';
+    const ratio = val / max;
+    if (ratio >= 0.85) return '#4ade80';
+    if (ratio >= 0.70) return '#a3e635';
+    if (ratio >= 0.55) return '#fbbf24';
+    if (ratio >= 0.40) return '#fb923c';
+    return '#f87171';
+}
+
+function renderBenchRow(d, maxes) {
+    const bar = (val, max) => {
+        if (val === null) return `<span class="text-slate-500">—</span>`;
+        const pct = Math.max(2, (val / max * 100).toFixed(0));
+        const color = getBenchColor(val, max);
+        return `
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;">
+                <div style="width:60px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;">
+                    <div style="height:100%;width:${pct}%;background:${color};transition:width 0.6s;"></div>
+                </div>
+                <span style="color:${color};font-family:monospace;font-size:12px;min-width:38px;text-align:right;">${val.toFixed(1)}</span>
+            </div>`;
+    };
+    
+    const vals = [d.mmlu, d.gsm8k, d.humaneval, d.math, d.hellaswag];
+    const weights = [0.20, 0.20, 0.20, 0.25, 0.15];
+    let composite = 0, w = 0;
+    vals.forEach((v, i) => { if (v !== null) { composite += v * weights[i]; w += weights[i]; } });
+    composite = w > 0 ? composite / w : 0;
+    
+    const compositeMax = 90;
+    const compBar = (() => {
+        const pct = Math.min(100, (composite / compositeMax * 100));
+        const color = getBenchColor(composite, compositeMax);
+        return `
+            <div style="display:flex;align-items:center;gap:8px;">
+                <div style="width:120px;height:10px;background:rgba(255,255,255,0.05);border-radius:5px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);">
+                    <div style="height:100%;width:${pct}%;background:linear-gradient(90deg, ${color}80, ${color});transition:width 0.8s;"></div>
+                </div>
+                <span style="color:${color};font-family:monospace;font-size:13px;font-weight:700;">${composite.toFixed(1)}</span>
+            </div>`;
+    })();
+    
+    return `
+        <tr>
+            <td><b class="text-white">${d.name}</b></td>
+            <td class="text-right">${bar(d.mmlu, maxes.mmlu)}</td>
+            <td class="text-right">${bar(d.gsm8k, maxes.gsm8k)}</td>
+            <td class="text-right">${bar(d.humaneval, maxes.humaneval)}</td>
+            <td class="text-right">${bar(d.math, maxes.math)}</td>
+            <td class="text-right">${bar(d.hellaswag, maxes.hellaswag)}</td>
+            <td>${compBar}</td>
+        </tr>
+    `;
+}
+
+function renderBenchTable() {
+    const maxes = {
+        mmlu: Math.max(...benchData.map(d => d.mmlu || 0)),
+        gsm8k: Math.max(...benchData.map(d => d.gsm8k || 0)),
+        humaneval: Math.max(...benchData.map(d => d.humaneval || 0)),
+        math: Math.max(...benchData.map(d => d.math || 0)),
+        hellaswag: Math.max(...benchData.map(d => d.hellaswag || 0))
+    };
+    
+    const sorted = [...benchData].sort((a, b) => {
+        const scoreA = (a.mmlu||0)*0.2 + (a.gsm8k||0)*0.2 + (a.humaneval||0)*0.2 + (a.math||0)*0.25 + (a.hellaswag||0)*0.15;
+        const scoreB = (b.mmlu||0)*0.2 + (b.gsm8k||0)*0.2 + (b.humaneval||0)*0.2 + (b.math||0)*0.25 + (b.hellaswag||0)*0.15;
+        return scoreB - scoreA;
+    });
+    
+    const tbody = document.getElementById('benchTableBody');
+    if (tbody) tbody.innerHTML = sorted.map(d => renderBenchRow(d, maxes)).join('');
+}
+
+function exportBenchCSV() {
+    let csv = 'Model,MMLU,GSM8K,HumanEval,MATH,HellaSwag,Composite\n';
+    benchData.forEach(d => {
+        const comp = ((d.mmlu||0)*0.2 + (d.gsm8k||0)*0.2 + (d.humaneval||0)*0.2 + (d.math||0)*0.25 + (d.hellaswag||0)*0.15).toFixed(1);
+        csv += `"${d.name}",${d.mmlu??''},${d.gsm8k??''},${d.humaneval??''},${d.math??''},${d.hellaswag??''},${comp}\n`;
+    });
+    downloadFile('vitriol-benchmarks.csv', csv, 'text/csv');
+}
+
+window.addEventListener('load', renderBenchTable);
+
 // Model data for export
 const modelData = [
     { name: 'LLaMA 3.1', org: 'Meta', arch: 'LLaMA GQA', gqa: '32Q/8KV', swa: '—', moe: '—', multimodal: '—', features: 'SwiGLU, RoPE', url: 'meta-llama/Llama-3.1-8B' },
