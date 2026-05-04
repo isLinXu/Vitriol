@@ -492,6 +492,7 @@
             const isGemma = /gemma/i.test(config.model_type || '') || /gemma/i.test(textConfig.model_type || '') || /Gemma/i.test(name);
             const isPhi = /phi/i.test(config.model_type || '') || /phi/i.test(textConfig.model_type || '') || /Phi/i.test(name);
             const isLlama = config.model_type === 'llama' || textConfig.model_type === 'llama' || /Llama|LLaMA/i.test(name);
+            const isGLM = /glm/i.test(config.model_type || '') || /chatglm/i.test(config.model_type || '') || /GLM|ChatGLM/i.test(name);
             const slidingWindow = config.sliding_window || textConfig.sliding_window || 0;
             const tieWordEmbeddings = config.tie_word_embeddings || textConfig.tie_word_embeddings || false;
             
@@ -591,6 +592,7 @@
                 isGemma,
                 isPhi,
                 isLlama,
+                isGLM,
                 slidingWindow,
                 textLayerTypes,
                 textConfig: textConfig,
@@ -1043,6 +1045,16 @@
                 } else if (cfg.isGemma) {
                     // Gemma-2: alternating SWA/Global + Pre/Post norm + GeGLU + softcap
                     let layer = buildGemma2Layer(i, layerY, cfg);
+                    layer.name = layerName;
+                    modelLayers.push(layer);
+                } else if (cfg.isPhi) {
+                    // Phi-3: Fused QKV + gate_up + SwiGLU
+                    let layer = buildPhi3Layer(i, layerY, cfg);
+                    layer.name = layerName;
+                    modelLayers.push(layer);
+                } else if (cfg.isGLM) {
+                    // GLM-4: GLMBlock with Pre+Post Norm + GLU + RoPE
+                    let layer = buildGLM4Layer(i, layerY, cfg);
                     layer.name = layerName;
                     modelLayers.push(layer);
                 } else if (cfg.isDeepSeekV4) {
@@ -2243,6 +2255,201 @@
         }
         
         // ============================================
+        // Phi-3 Layer: Fused QKV + su_scaled_rope + SwiGLU
+        // ============================================
+        function buildPhi3Layer(idx, y, cfg) {
+            // Phi-3 distinctive features:
+            // - Fused QKV projection (single matmul for Q/K/V)
+            // - su/yarn scaled RoPE for long context
+            // - Gate+Up fused into single projection (gate_up_proj)
+            const qkvSize = (cfg.numHeads + 2 * cfg.numKvHeads) * cfg.headDim;
+            
+            const modules = [
+                // Pre-attention LayerNorm (Phi-3 uses RMSNorm)
+                { name: `RMSNorm1_${idx}`, pos: [-18, 8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-5', desc: 'Pre-attention RMSNorm' }},
+                
+                // Fused QKV (Phi-3 signature!)
+                { name: `QKV_${idx}`, pos: [-10, 10, 0], size: [7, 4, 4], color: 0xa855f7,
+                  data: { 
+                      type: 'Fused QKV Projection',
+                      weight: `[H, QH+2KVH)*D]`, 
+                      shape: `[${cfg.hiddenSize}, ${qkvSize}]`, 
+                      params: formatParams(cfg.hiddenSize * qkvSize),
+                      q_heads: cfg.numHeads,
+                      kv_heads: cfg.numKvHeads,
+                      head_dim: cfg.headDim,
+                      desc: 'Single fused projection for Q/K/V (efficient)' }},
+                
+                // Attention (with su/yarn scaled RoPE for long context)
+                { name: `Attn_${idx}`, pos: [-1, 10, 0], size: [7, 4, 5], color: colors.attention,
+                  data: { 
+                      type: 'GQA with su-scaled RoPE',
+                      heads: cfg.numHeads,
+                      kv_heads: cfg.numKvHeads,
+                      rope_scaling: 'longrope/su_scaled',
+                      desc: 'Attention with scaled RoPE for long context' }},
+                
+                // Output proj
+                { name: `O_Proj_${idx}`, pos: [7, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      params: formatParams(cfg.numHeads * cfg.headDim * cfg.hiddenSize),
+                      desc: 'Output projection' }},
+                { name: `Add1_${idx}`, pos: [13, 8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }},
+                
+                // Pre-FFN norm
+                { name: `RMSNorm2_${idx}`, pos: [-18, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-5', desc: 'Pre-FFN RMSNorm' }},
+                
+                // Phi-3 Fused gate+up (gate_up_proj)
+                { name: `GateUp_${idx}`, pos: [-8, -8, 0], size: [7, 4, 4], color: 0xa855f7,
+                  data: { 
+                      type: 'Fused Gate+Up (Phi-3)',
+                      weight: `[H, 2I]`, 
+                      shape: `[${cfg.hiddenSize}, ${2 * cfg.intermediateSize}]`, 
+                      params: formatParams(cfg.hiddenSize * 2 * cfg.intermediateSize),
+                      activation: 'SwiGLU',
+                      desc: 'Fused gate_up projection (splits into gate+up)' }},
+                
+                // Down proj
+                { name: `Down_${idx}`, pos: [2, -8, 0], size: [5, 3, 3], color: colors.ffn,
+                  data: { 
+                      params: formatParams(cfg.intermediateSize * cfg.hiddenSize),
+                      desc: 'Down projection' }},
+                { name: `Add2_${idx}`, pos: [9, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }}
+            ];
+            
+            const connections = [
+                { from: `RMSNorm1_${idx}`, to: `QKV_${idx}`, label: 'x' },
+                { from: `QKV_${idx}`, to: `Attn_${idx}`, label: 'qkv' },
+                { from: `Attn_${idx}`, to: `O_Proj_${idx}`, label: 'attn' },
+                { from: `O_Proj_${idx}`, to: `Add1_${idx}`, label: 'o' },
+                { from: `RMSNorm2_${idx}`, to: `GateUp_${idx}`, label: 'x' },
+                { from: `GateUp_${idx}`, to: `Down_${idx}`, label: 'swiglu' },
+                { from: `Down_${idx}`, to: `Add2_${idx}`, label: 'ffn' }
+            ];
+            
+            return {
+                name: `Phi3_L${idx}`,
+                y,
+                type: 'attention',
+                modules: modules,
+                connections: connections
+            };
+        }
+        
+        // ============================================
+        // GLM-4 Layer: GLMBlock with RMSNorm + GLU + RoPE
+        // ============================================
+        function buildGLM4Layer(idx, y, cfg) {
+            // GLM-4 (ChatGLM) distinctive features:
+            // - Pre + Post LayerNorm around both Attn and MLP
+            // - GLU (Gated Linear Unit) with dense_h_to_4h and dense_4h_to_h
+            // - Rotary embedding applied within attention
+            // - RMSNorm variant
+            const qkvSize = (cfg.numHeads + 2 * cfg.numKvHeads) * cfg.headDim;
+            
+            const modules = [
+                // Input RMSNorm
+                { name: `InputNorm_${idx}`, pos: [-18, 8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { 
+                      type: 'RMSNorm',
+                      desc: 'Input layernorm (GLMBlock)' }},
+                
+                // Self-Attention block
+                // Query-Key-Value projection (can be fused or separate)
+                { name: `QKV_${idx}`, pos: [-10, 10, 0], size: [7, 4, 4], color: 0xf97316,
+                  data: { 
+                      type: 'GLM Query/Key/Value',
+                      weight: `[H, QH+2KVH)*D]`, 
+                      shape: `[${cfg.hiddenSize}, ${qkvSize}]`, 
+                      params: formatParams(cfg.hiddenSize * qkvSize),
+                      q_heads: cfg.numHeads,
+                      kv_heads: cfg.numKvHeads,
+                      desc: 'GLM linear QKV with bias' }},
+                
+                // RoPE application (GLM applies RoPE at attention)
+                { name: `RoPE_${idx}`, pos: [-2, 10, 0], size: [4, 3, 3], color: 0x14b8a6,
+                  data: { 
+                      type: 'Rotary Position Embedding',
+                      rope_ratio: cfg.raw?.rope_ratio || 500,
+                      desc: 'Partial RoPE (GLM variant)' }},
+                
+                // Attention compute
+                { name: `Attn_${idx}`, pos: [4, 10, 0], size: [6, 4, 5], color: colors.attention,
+                  data: { 
+                      type: 'Multi-head Attention',
+                      heads: cfg.numHeads,
+                      kv_heads: cfg.numKvHeads,
+                      desc: 'Self-attention with causal mask' }},
+                
+                // Dense projection
+                { name: `Dense_${idx}`, pos: [11, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      params: formatParams(cfg.numHeads * cfg.headDim * cfg.hiddenSize),
+                      desc: 'Dense output projection' }},
+                
+                // Post-attention norm (GLMBlock has it!)
+                { name: `PostAttnNorm_${idx}`, pos: [17, 10, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { 
+                      type: 'Post-Attn RMSNorm',
+                      desc: 'Post-attention normalization' }},
+                
+                { name: `Add1_${idx}`, pos: [22, 8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }},
+                
+                // MLP Block: GLU-style
+                // dense_h_to_4h: H → 2*4H (split into gate+value)
+                { name: `H_to_4H_${idx}`, pos: [-10, -8, 0], size: [7, 4, 4], color: colors.ffn,
+                  data: { 
+                      type: 'GLM Dense H→4H (×2)',
+                      weight: `[H, 2*4H]`, 
+                      shape: `[${cfg.hiddenSize}, ${2 * cfg.intermediateSize}]`, 
+                      params: formatParams(cfg.hiddenSize * 2 * cfg.intermediateSize),
+                      activation: 'swiglu',
+                      desc: 'Projects to 2x intermediate for gating' }},
+                
+                // dense_4h_to_h: 4H → H
+                { name: `_4H_to_H_${idx}`, pos: [0, -8, 0], size: [5, 3, 3], color: colors.ffn,
+                  data: { 
+                      weight: `[4H, H]`, 
+                      params: formatParams(cfg.intermediateSize * cfg.hiddenSize),
+                      desc: 'Projects back to hidden dim' }},
+                
+                // Post-MLP norm
+                { name: `PostMlpNorm_${idx}`, pos: [7, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { 
+                      type: 'Post-MLP RMSNorm',
+                      desc: 'Post-MLP normalization' }},
+                
+                { name: `Add2_${idx}`, pos: [13, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }}
+            ];
+            
+            const connections = [
+                { from: `InputNorm_${idx}`, to: `QKV_${idx}`, label: 'x' },
+                { from: `QKV_${idx}`, to: `RoPE_${idx}`, label: 'qkv' },
+                { from: `RoPE_${idx}`, to: `Attn_${idx}`, label: 'rot' },
+                { from: `Attn_${idx}`, to: `Dense_${idx}`, label: 'attn' },
+                { from: `Dense_${idx}`, to: `PostAttnNorm_${idx}`, label: 'out' },
+                { from: `PostAttnNorm_${idx}`, to: `Add1_${idx}`, label: 'post' },
+                { from: `H_to_4H_${idx}`, to: `_4H_to_H_${idx}`, label: 'glu' },
+                { from: `_4H_to_H_${idx}`, to: `PostMlpNorm_${idx}`, label: 'h' },
+                { from: `PostMlpNorm_${idx}`, to: `Add2_${idx}`, label: 'post' }
+            ];
+            
+            return {
+                name: `GLM4_L${idx}`,
+                y,
+                type: 'attention',
+                modules: modules,
+                connections: connections
+            };
+        }
+        
+        // ============================================
         // UI Functions
         // ============================================
         function updateStatsPanel(cfg) {
@@ -2256,8 +2463,9 @@
             else if (cfg.isMiMo) { archBadge = 'GQA + MoE'; archColor = '#f59e0b'; }
             else if (cfg.isMixtral) { archBadge = 'SWA + MoE'; archColor = '#ec4899'; }
             else if (cfg.isMistral) { archBadge = 'GQA + SWA'; archColor = '#ec4899'; }
-            else if (cfg.isGemma) { archBadge = 'Gemma'; archColor = '#84cc16'; }
-            else if (cfg.isPhi) { archBadge = 'Phi-3'; archColor = '#a855f7'; }
+            else if (cfg.isGemma) { archBadge = 'Gemma-2'; archColor = '#84cc16'; }
+            else if (cfg.isPhi) { archBadge = 'Phi-3 Fused'; archColor = '#a855f7'; }
+            else if (cfg.isGLM) { archBadge = 'GLMBlock'; archColor = '#f97316'; }
             else if (cfg.isLlama) { archBadge = 'LLaMA GQA'; archColor = '#60a5fa'; }
             else if (cfg.isMoE) { archBadge = 'MoE'; archColor = '#f59e0b'; }
             
