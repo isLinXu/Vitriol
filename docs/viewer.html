@@ -438,6 +438,7 @@
             const qkNopeHeadDim = config.qk_nope_head_dim || textConfig.qk_nope_head_dim || 0;
             const qkRopeHeadDim = config.qk_rope_head_dim || textConfig.qk_rope_head_dim || 0;
             const isDeepSeekV4 = config.model_type === 'deepseek_v4' || textConfig.model_type === 'deepseek_v4';
+            const isMiMo = config.model_type === 'mimo_v2' || textConfig.model_type === 'mimo_v2';
             const tieWordEmbeddings = config.tie_word_embeddings || textConfig.tie_word_embeddings || false;
             
             // Calculate total parameters
@@ -916,6 +917,11 @@
                 if (cfg.isDeepSeekV4) {
                     // DeepSeek V4 uses special layer types
                     let layer = buildDeepSeekV4Layer(i, layerY, cfg, lType);
+                    layer.name = layerName;
+                    modelLayers.push(layer);
+                } else if (cfg.isMiMo) {
+                    // MiMo uses MoE layers
+                    let layer = buildMiMoLayer(i, layerY, cfg);
                     layer.name = layerName;
                     modelLayers.push(layer);
                 } else if (lType === 'moe') {
@@ -1518,6 +1524,96 @@
                         { from: `Shared_${idx}`, to: `Add2_${idx}`, label: 'shared' },
                         { from: `Routed_${idx}`, to: `Add2_${idx}`, label: 'routed' }
                     ])
+                ]
+            };
+        }
+
+        // ============================================
+        // MiMo Layer with GQA and MoE
+        // ============================================
+        function buildMiMoLayer(idx, y, cfg) {
+            // MiMo uses standard GQA + MoE architecture
+            const modules = [
+                // Pre-attention normalization
+                { name: `RMSNorm1_${idx}`, pos: [-15, 8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-6', desc: 'Pre-attention normalization' }},
+                
+                // GQA Attention
+                { name: `Q_Proj_${idx}`, pos: [-8, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, QH]`, 
+                      shape: `[${cfg.hiddenSize}, ${cfg.numHeads * cfg.headDim}]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numHeads * cfg.headDim),
+                      heads: cfg.numHeads,
+                      desc: 'Q projection' }},
+                { name: `K_Proj_${idx}`, pos: [-2, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, KVH]`, 
+                      shape: `[${cfg.hiddenSize}, ${cfg.numKvHeads * cfg.headDim}]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numKvHeads * cfg.headDim),
+                      kv_heads: cfg.numKvHeads,
+                      desc: 'K projection' }},
+                { name: `V_Proj_${idx}`, pos: [4, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, KVH]`, 
+                      shape: `[${cfg.hiddenSize}, ${cfg.numKvHeads * cfg.headDim}]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numKvHeads * cfg.headDim),
+                      kv_heads: cfg.numKvHeads,
+                      desc: 'V projection' }},
+                { name: `Attn_${idx}`, pos: [10, 10, 0], size: [6, 4, 4], color: colors.attention,
+                  data: { 
+                      type: 'GQA',
+                      heads: cfg.numHeads,
+                      kv_heads: cfg.numKvHeads,
+                      head_dim: cfg.headDim,
+                      desc: 'Grouped Query Attention' }},
+                { name: `O_Proj_${idx}`, pos: [17, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[QH, H]`, 
+                      shape: `[${cfg.numHeads * cfg.headDim}, ${cfg.hiddenSize}]`, 
+                      params: formatParams(cfg.numHeads * cfg.headDim * cfg.hiddenSize),
+                      desc: 'Output projection' }},
+                { name: `Add1_${idx}`, pos: [23, 8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }},
+                
+                // Pre-FFN normalization
+                { name: `RMSNorm2_${idx}`, pos: [-15, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-6', desc: 'Pre-FFN normalization' }},
+                
+                // MoE FFN
+                { name: `Router_${idx}`, pos: [-10, -8, 0], size: [5, 3, 3], color: colors.moe, 
+                  data: { 
+                      weight: `[H, E]`, 
+                      shape: `[${cfg.hiddenSize}, ${cfg.numExperts}]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numExperts),
+                      desc: 'Expert router' }},
+                { name: `Routed_${idx}`, pos: [-2, -8, 0], size: [8, 5, 4], color: colors.moe,
+                  data: { 
+                      experts: cfg.numExperts,
+                      active: cfg.expertsPerTok,
+                      desc: `Routed experts (${cfg.expertsPerTok} active)` }},
+                { name: `Add2_${idx}`, pos: [8, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add', desc: 'MoE FFN' }}
+            ];
+            
+            return {
+                name: `MiMo_L${idx}`, y, type: 'attention',
+                modules: modules,
+                connections: [
+                    // Attention connections
+                    { from: `RMSNorm1_${idx}`, to: `Q_Proj_${idx}`, label: 'x' },
+                    { from: `RMSNorm1_${idx}`, to: `K_Proj_${idx}`, label: 'x' },
+                    { from: `RMSNorm1_${idx}`, to: `V_Proj_${idx}`, label: 'x' },
+                    { from: `Q_Proj_${idx}`, to: `Attn_${idx}`, label: 'q' },
+                    { from: `K_Proj_${idx}`, to: `Attn_${idx}`, label: 'k' },
+                    { from: `V_Proj_${idx}`, to: `Attn_${idx}`, label: 'v' },
+                    { from: `Attn_${idx}`, to: `O_Proj_${idx}`, label: 'attn' },
+                    { from: `O_Proj_${idx}`, to: `Add1_${idx}`, label: 'out' },
+                    
+                    // FFN connections
+                    { from: `RMSNorm2_${idx}`, to: `Router_${idx}`, label: 'x' },
+                    { from: `Router_${idx}`, to: `Routed_${idx}`, label: 'route' },
+                    { from: `Routed_${idx}`, to: `Add2_${idx}`, label: 'routed' }
                 ]
             };
         }
