@@ -1,0 +1,9 @@
+transformers>=4.40.0,<5.0.0
+torch>=2.0.0
+accelerate>=0.20.0
+safetensors>=0.3.0
+huggingface_hub>=0.14.0
+click>=8.0.0
+tqdm
+PyYAML>=6.0
+numpy<2

@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vitriol"
+version = "0.3.0"
+description = "Unified framework for model structure visualization, compression, pruning, quantization and efficient inference"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+keywords = [
+    "llm",
+    "transformers",
+    "quantization",
+    "kv-cache",
+    "neural-architecture-search",
+    "visualization",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "transformers>=4.40.0,<5.0.0",
+    "torch>=2.0.0",
+    "accelerate>=0.20.0",
+    "safetensors>=0.3.0",
+    "huggingface_hub>=0.14.0",
+    "click>=8.0.0",
+    "tqdm",
+    "PyYAML>=6.0",
+    "numpy<2",
+]
+
+[project.optional-dependencies]
+viz = [
+    "rich>=13.0",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "pandas>=2.0",
+    "plotly>=5.0",
+    "scipy>=1.10",
+]
+webui = [
+    "gradio>=4.0.0",
+]
+api = [
+    "fastapi>=0.95",
+    "uvicorn>=0.22",
+    "pydantic>=2",
+    "psutil>=5.9",
+]
+dev = [
+    "build>=1.0,<2.0",
+    "pytest>=7.0,<9.0",
+    "pytest-cov>=4.0,<7.0",
+    "pytest-timeout>=2.0,<3.0",
+    "ruff>=0.4.0,<1.0",
+    "mypy>=1.0,<2.0",
+    "pre-commit>=3.0,<5.0",
+]
+
+[project.scripts]
+vitriol = "vitriol.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/isLinXu/Vitriol"
+Repository = "https://github.com/isLinXu/Vitriol.git"
+Issues = "https://github.com/isLinXu/Vitriol/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"vitriol.viz" = ["*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n1 --ignore=tests/integration"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore::DeprecationWarning:torchao.*",
+    "ignore::DeprecationWarning:websockets.*",
+    "ignore::UserWarning:torch.*",
+]
