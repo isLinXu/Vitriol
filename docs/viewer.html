@@ -248,7 +248,7 @@
     </div>
 
     <!-- Inference Status Panel -->
-    <div class="fixed top-20 left-1/2 -translate-x-1/2 glass-panel px-6 py-3 z-10" id="inferencePanel" style="display: none;">
+    <div class="fixed top-20 left-1/2 -translate-x-1/2 glass-panel px-6 py-3 z-10" id="inferencePanel" style="display: none; min-width: 600px; max-width: 90vw;">
         <div class="flex items-center gap-3">
             <div class="w-3 h-3 rounded-full bg-green-400 animate-pulse"></div>
             <span class="text-sm text-white font-mono" id="inferenceStatus">Ready</span>
@@ -484,6 +484,12 @@
             const isDeepSeekV4 = config.model_type === 'deepseek_v4' || textConfig.model_type === 'deepseek_v4';
             const isMiMo = config.model_type === 'mimo_v2' || textConfig.model_type === 'mimo_v2';
             const isQwen35 = config.model_type === 'qwen3_5' || textConfig.model_type === 'qwen3_5' || /Qwen3[\.\-]/.test(name);
+            const isMistral = config.model_type === 'mistral' || textConfig.model_type === 'mistral' || /Mistral|Mixtral/i.test(name);
+            const isMixtral = config.model_type === 'mixtral' || textConfig.model_type === 'mixtral' || /Mixtral/i.test(name);
+            const isGemma = /gemma/i.test(config.model_type || '') || /gemma/i.test(textConfig.model_type || '') || /Gemma/i.test(name);
+            const isPhi = /phi/i.test(config.model_type || '') || /phi/i.test(textConfig.model_type || '') || /Phi/i.test(name);
+            const isLlama = config.model_type === 'llama' || textConfig.model_type === 'llama' || /Llama|LLaMA/i.test(name);
+            const slidingWindow = config.sliding_window || textConfig.sliding_window || 0;
             const tieWordEmbeddings = config.tie_word_embeddings || textConfig.tie_word_embeddings || false;
             
             // Calculate total parameters
@@ -577,6 +583,12 @@
                 isDeepSeekV4,
                 isMiMo,
                 isQwen35,
+                isMistral,
+                isMixtral,
+                isGemma,
+                isPhi,
+                isLlama,
+                slidingWindow,
                 textLayerTypes,
                 textConfig: textConfig,
                 visionConfig: visionConfig || config.vision_config || null,
@@ -1015,6 +1027,11 @@
                 if (cfg.isQwen35) {
                     // Qwen3.5/3.6 uses hybrid attention (linear + full alternating)
                     let layer = buildQwen35Layer(i, layerY, cfg, lType);
+                    layer.name = layerName;
+                    modelLayers.push(layer);
+                } else if (cfg.isMistral || cfg.isMixtral) {
+                    // Mistral uses GQA + SWA, Mixtral adds MoE
+                    let layer = buildMistralLayer(i, layerY, cfg);
                     layer.name = layerName;
                     modelLayers.push(layer);
                 } else if (cfg.isDeepSeekV4) {
@@ -1939,6 +1956,157 @@
         }
         
         // ============================================
+        // Mistral / Mixtral Layer with Sliding Window Attention
+        // ============================================
+        function buildMistralLayer(idx, y, cfg) {
+            // Mistral uses GQA + SWA (Sliding Window Attention)
+            // Mixtral adds MoE on top (8 experts, top-2)
+            const hasSWA = cfg.slidingWindow && cfg.slidingWindow > 0;
+            const isMixtral = cfg.isMixtral;
+            
+            const modules = [
+                // Pre-attention normalization
+                { name: `RMSNorm1_${idx}`, pos: [-18, 8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-5', desc: 'Pre-attention RMSNorm' }},
+                
+                // GQA Q/K/V projections
+                { name: `Q_Proj_${idx}`, pos: [-12, 10, -4], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, QH*D]`, 
+                      shape: `[${cfg.hiddenSize}, ${cfg.numHeads * cfg.headDim}]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numHeads * cfg.headDim),
+                      heads: cfg.numHeads,
+                      desc: 'Q projection (GQA)' }},
+                { name: `K_Proj_${idx}`, pos: [-12, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, KVH*D]`, 
+                      shape: `[${cfg.hiddenSize}, ${cfg.numKvHeads * cfg.headDim}]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numKvHeads * cfg.headDim),
+                      kv_heads: cfg.numKvHeads,
+                      desc: 'K projection (GQA)' }},
+                { name: `V_Proj_${idx}`, pos: [-12, 10, 4], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, KVH*D]`, 
+                      shape: `[${cfg.hiddenSize}, ${cfg.numKvHeads * cfg.headDim}]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numKvHeads * cfg.headDim),
+                      desc: 'V projection (GQA)' }},
+                
+                // Sliding Window Attention (if enabled)
+                { name: hasSWA ? `SWA_${idx}` : `Attn_${idx}`, 
+                  pos: [-2, 10, 0], size: [8, 4, 5], 
+                  color: hasSWA ? 0xec4899 : colors.attention,
+                  data: { 
+                      type: hasSWA ? 'Sliding Window Attention' : 'GQA',
+                      window_size: hasSWA ? cfg.slidingWindow : 'full',
+                      heads: cfg.numHeads,
+                      kv_heads: cfg.numKvHeads,
+                      head_dim: cfg.headDim,
+                      desc: hasSWA 
+                          ? `SWA window=${cfg.slidingWindow} tokens (efficient for long context)`
+                          : 'Grouped Query Attention' }},
+                
+                // Output projection
+                { name: `O_Proj_${idx}`, pos: [8, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[QH*D, H]`, 
+                      shape: `[${cfg.numHeads * cfg.headDim}, ${cfg.hiddenSize}]`, 
+                      params: formatParams(cfg.numHeads * cfg.headDim * cfg.hiddenSize),
+                      desc: 'Output projection' }},
+                
+                // Residual add 1
+                { name: `Add1_${idx}`, pos: [14, 8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }},
+                
+                // Pre-FFN normalization
+                { name: `RMSNorm2_${idx}`, pos: [-18, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-5', desc: 'Pre-FFN RMSNorm' }}
+            ];
+            
+            const connections = [
+                { from: `RMSNorm1_${idx}`, to: `Q_Proj_${idx}`, label: 'x' },
+                { from: `RMSNorm1_${idx}`, to: `K_Proj_${idx}`, label: 'x' },
+                { from: `RMSNorm1_${idx}`, to: `V_Proj_${idx}`, label: 'x' },
+                { from: `Q_Proj_${idx}`, to: hasSWA ? `SWA_${idx}` : `Attn_${idx}`, label: 'q' },
+                { from: `K_Proj_${idx}`, to: hasSWA ? `SWA_${idx}` : `Attn_${idx}`, label: 'k' },
+                { from: `V_Proj_${idx}`, to: hasSWA ? `SWA_${idx}` : `Attn_${idx}`, label: 'v' },
+                { from: hasSWA ? `SWA_${idx}` : `Attn_${idx}`, to: `O_Proj_${idx}`, label: 'attn' },
+                { from: `O_Proj_${idx}`, to: `Add1_${idx}`, label: 'out' }
+            ];
+            
+            if (isMixtral) {
+                // Mixtral: MoE FFN (8 experts, top-2)
+                const nExperts = cfg.numExperts || 8;
+                const topK = cfg.expertsPerTok || 2;
+                const expInterm = cfg.expertSize || cfg.intermediateSize;
+                
+                modules.push(
+                    { name: `Router_${idx}`, pos: [-12, -8, 0], size: [5, 3, 3], color: colors.moe, 
+                      data: { 
+                          weight: `[H, E]`, 
+                          shape: `[${cfg.hiddenSize}, ${nExperts}]`, 
+                          params: formatParams(cfg.hiddenSize * nExperts),
+                          experts: nExperts,
+                          top_k: topK,
+                          desc: `MoE router (top-${topK} of ${nExperts})` }},
+                    { name: `Experts_${idx}`, pos: [-2, -8, 0], size: [10, 6, 5], color: colors.moe,
+                      data: { 
+                          experts: nExperts,
+                          active: topK,
+                          per_expert: formatParams(3 * cfg.hiddenSize * expInterm),
+                          total: formatParams(nExperts * 3 * cfg.hiddenSize * expInterm),
+                          desc: `${nExperts} experts (Gate+Up+Down SwiGLU)` }},
+                    { name: `Add2_${idx}`, pos: [10, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                      data: { type: 'Residual Add (MoE)' }}
+                );
+                connections.push(
+                    { from: `RMSNorm2_${idx}`, to: `Router_${idx}`, label: 'x' },
+                    { from: `Router_${idx}`, to: `Experts_${idx}`, label: 'route' },
+                    { from: `Experts_${idx}`, to: `Add2_${idx}`, label: 'moe' }
+                );
+            } else {
+                // Mistral: Dense SwiGLU FFN
+                modules.push(
+                    { name: `Gate_${idx}`, pos: [-10, -8, -3], size: [5, 3, 3], color: colors.ffn,
+                      data: { 
+                          weight: `[H, I]`, 
+                          shape: `[${cfg.hiddenSize}, ${cfg.intermediateSize}]`, 
+                          params: formatParams(cfg.hiddenSize * cfg.intermediateSize),
+                          activation: 'SiLU',
+                          desc: 'Gate proj (SwiGLU)' }},
+                    { name: `Up_${idx}`, pos: [-10, -8, 3], size: [5, 3, 3], color: colors.ffn,
+                      data: { 
+                          weight: `[H, I]`, 
+                          shape: `[${cfg.hiddenSize}, ${cfg.intermediateSize}]`, 
+                          params: formatParams(cfg.hiddenSize * cfg.intermediateSize),
+                          desc: 'Up proj (SwiGLU)' }},
+                    { name: `Down_${idx}`, pos: [0, -8, 0], size: [5, 3, 3], color: colors.ffn,
+                      data: { 
+                          weight: `[I, H]`, 
+                          shape: `[${cfg.intermediateSize}, ${cfg.hiddenSize}]`, 
+                          params: formatParams(cfg.intermediateSize * cfg.hiddenSize),
+                          desc: 'Down proj (SwiGLU)' }},
+                    { name: `Add2_${idx}`, pos: [8, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                      data: { type: 'Residual Add' }}
+                );
+                connections.push(
+                    { from: `RMSNorm2_${idx}`, to: `Gate_${idx}`, label: 'x' },
+                    { from: `RMSNorm2_${idx}`, to: `Up_${idx}`, label: 'x' },
+                    { from: `Gate_${idx}`, to: `Down_${idx}`, label: 'g' },
+                    { from: `Up_${idx}`, to: `Down_${idx}`, label: 'h' },
+                    { from: `Down_${idx}`, to: `Add2_${idx}`, label: 'ffn' }
+                );
+            }
+            
+            return {
+                name: `Mistral_L${idx}${hasSWA ? '_SWA' : ''}${isMixtral ? '_MoE' : ''}`,
+                y,
+                type: isMixtral ? 'moe' : 'attention',
+                modules: modules,
+                connections: connections
+            };
+        }
+        
+        // ============================================
         // UI Functions
         // ============================================
         function updateStatsPanel(cfg) {
@@ -1950,6 +2118,11 @@
             if (cfg.isQwen35) { archBadge = 'Hybrid Attn'; archColor = '#06b6d4'; }
             else if (cfg.isDeepSeekV4) { archBadge = 'MLA + MoE'; archColor = '#f59e0b'; }
             else if (cfg.isMiMo) { archBadge = 'GQA + MoE'; archColor = '#f59e0b'; }
+            else if (cfg.isMixtral) { archBadge = 'SWA + MoE'; archColor = '#ec4899'; }
+            else if (cfg.isMistral) { archBadge = 'GQA + SWA'; archColor = '#ec4899'; }
+            else if (cfg.isGemma) { archBadge = 'Gemma'; archColor = '#84cc16'; }
+            else if (cfg.isPhi) { archBadge = 'Phi-3'; archColor = '#a855f7'; }
+            else if (cfg.isLlama) { archBadge = 'LLaMA GQA'; archColor = '#60a5fa'; }
             else if (cfg.isMoE) { archBadge = 'MoE'; archColor = '#f59e0b'; }
             
             // Count layer types for hybrid architectures
@@ -1992,6 +2165,12 @@
                 <div class="stat-card">
                     <div class="stat-value" style="color:#06b6d4;">${linearCount}<span style="font-size:12px;color:#94a3b8;">/${fullCount}</span></div>
                     <div class="stat-label">Linear/Full Attn</div>
+                </div>
+                ` : ''}
+                ${cfg.slidingWindow && cfg.slidingWindow > 0 ? `
+                <div class="stat-card" style="border-color:#ec489940;">
+                    <div class="stat-value" style="color:#ec4899;">${cfg.slidingWindow >= 1000 ? (cfg.slidingWindow/1000).toFixed(1) + 'K' : cfg.slidingWindow}</div>
+                    <div class="stat-label">SWA Window</div>
                 </div>
                 ` : ''}
                 ${cfg.isMultimodal ? `
@@ -2685,22 +2864,57 @@
             const totalSteps = layers.length;
             
             if (inferenceStep >= totalSteps) {
-                // Inference complete
+                // Inference complete - show summary
+                const statusDiv = document.getElementById('inferenceStatus');
+                if (statusDiv) {
+                    statusDiv.innerHTML = `✅ <span style="color:#4ade80;">Inference complete!</span> Generated 1 token. Restarting...`;
+                }
                 inferenceStep = 0;
                 setTimeout(() => {
                     if (isInferenceRunning) runInferenceStep();
-                }, 1000);
+                }, 2000);
                 return;
             }
             
             const currentLayer = layers[inferenceStep];
             
-            // Highlight current layer modules
+            // Determine highlight color based on layer type
+            let highlightColor = 0x00ff88;  // green default
+            let stageIcon = '⚙️';
+            let stageName = 'Processing';
+            
+            if (currentLayer.type === 'embedding' || currentLayer.name === 'INPUT') {
+                highlightColor = 0x3b82f6;  // blue - input embedding
+                stageIcon = '📝';
+                stageName = 'Token Embedding';
+            } else if (currentLayer.type === 'attention' || currentLayer.name.includes('TEXT_ENCODER')) {
+                highlightColor = 0x06b6d4;  // cyan - attention
+                stageIcon = '👁️';
+                stageName = 'Attention';
+            } else if (currentLayer.type === 'moe' || currentLayer.name.includes('MOE')) {
+                highlightColor = 0xf59e0b;  // amber - MoE
+                stageIcon = '🔀';
+                stageName = 'MoE Routing';
+            } else if (currentLayer.type === 'linear_attention') {
+                highlightColor = 0x06b6d4;  // cyan
+                stageIcon = '⚡';
+                stageName = 'Linear Attention';
+            } else if (currentLayer.type === 'full_attention') {
+                highlightColor = 0x8b5cf6;  // purple
+                stageIcon = '🔍';
+                stageName = 'Full Attention';
+            } else if (currentLayer.type === 'output' || currentLayer.name === 'OUTPUT') {
+                highlightColor = 0xef4444;  // red - output
+                stageIcon = '🎯';
+                stageName = 'LM Head';
+            }
+            
+            // Highlight current layer modules with staggered animation
             if (currentLayer.modules) {
                 currentLayer.modules.forEach((mod, idx) => {
                     setTimeout(() => {
                         if (!isInferenceRunning) return;
-                        highlightModule(mod.name, 0x00ff88);
+                        highlightModule(mod.name, highlightColor);
                         
                         // Show tooltip with module info
                         showInferenceTooltip(mod);
@@ -2708,18 +2922,27 @@
                 });
             }
             
-            // Update status
+            // Update status with rich info
             const statusDiv = document.getElementById('inferenceStatus');
             if (statusDiv) {
-                statusDiv.textContent = `Step ${inferenceStep + 1}/${totalSteps}: ${currentLayer.name}`;
+                const progress = ((inferenceStep + 1) / totalSteps * 100).toFixed(1);
+                const modCount = currentLayer.modules ? currentLayer.modules.length : 0;
+                statusDiv.innerHTML = `
+                    ${stageIcon} <b>${stageName}</b> &nbsp;|&nbsp; 
+                    Layer ${inferenceStep + 1}/${totalSteps} 
+                    <span style="color:#94a3b8;">(${progress}%)</span>
+                    &nbsp;|&nbsp; <span style="color:#60a5fa;">${currentLayer.name}</span>
+                    &nbsp;|&nbsp; <span style="color:#fbbf24;">${modCount} modules</span>
+                `;
             }
             
             inferenceStep++;
             
-            // Schedule next step
+            // Schedule next step (slower for attention/moe layers to show detail)
+            const stepDelay = (currentLayer.type === 'attention' || currentLayer.type === 'moe') ? 2000 : 1200;
             inferenceInterval = setTimeout(() => {
                 if (isInferenceRunning) runInferenceStep();
-            }, 1500);
+            }, stepDelay);
         }
         
         function showInferenceTooltip(module) {
