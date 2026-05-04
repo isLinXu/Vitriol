@@ -448,7 +448,9 @@
             const qkRopeHeadDim = config.qk_rope_head_dim || textConfig.qk_rope_head_dim || 0;
             const isDeepSeekV4 = config.model_type === 'deepseek_v4' || textConfig.model_type === 'deepseek_v4';
             const isMiMo = config.model_type === 'mimo_v2' || textConfig.model_type === 'mimo_v2';
+            const isQwen35 = config.model_type === 'qwen3_5' || textConfig.model_type === 'qwen3_5' || /Qwen3[\.\-]/.test(name);
             const tieWordEmbeddings = config.tie_word_embeddings || textConfig.tie_word_embeddings || false;
+            const isMultimodal = config.language_model_only === false || /VL|Omni|Vision|Janus/.test(name);
             
             // Calculate total parameters
             let totalParams = null;
@@ -539,6 +541,11 @@
                 firstKDense,
                 nSharedExperts,
                 isDeepSeekV4,
+                isMiMo,
+                isQwen35,
+                textLayerTypes,
+                textConfig: textConfig,
+                visionConfig: visionConfig || config.vision_config || null,
                 raw: config
             };
         }
@@ -549,47 +556,95 @@
             
             // Detect model type from name
             const isMoE = /Qwen3\.5|Ling|Ring|DeepSeek|MoE/.test(name);
+            const isQwen35 = /Qwen3[\.\-]/.test(name);
             const isMultimodal = /VL|Omni|Vision|Janus/.test(name);
+            
+            // Qwen3.5/3.6 uses hybrid attention (linear + full alternating)
+            let textLayerTypes = [];
+            if (isQwen35) {
+                // Pattern: 3 linear_attention, 1 full_attention, repeat
+                const numLayers = 2;
+                for (let i = 0; i < numLayers; i++) {
+                    textLayerTypes.push(i % 4 === 3 ? 'full_attention' : 'linear_attention');
+                }
+            }
             
             return {
                 name: name,
                 vocabSize: 248320,
-                hiddenSize: 256,
+                hiddenSize: isQwen35 ? 5120 : 256,
                 numLayers: 2,
-                numHeads: 16,
-                numKvHeads: 16,
-                headDim: 16,
-                intermediateSize: 1024,
+                numHeads: isQwen35 ? 24 : 16,
+                numKvHeads: isQwen35 ? 4 : 16,
+                headDim: isQwen35 ? 256 : 16,
+                intermediateSize: isQwen35 ? 17408 : 1024,
                 numExperts: isMoE ? 8 : 0,
                 expertsPerTok: 2,
                 expertSize: 64,
                 isMoE,
+                isQwen35,
                 isMultimodal,
-                visionLayers: 27,
+                visionLayers: isMultimodal ? 27 : 0,
+                textLayers: 2,
+                textLayerTypes: textLayerTypes,
                 layerTypes: Array(2).fill(isMoE ? 'moe' : 'dense'),
-                totalParams: isMoE ? 397000000000 : 7000000000,
+                totalParams: isQwen35 ? 27000000000 : (isMoE ? 397000000000 : 7000000000),
+                textConfig: isQwen35 ? {
+                    num_attention_heads: 24,
+                    num_key_value_heads: 4,
+                    head_dim: 256,
+                    intermediate_size: 17408,
+                    layer_types: textLayerTypes
+                } : {},
+                visionConfig: isMultimodal ? {
+                    depth: 27,
+                    hidden_size: 1152,
+                    patch_size: 16
+                } : null,
                 raw: {}
             };
         }
 
         function getDemoConfig() {
+            // Use Qwen3.6-27B as demo (advanced hybrid attention + multimodal)
+            const textLayerTypes = [];
+            for (let i = 0; i < 2; i++) {
+                textLayerTypes.push(i % 4 === 3 ? 'full_attention' : 'linear_attention');
+            }
             return {
-                name: 'Qwen3.5-397B-A17B',
+                name: 'Qwen3.6-27B',
                 vocabSize: 248320,
-                hiddenSize: 256,
+                hiddenSize: 5120,
                 numLayers: 2,
-                numHeads: 2,
-                numKvHeads: 2,
+                numHeads: 24,
+                numKvHeads: 4,
                 headDim: 256,
-                intermediateSize: 512,
-                numExperts: 8,
-                expertsPerTok: 2,
-                expertSize: 64,
-                isMoE: true,
+                intermediateSize: 17408,
+                numExperts: 0,
+                expertsPerTok: 0,
+                expertSize: 0,
+                isMoE: false,
+                isQwen35: true,
                 isMultimodal: true,
                 visionLayers: 27,
-                layerTypes: ['moe', 'moe'],
-                totalParams: 397000000000,
+                textLayers: 2,
+                textLayerTypes: textLayerTypes,
+                layerTypes: ['linear_attention', 'full_attention'],
+                totalParams: 27000000000,
+                textConfig: {
+                    num_attention_heads: 24,
+                    num_key_value_heads: 4,
+                    head_dim: 256,
+                    intermediate_size: 17408,
+                    layer_types: textLayerTypes,
+                    linear_num_key_heads: 16,
+                    linear_num_value_heads: 48
+                },
+                visionConfig: {
+                    depth: 27,
+                    hidden_size: 1152,
+                    patch_size: 16
+                },
                 raw: {}
             };
         }
@@ -923,7 +978,12 @@
                 let lType = cfg.textLayerTypes[i] || 'dense';
                 let layerName = `TEXT_ENCODER_L${i}`;
                 
-                if (cfg.isDeepSeekV4) {
+                if (cfg.isQwen35) {
+                    // Qwen3.5/3.6 uses hybrid attention (linear + full alternating)
+                    let layer = buildQwen35Layer(i, layerY, cfg, lType);
+                    layer.name = layerName;
+                    modelLayers.push(layer);
+                } else if (cfg.isDeepSeekV4) {
                     // DeepSeek V4 uses special layer types
                     let layer = buildDeepSeekV4Layer(i, layerY, cfg, lType);
                     layer.name = layerName;
@@ -949,7 +1009,36 @@
                 currentY -= layerSpacing;
             }
 
-            if (cfg.isMultimodal) {
+            // VISION ENCODER (for multimodal Qwen3.5/3.6)
+            if (cfg.isQwen35 && cfg.isMultimodal) {
+                modelLayers.push({
+                    name: 'VISION_ENCODER', y: currentY, type: 'attention',
+                    modules: [
+                        { name: 'ImageEmbed', pos: [-12, 0, 0], size: [10, 4, 5], color: colors.embedding,
+                          data: { 
+                              patch_size: cfg.visionConfig?.patch_size || 16, 
+                              in_channels: 3,
+                              hidden: cfg.visionConfig?.hidden_size || 1152,
+                              desc: 'Image patch embedding' }},
+                        { name: `VisionTower_${cfg.visionLayers}L`, pos: [0, 0, 0], size: [14, 6, 6], color: colors.attention,
+                          data: { 
+                              layers: cfg.visionLayers, 
+                              heads: cfg.visionConfig?.num_heads || 16,
+                              hidden: cfg.visionConfig?.hidden_size || 1152,
+                              desc: 'Vision Transformer (Qwen3.5-VL)' }},
+                        { name: 'VisionProj', pos: [14, 0, 0], size: [8, 4, 5], color: colors.embedding,
+                          data: { 
+                              shape: `[${cfg.visionConfig?.out_hidden_size || cfg.hiddenSize}, ${cfg.hiddenSize}]`,
+                              desc: 'Vision-language projection (MLP)' }}
+                    ],
+                    connections: [
+                        { from: 'ImageEmbed', to: `VisionTower_${cfg.visionLayers}L`, label: 'patches' },
+                        { from: `VisionTower_${cfg.visionLayers}L`, to: 'VisionProj', label: 'features' }
+                    ]
+                });
+                currentY -= layerSpacing;
+            } else if (cfg.isMultimodal) {
+                // Generic multimodal vision encoder
                 modelLayers.push({
                     name: 'VISION_ENCODER', y: currentY, type: 'attention',
                     modules: [
@@ -1627,6 +1716,194 @@
             };
         }
 
+        // ============================================
+        // Qwen3.5/3.6 Layer with Hybrid Attention
+        // ============================================
+        function buildQwen35Layer(idx, y, cfg, layerType) {
+            // Qwen3.5/3.6 uses hybrid attention: linear_attention + full_attention alternating
+            // Also supports multimodal (vision encoder)
+            const isLinearAttn = layerType === 'linear_attention';
+            const isFullAttn = layerType === 'full_attention' || !isLinearAttn;
+            
+            // GQA dimensions
+            const qHeads = cfg.numHeads;  // 24
+            const kvHeads = cfg.numKvHeads;  // 4
+            const headDim = cfg.headDim;  // 256
+            
+            // Linear attention special dims
+            const linearKHeads = cfg.textConfig?.linear_num_key_heads || 16;
+            const linearVHeads = cfg.textConfig?.linear_num_value_heads || 48;
+            const linearKHeadDim = cfg.textConfig?.linear_key_head_dim || 128;
+            const linearVHeadDim = cfg.textConfig?.linear_value_head_dim || 128;
+            
+            let modules = [];
+            let connections = [];
+            
+            // Pre-attention normalization
+            modules.push(
+                { name: `RMSNorm1_${idx}`, pos: [-18, 8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-6', desc: 'Pre-attention RMSNorm' }}
+            );
+            
+            if (isLinearAttn) {
+                // Linear Attention (efficient, O(n) complexity)
+                modules.push(
+                    { name: `Q_Lin_${idx}`, pos: [-12, 10, -4], size: [4, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, LKH*LKD]`, 
+                          shape: `[${cfg.hiddenSize}, ${linearKHeads * linearKHeadDim}]`, 
+                          params: formatParams(cfg.hiddenSize * linearKHeads * linearKHeadDim),
+                          heads: linearKHeads,
+                          head_dim: linearKHeadDim,
+                          desc: 'Q projection (Linear Attn)' }},
+                    { name: `K_Lin_${idx}`, pos: [-12, 10, 0], size: [4, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, LKH*LKD]`, 
+                          shape: `[${cfg.hiddenSize}, ${linearKHeads * linearKHeadDim}]`, 
+                          params: formatParams(cfg.hiddenSize * linearKHeads * linearKHeadDim),
+                          desc: 'K projection (Linear Attn)' }},
+                    { name: `V_Lin_${idx}`, pos: [-12, 10, 4], size: [4, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, LVH*LVD]`, 
+                          shape: `[${cfg.hiddenSize}, ${linearVHeads * linearVHeadDim}]`, 
+                          params: formatParams(cfg.hiddenSize * linearVHeads * linearVHeadDim),
+                          heads: linearVHeads,
+                          head_dim: linearVHeadDim,
+                          desc: 'V projection (Linear Attn)' }},
+                    { name: `LinAttn_${idx}`, pos: [-4, 10, 0], size: [7, 4, 5], color: 0x06b6d4,
+                      data: { 
+                          type: 'Linear Attention',
+                          complexity: 'O(n)',
+                          k_heads: linearKHeads,
+                          v_heads: linearVHeads,
+                          desc: 'Linear attention with learned projections' }}
+                );
+                connections.push(
+                    { from: `RMSNorm1_${idx}`, to: `Q_Lin_${idx}`, label: 'x' },
+                    { from: `RMSNorm1_${idx}`, to: `K_Lin_${idx}`, label: 'x' },
+                    { from: `RMSNorm1_${idx}`, to: `V_Lin_${idx}`, label: 'x' },
+                    { from: `Q_Lin_${idx}`, to: `LinAttn_${idx}`, label: 'q' },
+                    { from: `K_Lin_${idx}`, to: `LinAttn_${idx}`, label: 'k' },
+                    { from: `V_Lin_${idx}`, to: `LinAttn_${idx}`, label: 'v' }
+                );
+            } else {
+                // Full Attention (standard GQA)
+                modules.push(
+                    { name: `Q_Proj_${idx}`, pos: [-12, 10, -4], size: [5, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, QH*D]`, 
+                          shape: `[${cfg.hiddenSize}, ${qHeads * headDim}]`, 
+                          params: formatParams(cfg.hiddenSize * qHeads * headDim),
+                          heads: qHeads,
+                          desc: 'Q projection (GQA)' }},
+                    { name: `K_Proj_${idx}`, pos: [-12, 10, 0], size: [5, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, KVH*D]`, 
+                          shape: `[${cfg.hiddenSize}, ${kvHeads * headDim}]`, 
+                          params: formatParams(cfg.hiddenSize * kvHeads * headDim),
+                          kv_heads: kvHeads,
+                          desc: 'K projection (GQA)' }},
+                    { name: `V_Proj_${idx}`, pos: [-12, 10, 4], size: [5, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, KVH*D]`, 
+                          shape: `[${cfg.hiddenSize}, ${kvHeads * headDim}]`, 
+                          params: formatParams(cfg.hiddenSize * kvHeads * headDim),
+                          kv_heads: kvHeads,
+                          desc: 'V projection (GQA)' }},
+                    { name: `Attn_${idx}`, pos: [-2, 10, 0], size: [7, 4, 5], color: colors.attention,
+                      data: { 
+                          type: 'GQA',
+                          heads: qHeads,
+                          kv_heads: kvHeads,
+                          head_dim: headDim,
+                          desc: 'Grouped Query Attention' }}
+                );
+                connections.push(
+                    { from: `RMSNorm1_${idx}`, to: `Q_Proj_${idx}`, label: 'x' },
+                    { from: `RMSNorm1_${idx}`, to: `K_Proj_${idx}`, label: 'x' },
+                    { from: `RMSNorm1_${idx}`, to: `V_Proj_${idx}`, label: 'x' },
+                    { from: `Q_Proj_${idx}`, to: `Attn_${idx}`, label: 'q' },
+                    { from: `K_Proj_${idx}`, to: `Attn_${idx}`, label: 'k' },
+                    { from: `V_Proj_${idx}`, to: `Attn_${idx}`, label: 'v' }
+                );
+            }
+            
+            // Output projection
+            modules.push(
+                { name: `O_Proj_${idx}`, pos: [8, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[QH*D, H]`, 
+                      shape: `[${qHeads * headDim}, ${cfg.hiddenSize}]`, 
+                      params: formatParams(qHeads * headDim * cfg.hiddenSize),
+                      desc: 'Output projection' }}
+            );
+            connections.push(
+                { from: isLinearAttn ? `LinAttn_${idx}` : `Attn_${idx}`, to: `O_Proj_${idx}`, label: 'attn' }
+            );
+            
+            // Residual add 1
+            modules.push(
+                { name: `Add1_${idx}`, pos: [14, 8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }}
+            );
+            connections.push(
+                { from: `O_Proj_${idx}`, to: `Add1_${idx}`, label: 'out' }
+            );
+            
+            // Pre-FFN normalization
+            modules.push(
+                { name: `RMSNorm2_${idx}`, pos: [-10, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-6', desc: 'Pre-FFN RMSNorm' }}
+            );
+            
+            // FFN (SwiGLU for Qwen3.5/3.6)
+            const ffnInterm = cfg.intermediateSize;  // 17408
+            modules.push(
+                { name: `Gate_${idx}`, pos: [-4, -8, -3], size: [5, 3, 3], color: colors.ffn,
+                  data: { 
+                      weight: `[H, I]`, 
+                      shape: `[${cfg.hiddenSize}, ${ffnInterm}]`, 
+                      params: formatParams(cfg.hiddenSize * ffnInterm),
+                      activation: 'SiLU',
+                      desc: 'Gate proj (SwiGLU)' }},
+                { name: `Up_${idx}`, pos: [-4, -8, 3], size: [5, 3, 3], color: colors.ffn,
+                  data: { 
+                      weight: `[H, I]`, 
+                      shape: `[${cfg.hiddenSize}, ${ffnInterm}]`, 
+                      params: formatParams(cfg.hiddenSize * ffnInterm),
+                      desc: 'Up proj (SwiGLU)' }},
+                { name: `Down_${idx}`, pos: [6, -8, 0], size: [5, 3, 3], color: colors.ffn,
+                  data: { 
+                      weight: `[I, H]`, 
+                      shape: `[${ffnInterm}, ${cfg.hiddenSize}]`, 
+                      params: formatParams(ffnInterm * cfg.hiddenSize),
+                      desc: 'Down proj (SwiGLU)' }}
+            );
+            connections.push(
+                { from: `RMSNorm2_${idx}`, to: `Gate_${idx}`, label: 'x' },
+                { from: `RMSNorm2_${idx}`, to: `Up_${idx}`, label: 'x' },
+                { from: `Gate_${idx}`, to: `Down_${idx}`, label: 'g' },
+                { from: `Up_${idx}`, to: `Down_${idx}`, label: 'h' }
+            );
+            
+            // Residual add 2
+            modules.push(
+                { name: `Add2_${idx}`, pos: [14, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }}
+            );
+            connections.push(
+                { from: `Down_${idx}`, to: `Add2_${idx}`, label: 'ffn' }
+            );
+            
+            return {
+                name: `Qwen35_L${idx}_${layerType}`,
+                y,
+                type: isLinearAttn ? 'linear_attention' : 'full_attention',
+                modules: modules,
+                connections: connections
+            };
+        }
+        
         // ============================================
         // UI Functions
         // ============================================
