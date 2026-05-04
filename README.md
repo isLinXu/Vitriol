@@ -228,7 +228,7 @@ Vitriol goes beyond weight generation — it implements a full **quantized infer
 Block-wise min-max quantization of Key/Value cache during inference, directly monkey-patching `F.scaled_dot_product_attention`:
 
 > Note: the `KVRuntimePatcher` path is an **approximate runtime / decode-speed** path that still returns floating-point tensors. It does **not** turn the KV cache into a bit-packed storage format, so device memory usage will not necessarily scale linearly with the "bits/value" table below.
-> For packed KV storage plus metadata (`q_data`, scales, mins, residual sketch metadata), use the `KVCacheStore` / `CacheHookPatcher` path described later under the policy system and Qwen3.5 integration.
+> For packed KV storage plus metadata (`q_data`, scales, mins, residual sketch metadata), use the `KVCacheStore` / `CacheHookPatcher` path described later under the policy system.
 
 | Format | Effective Bits | Bytes/Value | Compression vs BF16 |
 |--------|:---:|:---:|:---:|
@@ -378,17 +378,6 @@ policy = KVPolicyPreset.balanced_default()
 # )
 ```
 
-### Qwen3.5 Integration
-
-Dedicated patches for Qwen3.5's KV store system, including per-layer V quantization control:
-
-```python
-# patches/qwen35_kv_store_patches.py
-# patches/qwen35_attention_patches.py
-# Supports v_quantize_only_first_n_full_attention_layers for fine-grained control
-```
-
-### Benchmarking
 
 The `bench/` module provides automated KV cache compression benchmarks with prompt suites:
 

@@ -227,7 +227,7 @@ Vitriol 不仅仅生成权重——它实现了完整的**量化推理流水线*
 推理时对注意力计算中的 Key/Value 做 TurboQuant 风格的近似处理，直接 Monkey-patch `F.scaled_dot_product_attention`：
 
 > 注意：`KVRuntimePatcher` 路径属于 **“近似推理 / 解码加速”**，它返回的仍是浮点张量，因此**不会把 KV cache 改造成 bit-packed 存储格式**，显存占用通常不会按 “bits/value” 线性下降。  
-> 若你需要“KV 存储压缩”（packed KV + scales/mins 等元数据），请使用 `KVCacheStore` / `CacheHookPatcher` 那条 KVStore 路径（见下文“KV Cache 策略系统 / Qwen3.5 集成”）。
+> 若你需要"KV 存储压缩"（packed KV + scales/mins 等元数据），请使用 `KVCacheStore` / `CacheHookPatcher` 那条 KVStore 路径（见下文"KV Cache 策略系统"）。
 
 | 格式 | 有效位数 | 字节/值 | 相对 BF16 压缩比 |
 |------|:---:|:---:|:---:|
@@ -376,17 +376,6 @@ policy = KVPolicyPreset.balanced_default()
 # )
 ```
 
-### Qwen3.5 集成
-
-为 Qwen3.5 的 KV Store 系统提供专用补丁，包括逐层 V 量化控制：
-
-```python
-# patches/qwen35_kv_store_patches.py
-# patches/qwen35_attention_patches.py
-# 支持 v_quantize_only_first_n_full_attention_layers 实现精细控制
-```
-
-### 基准测试
 
 `bench/` 模块提供自动化的 KV Cache 压缩基准测试，附带提示词套件：
 
