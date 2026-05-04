@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vitriol · LLM 架构横向对比</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: #050508;
+            font-family: 'SF Pro Display', -apple-system, sans-serif;
+            color: #e2e8f0;
+        }
+        .glass {
+            background: rgba(15, 18, 30, 0.85);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-family: monospace;
+            font-weight: 600;
+        }
+        table { border-collapse: collapse; width: 100%; }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            font-size: 13px;
+        }
+        th {
+            background: rgba(255,255,255,0.04);
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+        tr:hover td { background: rgba(255,255,255,0.03); }
+        .feat-yes { color: #4ade80; }
+        .feat-no { color: #64748b; }
+        .feat-partial { color: #fbbf24; }
+        .view-btn {
+            padding: 6px 12px;
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 6px;
+            font-size: 11px;
+            color: #60a5fa;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .view-btn:hover {
+            background: rgba(59, 130, 246, 0.3);
+            transform: translateY(-1px);
+        }
+        .hero-card {
+            background: linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(139,92,246,0.08) 100%);
+            border: 1px solid rgba(59,130,246,0.2);
+        }
+    </style>
+</head>
+<body class="min-h-screen p-6">
+
+<!-- Header -->
+<div class="max-w-7xl mx-auto mb-6">
+    <div class="flex items-center justify-between mb-2">
+        <div>
+            <h1 class="text-3xl font-bold text-white mb-1">🧬 LLM 架构横向对比</h1>
+            <p class="text-slate-400 text-sm">Vitriol 3D Viewer 已精确支持的主流大模型架构特性对比</p>
+        </div>
+        <div class="flex gap-2">
+            <a href="index.html" class="view-btn">← 返回首页</a>
+            <a href="viewer.html" class="view-btn">🎨 进入 3D Viewer</a>
+        </div>
+    </div>
+</div>
+
+<!-- Architecture Cards -->
+<div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="glass hero-card p-5">
+        <div class="text-xs text-blue-400 uppercase mb-1">旗舰模型</div>
+        <h3 class="text-xl font-bold text-white mb-2">🐋 DeepSeek-V4-Pro</h3>
+        <div class="text-sm text-slate-300 mb-3">862B total params / 37B active</div>
+        <div class="flex flex-wrap gap-1 mb-3">
+            <span class="badge bg-amber-500/20 text-amber-400">MLA</span>
+            <span class="badge bg-amber-500/20 text-amber-400">MoE</span>
+            <span class="badge bg-purple-500/20 text-purple-400">Hash Attn</span>
+        </div>
+        <a href="viewer.html#?hf=deepseek-ai/DeepSeek-V4-Pro" class="view-btn block text-center">🎨 查看 3D 可视化</a>
+    </div>
+    
+    <div class="glass hero-card p-5" style="background: linear-gradient(135deg, rgba(6,182,212,0.1) 0%, rgba(139,92,246,0.08) 100%); border-color: rgba(6,182,212,0.3);">
+        <div class="text-xs text-cyan-400 uppercase mb-1">多模态 + 混合注意力</div>
+        <h3 class="text-xl font-bold text-white mb-2">🌸 Qwen3.6-27B</h3>
+        <div class="text-sm text-slate-300 mb-3">27B params / 256K context</div>
+        <div class="flex flex-wrap gap-1 mb-3">
+            <span class="badge bg-cyan-500/20 text-cyan-400">Linear+Full Attn</span>
+            <span class="badge bg-purple-500/20 text-purple-400">Vision</span>
+            <span class="badge bg-blue-500/20 text-blue-400">M-RoPE</span>
+        </div>
+        <a href="viewer.html#?hf=Qwen/Qwen3.6-27B" class="view-btn block text-center">🎨 查看 3D 可视化</a>
+    </div>
+    
+    <div class="glass hero-card p-5" style="background: linear-gradient(135deg, rgba(236,72,153,0.1) 0%, rgba(245,158,11,0.08) 100%); border-color: rgba(236,72,153,0.3);">
+        <div class="text-xs text-pink-400 uppercase mb-1">SWA + MoE</div>
+        <h3 class="text-xl font-bold text-white mb-2">🌬️ Mixtral 8x7B</h3>
+        <div class="text-sm text-slate-300 mb-3">47B total / 13B active (top-2 of 8)</div>
+        <div class="flex flex-wrap gap-1 mb-3">
+            <span class="badge bg-pink-500/20 text-pink-400">SWA</span>
+            <span class="badge bg-amber-500/20 text-amber-400">MoE</span>
+            <span class="badge bg-cyan-500/20 text-cyan-400">GQA</span>
+        </div>
+        <a href="viewer.html#?hf=mistralai/Mixtral-8x7B-v0.1" class="view-btn block text-center">🎨 查看 3D 可视化</a>
+    </div>
+</div>
+
+<!-- Feature Comparison Table -->
+<div class="max-w-7xl mx-auto glass p-6 mb-6">
+    <h2 class="text-xl font-bold text-white mb-4">📊 架构特性对比矩阵</h2>
+    <div class="overflow-x-auto">
+    <table>
+        <thead>
+            <tr>
+                <th>模型</th>
+                <th>架构类型</th>
+                <th>GQA</th>
+                <th>SWA</th>
+                <th>MoE</th>
+                <th>多模态</th>
+                <th>特殊特性</th>
+                <th>3D Viewer</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><b class="text-white">LLaMA 3.1</b><br><span class="text-xs text-slate-500">Meta</span></td>
+                <td><span class="badge bg-blue-500/20 text-blue-400">LLaMA GQA</span></td>
+                <td class="feat-yes">✓ 32Q/8KV</td>
+                <td class="feat-no">—</td>
+                <td class="feat-no">—</td>
+                <td class="feat-no">—</td>
+                <td>SwiGLU, RoPE</td>
+                <td><a href="viewer.html#?hf=meta-llama/Llama-3.1-8B" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">Mistral 7B</b><br><span class="text-xs text-slate-500">Mistral AI</span></td>
+                <td><span class="badge bg-pink-500/20 text-pink-400">GQA + SWA</span></td>
+                <td class="feat-yes">✓ 32Q/8KV</td>
+                <td class="feat-yes">✓ 4096 tokens</td>
+                <td class="feat-no">—</td>
+                <td class="feat-no">—</td>
+                <td>Sliding Window</td>
+                <td><a href="viewer.html#?hf=mistralai/Mistral-7B-v0.3" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">Mixtral 8x7B</b><br><span class="text-xs text-slate-500">Mistral AI</span></td>
+                <td><span class="badge bg-pink-500/20 text-pink-400">SWA + MoE</span></td>
+                <td class="feat-yes">✓ 32Q/8KV</td>
+                <td class="feat-yes">✓</td>
+                <td class="feat-yes">✓ 8 experts / top-2</td>
+                <td class="feat-no">—</td>
+                <td>Sparse MoE</td>
+                <td><a href="viewer.html#?hf=mistralai/Mixtral-8x7B-v0.1" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">Qwen 2.5 7B</b><br><span class="text-xs text-slate-500">Alibaba</span></td>
+                <td><span class="badge bg-blue-500/20 text-blue-400">LLaMA GQA</span></td>
+                <td class="feat-yes">✓ 28Q/4KV</td>
+                <td class="feat-no">—</td>
+                <td class="feat-no">—</td>
+                <td class="feat-no">—</td>
+                <td>RoPE extended</td>
+                <td><a href="viewer.html#?hf=Qwen/Qwen2.5-7B" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">Qwen 3.6-27B</b><br><span class="text-xs text-slate-500">Alibaba</span></td>
+                <td><span class="badge bg-cyan-500/20 text-cyan-400">Hybrid Attn</span></td>
+                <td class="feat-yes">✓ 24Q/4KV</td>
+                <td class="feat-partial">~ Linear Attn</td>
+                <td class="feat-no">—</td>
+                <td class="feat-yes">✓ Vision 27L</td>
+                <td>Linear+Full, M-RoPE</td>
+                <td><a href="viewer.html#?hf=Qwen/Qwen3.6-27B" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">Gemma-2 9B</b><br><span class="text-xs text-slate-500">Google</span></td>
+                <td><span class="badge" style="background: rgba(132,204,22,0.2); color: #84cc16;">Gemma</span></td>
+                <td class="feat-yes">✓ 16Q/8KV</td>
+                <td class="feat-yes">✓ 交替 SWA/Global</td>
+                <td class="feat-no">—</td>
+                <td class="feat-no">—</td>
+                <td>GeGLU, Pre+Post Norm, Softcap</td>
+                <td><a href="viewer.html#?hf=google/gemma-2-9b" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">Phi-3 Mini</b><br><span class="text-xs text-slate-500">Microsoft</span></td>
+                <td><span class="badge bg-purple-500/20 text-purple-400">Phi-3</span></td>
+                <td class="feat-yes">✓ MQA-like</td>
+                <td class="feat-partial">~ 2K/4K</td>
+                <td class="feat-no">—</td>
+                <td class="feat-no">—</td>
+                <td>Fused QKV</td>
+                <td><a href="viewer.html#?hf=microsoft/Phi-3-mini-4k-instruct" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">DeepSeek-V4-Pro</b><br><span class="text-xs text-slate-500">DeepSeek</span></td>
+                <td><span class="badge bg-amber-500/20 text-amber-400">MLA + MoE</span></td>
+                <td class="feat-partial">~ MLA变体</td>
+                <td class="feat-no">—</td>
+                <td class="feat-yes">✓ 256 experts</td>
+                <td class="feat-no">—</td>
+                <td>MLA, Q-LoRA, Hash Attn</td>
+                <td><a href="viewer.html#?hf=deepseek-ai/DeepSeek-V4-Pro" class="view-btn">查看</a></td>
+            </tr>
+            <tr>
+                <td><b class="text-white">MiMo V2.5-Pro</b><br><span class="text-xs text-slate-500">Xiaomi</span></td>
+                <td><span class="badge bg-amber-500/20 text-amber-400">GQA + MoE</span></td>
+                <td class="feat-yes">✓</td>
+                <td class="feat-no">—</td>
+                <td class="feat-yes">✓ 384 / top-8</td>
+                <td class="feat-no">—</td>
+                <td>Fine-grained MoE</td>
+                <td><a href="viewer.html#?hf=XiaomiMiMo/MiMo-V2.5-Pro" class="view-btn">查看</a></td>
+            </tr>
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<!-- Feature Legend -->
+<div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="glass p-5">
+        <h3 class="text-lg font-bold text-white mb-3">📚 架构术语速查</h3>
+        <div class="space-y-2 text-sm">
+            <div><b class="text-cyan-400">GQA</b> <span class="text-slate-400">Grouped Query Attention</span> — 多个 Q 头共享 K/V 头，大幅减少 KV cache</div>
+            <div><b class="text-pink-400">SWA</b> <span class="text-slate-400">Sliding Window Attention</span> — 每 token 只关注最近 W 个 tokens，O(n·W)</div>
+            <div><b class="text-amber-400">MoE</b> <span class="text-slate-400">Mixture of Experts</span> — 每 token 仅激活 top-K 个专家，稀疏计算</div>
+            <div><b class="text-purple-400">MLA</b> <span class="text-slate-400">Multi-head Latent Attention</span> — DeepSeek 的低秩 KV 压缩</div>
+            <div><b class="text-green-400">SwiGLU/GeGLU</b> <span class="text-slate-400">Gated Linear Units</span> — FFN 中的门控激活</div>
+            <div><b class="text-blue-400">RoPE / M-RoPE</b> <span class="text-slate-400">Rotary Position Encoding</span> — 旋转位置编码（M 支持多模态）</div>
+        </div>
+    </div>
+    
+    <div class="glass p-5">
+        <h3 class="text-lg font-bold text-white mb-3">🎯 3D Viewer 核心功能</h3>
+        <div class="space-y-2 text-sm">
+            <div>✅ 从 HuggingFace API 实时拉取精确参数数量</div>
+            <div>✅ 按模型类型精准渲染不同架构（MLA / MoE / SWA / Linear Attn）</div>
+            <div>✅ 推理演示动画（阶段图标 + 颜色编码 + KV Cache）</div>
+            <div>✅ 9 种架构徽章自动识别（LLaMA/Mistral/Mixtral/Qwen3.5/Gemma/Phi/DeepSeek/MiMo）</div>
+            <div>✅ 模型预设快速切换（14+ 常用模型）</div>
+            <div>✅ 侧边栏导航 + 层级折叠</div>
+            <div>✅ 一键导出 PNG / HTML</div>
+        </div>
+    </div>
+</div>
+
+<!-- Footer -->
+<div class="max-w-7xl mx-auto text-center text-slate-500 text-xs pb-4">
+    <div>Vitriol · LLM Quantization & NAS Framework · 
+    <a href="https://github.com/isLinXu/Vitriol" class="text-blue-400 hover:underline">GitHub</a></div>
+</div>
+
+</body>
+</html>

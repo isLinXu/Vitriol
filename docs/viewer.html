@@ -214,7 +214,10 @@
     
     <!-- Model Preset Selector -->
     <div class="fixed top-4 right-4 glass-panel p-2 z-20" id="modelPresetPanel" style="max-width: 380px;">
-        <div class="text-xs text-gray-400 uppercase mb-2 px-2">🚀 Quick Load Model</div>
+        <div class="text-xs text-gray-400 uppercase mb-2 px-2 flex justify-between items-center">
+            <span>🚀 Quick Load Model</span>
+            <a href="arch-compare.html" class="text-[10px] text-blue-400 hover:text-blue-300" title="Architecture Comparison">📊 Compare</a>
+        </div>
         <select id="modelPresetSelect" onchange="loadModelPreset(this.value)" 
                 class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 mb-2">
             <option value="">-- Select a model to visualize --</option>
@@ -966,6 +969,9 @@
         // Build Model (Enhanced with detailed info)
         // ============================================
         function buildModel(cfg) {
+            // Store config globally for KV cache/MoE computation in inference demo
+            window._currentCfg = cfg;
+            
             updateStatsPanel(cfg);
             updateDetailPanel(cfg);
             
@@ -1032,6 +1038,11 @@
                 } else if (cfg.isMistral || cfg.isMixtral) {
                     // Mistral uses GQA + SWA, Mixtral adds MoE
                     let layer = buildMistralLayer(i, layerY, cfg);
+                    layer.name = layerName;
+                    modelLayers.push(layer);
+                } else if (cfg.isGemma) {
+                    // Gemma-2: alternating SWA/Global + Pre/Post norm + GeGLU + softcap
+                    let layer = buildGemma2Layer(i, layerY, cfg);
                     layer.name = layerName;
                     modelLayers.push(layer);
                 } else if (cfg.isDeepSeekV4) {
@@ -2107,6 +2118,131 @@
         }
         
         // ============================================
+        // Gemma-2 Layer: GQA + Alternating SWA/Full + Pre/Post Norm + GeGLU + Softcapping
+        // ============================================
+        function buildGemma2Layer(idx, y, cfg) {
+            // Gemma-2 distinctive features:
+            // - Alternating local (SWA) and global attention
+            // - Pre-norm AND post-norm around both Attn and FFN
+            // - GeGLU activation (instead of SwiGLU)
+            // - attn_logit_softcapping (50.0) to prevent outliers
+            const isLocalAttn = idx % 2 === 0;  // Alternating pattern (Gemma-2 default)
+            const swaWindow = cfg.slidingWindow || 4096;
+            const attnSoftcap = cfg.raw?.attn_logit_softcapping || 50.0;
+            
+            const modules = [
+                // Pre-attention RMSNorm (Gemma-2 uses (1 + weight) * x / rms)
+                { name: `PreAttnNorm_${idx}`, pos: [-18, 10, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { 
+                      type: 'Gemma RMSNorm',
+                      scaling: '(1 + weight)',
+                      eps: '1e-6', 
+                      desc: 'Pre-attention norm (Gemma variant)' }},
+                
+                // GQA Q/K/V
+                { name: `Q_${idx}`, pos: [-12, 11, -4], size: [4, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, QH*D]`, 
+                      params: formatParams(cfg.hiddenSize * cfg.numHeads * cfg.headDim),
+                      heads: cfg.numHeads,
+                      desc: 'Q projection' }},
+                { name: `K_${idx}`, pos: [-12, 11, 0], size: [4, 3, 3], color: colors.attention,
+                  data: { 
+                      params: formatParams(cfg.hiddenSize * cfg.numKvHeads * cfg.headDim),
+                      kv_heads: cfg.numKvHeads,
+                      desc: 'K projection' }},
+                { name: `V_${idx}`, pos: [-12, 11, 4], size: [4, 3, 3], color: colors.attention,
+                  data: { 
+                      params: formatParams(cfg.hiddenSize * cfg.numKvHeads * cfg.headDim),
+                      desc: 'V projection' }},
+                
+                // Attention with softcapping
+                { name: isLocalAttn ? `LocalAttn_${idx}` : `GlobalAttn_${idx}`, 
+                  pos: [-3, 11, 0], size: [7, 4, 5], 
+                  color: isLocalAttn ? 0xec4899 : 0x84cc16,
+                  data: { 
+                      type: isLocalAttn ? `Local SWA (window=${swaWindow})` : 'Global (full attention)',
+                      softcap: attnSoftcap,
+                      note: `Logit softcap: tanh(logits/${attnSoftcap}) * ${attnSoftcap}`,
+                      desc: isLocalAttn 
+                          ? `Sliding window attention (window=${swaWindow})` 
+                          : 'Global full attention with softcapping' }},
+                
+                // Output proj
+                { name: `O_${idx}`, pos: [5, 11, 0], size: [4, 3, 3], color: colors.attention,
+                  data: { 
+                      params: formatParams(cfg.numHeads * cfg.headDim * cfg.hiddenSize),
+                      desc: 'Output projection' }},
+                
+                // Post-attention norm (Gemma-2 unique!)
+                { name: `PostAttnNorm_${idx}`, pos: [11, 11, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { 
+                      type: 'Gemma Post-Norm',
+                      scaling: '(1 + weight)',
+                      desc: 'Post-attention norm (Gemma-2 stability)' }},
+                { name: `Add1_${idx}`, pos: [17, 10, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }},
+                
+                // Pre-FFN norm
+                { name: `PreFFNNorm_${idx}`, pos: [-18, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { 
+                      type: 'Pre-FFN Norm',
+                      desc: 'Pre-FFN normalization' }},
+                
+                // GeGLU (GELU-based gating, not SiLU!)
+                { name: `Gate_${idx}`, pos: [-10, -8, -3], size: [5, 3, 3], color: 0x84cc16,
+                  data: { 
+                      weight: `[H, I]`,
+                      shape: `[${cfg.hiddenSize}, ${cfg.intermediateSize}]`,
+                      params: formatParams(cfg.hiddenSize * cfg.intermediateSize),
+                      activation: 'GeGLU (gelu_pytorch_tanh)',
+                      desc: 'Gate proj with GeGLU (Gemma variant)' }},
+                { name: `Up_${idx}`, pos: [-10, -8, 3], size: [5, 3, 3], color: 0x84cc16,
+                  data: { 
+                      params: formatParams(cfg.hiddenSize * cfg.intermediateSize),
+                      desc: 'Up proj (GeGLU)' }},
+                { name: `Down_${idx}`, pos: [-1, -8, 0], size: [5, 3, 3], color: 0x84cc16,
+                  data: { 
+                      params: formatParams(cfg.intermediateSize * cfg.hiddenSize),
+                      desc: 'Down proj' }},
+                
+                // Post-FFN norm (Gemma-2 unique!)
+                { name: `PostFFNNorm_${idx}`, pos: [7, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { 
+                      type: 'Gemma Post-Norm',
+                      desc: 'Post-FFN norm (Gemma-2 stability)' }},
+                { name: `Add2_${idx}`, pos: [14, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }}
+            ];
+            
+            const connections = [
+                { from: `PreAttnNorm_${idx}`, to: `Q_${idx}`, label: 'x' },
+                { from: `PreAttnNorm_${idx}`, to: `K_${idx}`, label: 'x' },
+                { from: `PreAttnNorm_${idx}`, to: `V_${idx}`, label: 'x' },
+                { from: `Q_${idx}`, to: isLocalAttn ? `LocalAttn_${idx}` : `GlobalAttn_${idx}`, label: 'q' },
+                { from: `K_${idx}`, to: isLocalAttn ? `LocalAttn_${idx}` : `GlobalAttn_${idx}`, label: 'k' },
+                { from: `V_${idx}`, to: isLocalAttn ? `LocalAttn_${idx}` : `GlobalAttn_${idx}`, label: 'v' },
+                { from: isLocalAttn ? `LocalAttn_${idx}` : `GlobalAttn_${idx}`, to: `O_${idx}`, label: 'attn' },
+                { from: `O_${idx}`, to: `PostAttnNorm_${idx}`, label: 'o' },
+                { from: `PostAttnNorm_${idx}`, to: `Add1_${idx}`, label: 'post' },
+                { from: `PreFFNNorm_${idx}`, to: `Gate_${idx}`, label: 'x' },
+                { from: `PreFFNNorm_${idx}`, to: `Up_${idx}`, label: 'x' },
+                { from: `Gate_${idx}`, to: `Down_${idx}`, label: 'gelu' },
+                { from: `Up_${idx}`, to: `Down_${idx}`, label: 'h' },
+                { from: `Down_${idx}`, to: `PostFFNNorm_${idx}`, label: 'ffn' },
+                { from: `PostFFNNorm_${idx}`, to: `Add2_${idx}`, label: 'post' }
+            ];
+            
+            return {
+                name: `Gemma2_L${idx}_${isLocalAttn ? 'Local' : 'Global'}`,
+                y,
+                type: 'attention',
+                modules: modules,
+                connections: connections
+            };
+        }
+        
+        // ============================================
         // UI Functions
         // ============================================
         function updateStatsPanel(cfg) {
@@ -2927,12 +3063,37 @@
             if (statusDiv) {
                 const progress = ((inferenceStep + 1) / totalSteps * 100).toFixed(1);
                 const modCount = currentLayer.modules ? currentLayer.modules.length : 0;
+                
+                // Compute KV cache for attention layers (per-layer)
+                let extraInfo = '';
+                if (currentLayer.type === 'attention' || currentLayer.type === 'full_attention' || currentLayer.type === 'linear_attention') {
+                    const cfg = window._currentCfg || {};
+                    const seqLen = 2048;  // assume 2K context for demo
+                    const kvHeads = cfg.numKvHeads || cfg.numHeads || 8;
+                    const headDim = cfg.headDim || 128;
+                    // KV cache = 2 (K+V) * seq_len * kv_heads * head_dim * 2 bytes (fp16)
+                    const kvBytes = 2 * seqLen * kvHeads * headDim * 2;
+                    const kvMB = (kvBytes / 1024 / 1024).toFixed(2);
+                    extraInfo = ` <span style="color:#fbbf24;">💾 KV=${kvMB}MB/layer @ 2K ctx</span>`;
+                } else if (currentLayer.type === 'moe') {
+                    const cfg = window._currentCfg || {};
+                    const activeRatio = cfg.expertsPerTok && cfg.numExperts 
+                        ? (cfg.expertsPerTok / cfg.numExperts * 100).toFixed(1) 
+                        : 'N/A';
+                    extraInfo = ` <span style="color:#f97316;">⚡ Active: ${cfg.expertsPerTok || '?'}/${cfg.numExperts || '?'} experts (${activeRatio}%)</span>`;
+                } else if (currentLayer.name === 'INPUT' || currentLayer.type === 'embedding') {
+                    extraInfo = ` <span style="color:#60a5fa;">🔤 Token → Vector (${(window._currentCfg||{}).hiddenSize || '?'})</span>`;
+                } else if (currentLayer.type === 'output') {
+                    extraInfo = ` <span style="color:#ef4444;">📊 Softmax → Next Token</span>`;
+                }
+                
                 statusDiv.innerHTML = `
                     ${stageIcon} <b>${stageName}</b> &nbsp;|&nbsp; 
                     Layer ${inferenceStep + 1}/${totalSteps} 
                     <span style="color:#94a3b8;">(${progress}%)</span>
                     &nbsp;|&nbsp; <span style="color:#60a5fa;">${currentLayer.name}</span>
                     &nbsp;|&nbsp; <span style="color:#fbbf24;">${modCount} modules</span>
+                    ${extraInfo}
                 `;
             }
             
