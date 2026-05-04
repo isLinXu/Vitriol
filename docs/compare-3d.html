@@ -89,6 +89,22 @@
             font-size: 10px;
             font-family: monospace;
         }
+        
+        /* Mobile: vertical stack */
+        @media (max-width: 768px) {
+            #splitContainer {
+                flex-direction: column !important;
+            }
+            .split-handle {
+                width: 100% !important; height: 4px !important;
+                cursor: row-resize !important;
+            }
+            .panel-header { height: 42px; padding: 4px 8px; }
+            select.model-select {
+                font-size: 10px; padding: 3px 5px; max-width: 160px;
+            }
+            .fixed.bottom-4 { display: none; }
+        }
     </style>
 </head>
 <body>
@@ -254,7 +270,7 @@ function syncCameras() {
     }
 }
 
-// Resize split handle
+// Resize split handle (horizontal on desktop, vertical on mobile)
 (function setupSplitHandle() {
     const handle = document.getElementById('splitHandle');
     const container = document.getElementById('splitContainer');
@@ -262,11 +278,12 @@ function syncCameras() {
     const rightPanel = container.lastElementChild;
     let isDragging = false;
     
+    function isMobile() { return window.innerWidth <= 768; }
+    
     handle.addEventListener('mousedown', (e) => {
         isDragging = true;
-        document.body.style.cursor = 'col-resize';
+        document.body.style.cursor = isMobile() ? 'row-resize' : 'col-resize';
         document.body.style.userSelect = 'none';
-        // Disable iframe pointer events during drag so mouseup always fires on parent
         document.getElementById('leftFrame').style.pointerEvents = 'none';
         document.getElementById('rightFrame').style.pointerEvents = 'none';
         e.preventDefault();
@@ -274,12 +291,21 @@ function syncCameras() {
     
     document.addEventListener('mousemove', (e) => {
         if (!isDragging) return;
-        const total = container.offsetWidth;
-        const leftWidth = e.clientX;
-        const leftPercent = (leftWidth / total) * 100;
-        if (leftPercent < 10 || leftPercent > 90) return;
-        leftPanel.style.flex = `0 0 ${leftPercent}%`;
-        rightPanel.style.flex = `0 0 ${100 - leftPercent}%`;
+        if (isMobile()) {
+            const total = container.offsetHeight;
+            const topHeight = e.clientY - 48;  // subtract top bar
+            const topPercent = (topHeight / total) * 100;
+            if (topPercent < 10 || topPercent > 90) return;
+            leftPanel.style.flex = `0 0 ${topPercent}%`;
+            rightPanel.style.flex = `0 0 ${100 - topPercent}%`;
+        } else {
+            const total = container.offsetWidth;
+            const leftWidth = e.clientX;
+            const leftPercent = (leftWidth / total) * 100;
+            if (leftPercent < 10 || leftPercent > 90) return;
+            leftPanel.style.flex = `0 0 ${leftPercent}%`;
+            rightPanel.style.flex = `0 0 ${100 - leftPercent}%`;
+        }
     });
     
     document.addEventListener('mouseup', () => {

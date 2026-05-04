@@ -140,6 +140,77 @@
             background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px;
             font-family: monospace; margin-right: 4px;
         }
+        
+        /* ========= Mobile & Small Screen Adaptation ========= */
+        @media (max-width: 768px) {
+            /* Top-left header: shrink */
+            .fixed.top-4.left-4 { left: 8px; right: 8px; padding: 8px !important; }
+            .fixed.top-4.left-4 h1 { font-size: 14px; }
+            
+            /* Model preset panel: shrink & reposition */
+            #modelPresetPanel {
+                top: 56px !important; right: 8px !important; left: 8px !important;
+                max-width: none !important; padding: 6px !important;
+            }
+            #modelPresetPanel select { font-size: 11px; }
+            
+            /* Left nav tree: hide by default, toggle on tap */
+            .fixed.left-4.top-24 {
+                left: 0 !important; width: 100% !important; top: 120px !important;
+                max-height: 40vh !important; bottom: auto !important;
+                z-index: 15;
+            }
+            
+            /* View controls: smaller and positioned bottom-left */
+            #viewControls {
+                top: auto !important; bottom: 72px !important;
+                right: 8px !important; padding: 4px !important;
+                flex-direction: row !important; flex-wrap: wrap !important;
+            }
+            #viewControls .control-btn { padding: 6px 8px !important; font-size: 10px !important; }
+            
+            /* Right detail panel: full width at bottom */
+            #detailPanel {
+                right: 0 !important; left: 0 !important; top: auto !important;
+                bottom: 60px !important; width: 100% !important;
+                max-height: 50vh !important;
+            }
+            
+            /* Bottom controls: scrollable */
+            .fixed.bottom-4.left-1\\/2 {
+                left: 8px !important; right: 8px !important;
+                transform: none !important; width: auto !important;
+                overflow-x: auto; white-space: nowrap;
+                padding: 6px !important; gap: 4px !important;
+            }
+            .fixed.bottom-4.left-1\\/2 .control-btn {
+                padding: 6px 10px !important; font-size: 10px !important;
+                flex-shrink: 0;
+            }
+            
+            /* Shortcuts hint: hide on mobile */
+            .shortcuts-hint { display: none !important; }
+            
+            /* Inference panel: narrower */
+            #inferencePanel {
+                left: 4px !important; right: 4px !important;
+                transform: none !important; min-width: auto !important;
+                max-width: none !important; padding: 6px 10px !important;
+            }
+            #inferenceStatus { font-size: 10px !important; }
+            
+            /* Node labels: smaller */
+            .node-label { font-size: 9px !important; padding: 2px 5px !important; }
+            .node-label.sub { font-size: 8px !important; }
+            .node-label.module-name { font-size: 8px !important; }
+        }
+        
+        @media (max-width: 480px) {
+            /* Ultra-small phones */
+            .fixed.top-4.left-4 h1 { font-size: 12px; }
+            .stat-value { font-size: 14px !important; }
+            .stat-label { font-size: 8px !important; }
+        }
     </style>
 </head>
 <body>
@@ -3068,6 +3139,92 @@
         }
 
         // ============================================
+        // i18n (English UI support)
+        // ============================================
+        const i18n = {
+            en: {
+                'Quick Load Model': 'Quick Load Model',
+                'Compare': 'Compare',
+                '3D Split': '3D Split',
+                'Search modules...': 'Search modules...',
+                'Legend': 'Legend',
+                'Input': 'Input',
+                'Attention': 'Attention',
+                'MoE': 'MoE',
+                'Expert': 'Expert',
+                'FFN': 'FFN',
+                'Output': 'Output',
+                'Total Params': 'Total Params',
+                'Layers': 'Layers',
+                'Hidden': 'Hidden',
+                'Heads': 'Heads',
+                'Architecture': 'Architecture',
+                'Experts (Total/Active)': 'Experts (Total/Active)',
+                'SWA Window': 'SWA Window',
+                'Vision Layers': 'Vision Layers',
+                'LOD Active': 'LOD Active',
+                '▼ Expand': '▼ Expand',
+                '▶ Collapse': '▶ Collapse',
+                '🎯 Reset': '🎯 Reset',
+                '📐 3D': '📐 3D',
+                '🌊 Flow': '🌊 Flow',
+                '🏷️ Labels': '🏷️ Labels',
+                '⚖️ Compare': '⚖️ Compare',
+                '▶️ Inference': '▶️ Inference',
+                '📷 Screenshot': '📷 Screenshot'
+            },
+            zh: {
+                // Default is English, map to Chinese
+                'Quick Load Model': '快速加载模型',
+                'Compare': '对比',
+                '3D Split': '3D对比',
+                'Search modules...': '搜索模块...',
+                'Legend': '图例',
+                'Input': '输入',
+                'Attention': '注意力',
+                'Total Params': '总参数',
+                'Layers': '层数',
+                'Hidden': '隐藏维度',
+                'Heads': '头数',
+                'Architecture': '架构',
+                'SWA Window': '滑动窗口',
+                'Vision Layers': '视觉层',
+                'LOD Active': 'LOD已激活',
+                '▶️ Inference': '▶️ 推理演示',
+                '📷 Screenshot': '📷 截图'
+            }
+        };
+        
+        function applyI18n(lang) {
+            const dict = i18n[lang];
+            if (!dict) return;
+            
+            // Replace text content in elements with data-i18n or matching text
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (dict[key]) el.textContent = dict[key];
+            });
+            
+            // Translate button text (for English mode)
+            if (lang === 'en') {
+                // Update language-related attributes  
+                document.documentElement.lang = 'en';
+                
+                // Sync common UI labels
+                const replacements = [
+                    { selector: '#searchInput', attr: 'placeholder', key: 'Search modules...' },
+                    { selector: '.text-xs.text-gray-500.mb-2.uppercase', text: 'Legend', key: 'Legend' }
+                ];
+                replacements.forEach(r => {
+                    const el = document.querySelector(r.selector);
+                    if (!el) return;
+                    if (r.attr) el.setAttribute(r.attr, dict[r.key] || r.key);
+                    else if (dict[r.key]) el.textContent = dict[r.key];
+                });
+            }
+        }
+        
+        // ============================================
         // Model Preset Loader (no page reload)
         // ============================================
         async function loadModelPreset(hfRepo) {
@@ -3171,6 +3328,9 @@
                     if (p.mesh.material) p.mesh.material.dispose();
                 }
             });
+            
+            // Remove inference particles
+            if (typeof clearInferenceParticles === 'function') clearInferenceParticles();
             
             // Reset state
             nodes = [];
@@ -3321,6 +3481,7 @@
             if (panel) panel.style.display = 'none';
             
             clearHighlights();
+            clearInferenceParticles();
         }
         
         function clearHighlights() {
@@ -3365,6 +3526,113 @@
                 }
                 animateCamera();
             }
+        }
+        
+        // ============================================
+        // Particle Flow Animation (Attention weight flow visualization)
+        // ============================================
+        let inferenceParticles = [];  // Separate from flowParticles (main flow)
+        
+        function emitInferenceParticles(fromLayer, toLayer, color = 0x00ff88, count = 20) {
+            if (!fromLayer || !toLayer || !scene) return;
+            
+            const fromY = fromLayer.y || 0;
+            const toY = toLayer.y || 0;
+            
+            // Pick a representative module position per layer
+            const fromMod = fromLayer.modules?.[Math.floor((fromLayer.modules.length||1)/2)];
+            const toMod = toLayer.modules?.[Math.floor((toLayer.modules.length||1)/2)];
+            
+            const fromX = fromMod?.pos?.[0] || 0;
+            const fromZ = fromMod?.pos?.[2] || 0;
+            const toX = toMod?.pos?.[0] || 0;
+            const toZ = toMod?.pos?.[2] || 0;
+            
+            for (let i = 0; i < count; i++) {
+                const geom = new THREE.SphereGeometry(0.4, 8, 8);
+                const mat = new THREE.MeshBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.9
+                });
+                const particle = new THREE.Mesh(geom, mat);
+                
+                // Start with slight random scatter at source
+                particle.position.set(
+                    fromX + (Math.random() - 0.5) * 6,
+                    fromY + (Math.random() - 0.5) * 2,
+                    fromZ + (Math.random() - 0.5) * 6
+                );
+                
+                scene.add(particle);
+                
+                // Particle metadata for animation
+                inferenceParticles.push({
+                    mesh: particle,
+                    startTime: Date.now() + i * 30,  // Staggered emission
+                    duration: 1500,
+                    startPos: particle.position.clone(),
+                    endPos: new THREE.Vector3(
+                        toX + (Math.random() - 0.5) * 6,
+                        toY + (Math.random() - 0.5) * 2,
+                        toZ + (Math.random() - 0.5) * 6
+                    ),
+                    color: color
+                });
+            }
+        }
+        
+        function updateInferenceParticles() {
+            const now = Date.now();
+            const alive = [];
+            
+            for (const p of inferenceParticles) {
+                const elapsed = now - p.startTime;
+                
+                if (elapsed < 0) {
+                    // Not started yet
+                    p.mesh.visible = false;
+                    alive.push(p);
+                    continue;
+                }
+                
+                p.mesh.visible = true;
+                
+                if (elapsed >= p.duration) {
+                    // Finished, remove
+                    scene.remove(p.mesh);
+                    if (p.mesh.geometry) p.mesh.geometry.dispose();
+                    if (p.mesh.material) p.mesh.material.dispose();
+                    continue;
+                }
+                
+                const progress = elapsed / p.duration;
+                const easedProgress = 1 - Math.pow(1 - progress, 2);  // Ease-out quadratic
+                
+                p.mesh.position.lerpVectors(p.startPos, p.endPos, easedProgress);
+                
+                // Fade out towards end
+                if (progress > 0.7) {
+                    p.mesh.material.opacity = 0.9 * (1 - (progress - 0.7) / 0.3);
+                }
+                
+                // Slight scale pulse
+                const scale = 1 + Math.sin(elapsed * 0.01) * 0.2;
+                p.mesh.scale.setScalar(scale);
+                
+                alive.push(p);
+            }
+            
+            inferenceParticles = alive;
+        }
+        
+        function clearInferenceParticles() {
+            for (const p of inferenceParticles) {
+                scene.remove(p.mesh);
+                if (p.mesh.geometry) p.mesh.geometry.dispose();
+                if (p.mesh.material) p.mesh.material.dispose();
+            }
+            inferenceParticles = [];
         }
         
         function runInferenceStep() {
@@ -3432,6 +3700,14 @@
                         showInferenceTooltip(mod);
                     }, idx * 200);
                 });
+            }
+            
+            // Emit particles flowing from previous layer to current layer (attention weight flow)
+            if (inferenceStep > 0 && inferenceStep < layers.length) {
+                const prevLayer = layers[inferenceStep - 1];
+                if (prevLayer && currentLayer && prevLayer !== currentLayer) {
+                    emitInferenceParticles(prevLayer, currentLayer, highlightColor, 15);
+                }
             }
             
             // Update status with rich info
@@ -3676,6 +3952,7 @@
             if (stats) stats.begin();
             controls.update();
             updateFlowParticles();
+            updateInferenceParticles();
             updateLOD();
             renderer.render(scene, camera);
             labelRenderer.render(scene, camera);
@@ -3729,12 +4006,17 @@
                 let modelPath = '';
                 let hfRepo = '';
                 let isCompactMode = false;
+                let lang = 'zh';
                 if (window.location.hash) {
                     const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
                     modelPath = urlParams.get('model') || '';
                     hfRepo = urlParams.get('hf') || '';
                     isCompactMode = urlParams.get('compact') === '1';
+                    lang = urlParams.get('lang') || (navigator.language.startsWith('en') ? 'en' : 'zh');
                 }
+                
+                // i18n: Apply English UI if requested
+                if (lang === 'en') applyI18n('en');
                 
                 // Apply compact mode: hide model preset panel, top stats bar, reduce chrome
                 if (isCompactMode) {
