@@ -913,7 +913,12 @@
                 let lType = cfg.textLayerTypes[i] || 'dense';
                 let layerName = `TEXT_ENCODER_L${i}`;
                 
-                if (lType === 'moe') {
+                if (cfg.isDeepSeekV4) {
+                    // DeepSeek V4 uses special layer types
+                    let layer = buildDeepSeekV4Layer(i, layerY, cfg, lType);
+                    layer.name = layerName;
+                    modelLayers.push(layer);
+                } else if (lType === 'moe') {
                     let layer = buildMoELayer(i, layerY, cfg);
                     layer.name = layerName;
                     modelLayers.push(layer);
@@ -1350,6 +1355,169 @@
                     
                     { from: `RMSNorm2_${idx}`, to: `Gated_${idx}`, label: 'x' },
                     { from: `Gated_${idx}`, to: `Add2_${idx}`, label: 'ffn_out' }
+                ]
+            };
+        }
+
+        // ============================================
+        // DeepSeek V4 Layer with MLA and MoE
+        // ============================================
+        function buildDeepSeekV4Layer(idx, y, cfg, layerType) {
+            const isDenseLayer = idx < cfg.firstKDense;
+            const isHashLayer = layerType === 'hash_attention';
+            const isCompressedLayer = layerType === 'compressed_attention';
+            
+            // MLA Attention parameters
+            const qLoraRank = cfg.qLoraRank || 0;
+            const vHeadDim = cfg.vHeadDim || cfg.headDim;
+            const oLoraRank = cfg.oLoraRank || 0;
+            
+            // Calculate MLA parameter counts
+            const qParams = qLoraRank > 0 ? 
+                (cfg.hiddenSize * qLoraRank + qLoraRank * (cfg.numHeads * cfg.headDim)) : 
+                (cfg.hiddenSize * cfg.numHeads * cfg.headDim);
+            const kvParams = 2 * cfg.hiddenSize * (cfg.numKvHeads * vHeadDim);
+            const oParams = oLoraRank > 0 ?
+                (cfg.numHeads * cfg.headDim * oLoraRank + oLoraRank * cfg.hiddenSize) :
+                (cfg.numHeads * cfg.headDim * cfg.hiddenSize);
+            
+            let attnDesc = 'MLA';
+            if (isHashLayer) attnDesc = 'Hash Attention';
+            else if (isCompressedLayer) attnDesc = 'CSA/HCA Compressed';
+            else if (layerType === 'sliding_window') attnDesc = 'MLA + SWA';
+            else attnDesc = 'MLA Full';
+            
+            const modules = [
+                // Pre-attention normalization
+                { name: `RMSNorm1_${idx}`, pos: [-18, 8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-6', desc: 'Pre-attention normalization' }},
+            ];
+            
+            // MLA Q projection (compressed)
+            if (qLoraRank > 0) {
+                modules.push(
+                    { name: `Q_Down_${idx}`, pos: [-10, 10, 0], size: [5, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, R]`, 
+                          shape: `[${cfg.hiddenSize}, ${qLoraRank}]`, 
+                          params: formatParams(cfg.hiddenSize * qLoraRank),
+                          desc: 'Q LoRA down-projection' }},
+                    { name: `Q_Up_${idx}`, pos: [-4, 10, 0], size: [5, 3, 3], color: colors.attention,
+                      data: { 
+                          weight: `[R, QH]`, 
+                          shape: `[${qLoraRank}, ${cfg.numHeads * cfg.headDim}]`, 
+                          params: formatParams(qLoraRank * cfg.numHeads * cfg.headDim),
+                          desc: 'Q LoRA up-projection' }}
+                );
+            } else {
+                modules.push(
+                    { name: `Q_Proj_${idx}`, pos: [-7, 10, 0], size: [6, 4, 3], color: colors.attention,
+                      data: { 
+                          weight: `[H, QH]`, 
+                          shape: `[${cfg.hiddenSize}, ${cfg.numHeads * cfg.headDim}]`, 
+                          params: formatParams(cfg.hiddenSize * cfg.numHeads * cfg.headDim),
+                          desc: 'Q projection' }}
+                );
+            }
+            
+            // K/V projections (shared)
+            modules.push(
+                { name: `KV_Proj_${idx}`, pos: [2, 10, 0], size: [6, 4, 3], color: colors.attention,
+                  data: { 
+                      weight: `[H, 2*KVH]`, 
+                      shape: `[${cfg.hiddenSize}, ${2 * cfg.numKvHeads * vHeadDim}]`, 
+                      params: formatParams(2 * cfg.hiddenSize * cfg.numKvHeads * vHeadDim),
+                      desc: 'K/V compressed projection' }},
+                { name: `Attn_${idx}`, pos: [10, 10, 0], size: [7, 4, 4], color: colors.attention,
+                  data: { 
+                      type: attnDesc,
+                      heads: cfg.numHeads,
+                      kv_heads: cfg.numKvHeads,
+                      head_dim: cfg.headDim,
+                      desc: 'Multi-head Latent Attention' }},
+                { name: `O_Proj_${idx}`, pos: [18, 10, 0], size: [5, 3, 3], color: colors.attention,
+                  data: { 
+                      weight: `[QH, H]`, 
+                      shape: `[${cfg.numHeads * cfg.headDim}, ${cfg.hiddenSize}]`, 
+                      params: formatParams(oParams),
+                      desc: 'Output projection' }},
+                { name: `Add1_${idx}`, pos: [24, 8, 0], size: [4, 3, 3], color: colors.ffn, 
+                  data: { type: 'Residual Add' }}
+            );
+            
+            // FFN section
+            modules.push(
+                { name: `RMSNorm2_${idx}`, pos: [-18, -8, 0], size: [5, 3, 3], color: colors.norm, 
+                  data: { eps: '1e-6', desc: 'Pre-FFN normalization' }}
+            );
+            
+            if (isDenseLayer) {
+                // Dense SwiGLU FFN
+                modules.push(
+                    { name: `Gate_${idx}`, pos: [-10, -8, 0], size: [5, 3, 3], color: colors.ffn, 
+                      data: { activation: 'SiLU', desc: 'Gating activation' }},
+                    { name: `Up_${idx}`, pos: [-3, -8, 0], size: [6, 4, 3], color: colors.ffn,
+                      data: { 
+                          weight: `[H, I]`, 
+                          shape: `[${cfg.hiddenSize}, ${cfg.intermediateSize}]`, 
+                          params: formatParams(cfg.hiddenSize * cfg.intermediateSize),
+                          desc: 'FFN up projection' }},
+                    { name: `Down_${idx}`, pos: [5, -8, 0], size: [6, 4, 3], color: colors.ffn,
+                      data: { 
+                          weight: `[I, H]`, 
+                          shape: `[${cfg.intermediateSize}, ${cfg.hiddenSize}]`, 
+                          params: formatParams(cfg.intermediateSize * cfg.hiddenSize),
+                          desc: 'FFN down projection' }},
+                    { name: `Add2_${idx}`, pos: [12, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                      data: { type: 'Residual Add', desc: 'Dense SwiGLU' }}
+                );
+            } else {
+                // MoE FFN
+                modules.push(
+                    { name: `Router_${idx}`, pos: [-12, -8, 0], size: [5, 3, 3], color: colors.moe, 
+                      data: { 
+                          weight: `[H, E]`, 
+                          shape: `[${cfg.hiddenSize}, ${cfg.numExperts}]`, 
+                          params: formatParams(cfg.hiddenSize * cfg.numExperts),
+                          desc: 'Expert router' }},
+                    { name: `Shared_${idx}`, pos: [-4, -8, 0], size: [6, 4, 3], color: colors.moe,
+                      data: { 
+                          experts: cfg.nSharedExperts || 1,
+                          desc: 'Shared expert' }},
+                    { name: `Routed_${idx}`, pos: [5, -8, 0], size: [8, 5, 4], color: colors.moe,
+                      data: { 
+                          experts: cfg.numExperts,
+                          active: cfg.expertsPerTok,
+                          desc: `Routed experts (${cfg.expertsPerTok} active)` }},
+                    { name: `Add2_${idx}`, pos: [15, -8, 0], size: [4, 3, 3], color: colors.ffn, 
+                      data: { type: 'Residual Add', desc: 'MoE FFN' }}
+                );
+            }
+            
+            return {
+                name: `DSV4_L${idx}`, y, type: 'attention',
+                modules: modules,
+                connections: [
+                    // Attention connections
+                    { from: `RMSNorm1_${idx}`, to: qLoraRank > 0 ? `Q_Down_${idx}` : `Q_Proj_${idx}`, label: 'x' },
+                    { from: `RMSNorm1_${idx}`, to: `KV_Proj_${idx}`, label: 'x' },
+                    ...(qLoraRank > 0 ? [{ from: `Q_Down_${idx}`, to: `Q_Up_${idx}`, label: 'q' }] : []),
+                    { from: qLoraRank > 0 ? `Q_Up_${idx}` : `Q_Proj_${idx}`, to: `Attn_${idx}`, label: 'q' },
+                    { from: `KV_Proj_${idx}`, to: `Attn_${idx}`, label: 'kv' },
+                    { from: `Attn_${idx}`, to: `O_Proj_${idx}`, label: 'attn' },
+                    { from: `O_Proj_${idx}`, to: `Add1_${idx}`, label: 'out' },
+                    
+                    // FFN connections
+                    { from: `RMSNorm2_${idx}`, to: isDenseLayer ? `Gate_${idx}` : `Router_${idx}`, label: 'x' },
+                    ...(isDenseLayer ? [
+                        { from: `Gate_${idx}`, to: `Down_${idx}`, label: 'g' },
+                        { from: `Up_${idx}`, to: `Down_${idx}`, label: 'h' },
+                        { from: `Down_${idx}`, to: `Add2_${idx}`, label: 'ffn' }
+                    ] : [
+                        { from: `Router_${idx}`, to: `Routed_${idx}`, label: 'route' },
+                        { from: `Shared_${idx}`, to: `Add2_${idx}`, label: 'shared' },
+                        { from: `Routed_${idx}`, to: `Add2_${idx}`, label: 'routed' }
+                    ])
                 ]
             };
         }
