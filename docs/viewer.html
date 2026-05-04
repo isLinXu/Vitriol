@@ -216,7 +216,10 @@
     <div class="fixed top-4 right-4 glass-panel p-2 z-20" id="modelPresetPanel" style="max-width: 380px;">
         <div class="text-xs text-gray-400 uppercase mb-2 px-2 flex justify-between items-center">
             <span>🚀 Quick Load Model</span>
-            <a href="arch-compare.html" class="text-[10px] text-blue-400 hover:text-blue-300" title="Architecture Comparison">📊 Compare</a>
+            <span class="flex gap-2">
+                <a href="arch-compare.html" class="text-[10px] text-blue-400 hover:text-blue-300" title="Architecture Comparison">📊 Compare</a>
+                <a href="compare-3d.html" class="text-[10px] text-blue-400 hover:text-blue-300" title="Side-by-side 3D">⚖️ 3D Split</a>
+            </span>
         </div>
         <select id="modelPresetSelect" onchange="loadModelPreset(this.value)" 
                 class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 mb-2">
@@ -3015,15 +3018,130 @@
         }
 
         // ============================================
-        // Model Preset Loader
+        // Model Preset Loader (no page reload)
         // ============================================
-        function loadModelPreset(hfRepo) {
+        async function loadModelPreset(hfRepo) {
             if (!hfRepo) return;
-            // Update URL and reload viewer with new model
-            const newUrl = `${window.location.pathname}#?hf=${encodeURIComponent(hfRepo)}`;
-            window.location.href = newUrl;
-            // Force reload to re-initialize everything
-            setTimeout(() => window.location.reload(), 100);
+            
+            // Update URL hash without reload
+            const newHash = `#?hf=${encodeURIComponent(hfRepo)}`;
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', newHash);
+            } else {
+                window.location.hash = newHash;
+            }
+            
+            // Show loading overlay
+            const loading = document.getElementById('loading');
+            if (loading) {
+                loading.style.display = 'flex';
+                loading.style.opacity = '1';
+                const loader = document.querySelector('.loader');
+                if (loader) loader.style.display = 'block';
+                document.getElementById('loadingText').textContent = `Loading ${hfRepo}...`;
+                document.getElementById('loadingText').style.color = '#60a5fa';
+            }
+            
+            // Stop inference demo if running
+            if (typeof isInferenceRunning !== 'undefined' && isInferenceRunning) {
+                stopInferenceDemo();
+            }
+            
+            try {
+                // Clear existing scene
+                clearScene();
+                
+                // Update path display
+                const modelPath = `hf://${hfRepo}`;
+                document.getElementById('modelPath').textContent = modelPath;
+                
+                // Load new config
+                const cfg = await loadModelConfig(modelPath);
+                document.getElementById('modelName').textContent = cfg.name;
+                document.getElementById('loadingText').textContent = `Building ${cfg.name}...`;
+                
+                // Build new model
+                setTimeout(() => {
+                    try {
+                        buildModel(cfg);
+                        
+                        // Hide loading
+                        loading.style.opacity = '0';
+                        setTimeout(() => { loading.style.display = 'none'; }, 500);
+                        
+                        // Reset camera to fit new model
+                        resetCamera();
+                    } catch (e) {
+                        console.error(e);
+                        document.getElementById('loadingText').textContent = `Error building model: ${e.message}`;
+                        document.getElementById('loadingText').style.color = '#ef4444';
+                    }
+                }, 50);
+            } catch (e) {
+                console.error('Failed to load model:', e);
+                document.getElementById('loadingText').textContent = `Error: ${e.message}`;
+                document.getElementById('loadingText').style.color = '#ef4444';
+            }
+        }
+        
+        // Clear all model-related objects from the scene (keep lights)
+        function clearScene() {
+            if (!scene) return;
+            
+            // Remove all layer groups
+            layerGroups.forEach(lg => {
+                if (lg.group) {
+                    scene.remove(lg.group);
+                    // Dispose geometries and materials
+                    lg.group.traverse((obj) => {
+                        if (obj.geometry) obj.geometry.dispose();
+                        if (obj.material) {
+                            if (Array.isArray(obj.material)) {
+                                obj.material.forEach(m => m.dispose());
+                            } else {
+                                obj.material.dispose();
+                            }
+                        }
+                    });
+                }
+            });
+            
+            // Remove connection lines
+            pipeMeshes.forEach(mesh => {
+                scene.remove(mesh);
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
+            });
+            
+            // Remove flow particles
+            flowParticles.forEach(p => {
+                if (p.mesh) {
+                    scene.remove(p.mesh);
+                    if (p.mesh.geometry) p.mesh.geometry.dispose();
+                    if (p.mesh.material) p.mesh.material.dispose();
+                }
+            });
+            
+            // Reset state
+            nodes = [];
+            connections = [];
+            flowParticles = [];
+            layerGroups = [];
+            pipeMeshes = [];
+            modelLayers = [];
+            collapsedLayers.clear();
+            selectedObject = null;
+            highlightedObject = null;
+            
+            // Remove all CSS2D labels
+            if (labelRenderer && labelRenderer.domElement) {
+                const labels = labelRenderer.domElement.querySelectorAll('.node-label');
+                labels.forEach(l => l.remove());
+            }
+            
+            // Clear nav tree
+            const navTree = document.getElementById('navTree');
+            if (navTree) navTree.innerHTML = '';
         }
         
         // Sync model preset dropdown with current model on load
@@ -3560,10 +3678,30 @@
                 const defaultModelPath = 'data/qwen3-demo';
                 let modelPath = '';
                 let hfRepo = '';
+                let isCompactMode = false;
                 if (window.location.hash) {
                     const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
                     modelPath = urlParams.get('model') || '';
                     hfRepo = urlParams.get('hf') || '';
+                    isCompactMode = urlParams.get('compact') === '1';
+                }
+                
+                // Apply compact mode: hide model preset panel, top stats bar, reduce chrome
+                if (isCompactMode) {
+                    const presetPanel = document.getElementById('modelPresetPanel');
+                    if (presetPanel) presetPanel.style.display = 'none';
+                    // Also hide the top header (first glass-panel with model name)
+                    const topHeader = document.querySelector('.fixed.top-4.left-4');
+                    if (topHeader) topHeader.style.display = 'none';
+                    // Hide left nav tree
+                    const leftNav = document.querySelector('.fixed.left-4.top-24');
+                    if (leftNav) leftNav.style.display = 'none';
+                    // Hide view controls
+                    const viewControls = document.getElementById('viewControls');
+                    if (viewControls) viewControls.style.display = 'none';
+                    // Hide shortcuts hint
+                    const hint = document.querySelector('.shortcuts-hint');
+                    if (hint) hint.style.display = 'none';
                 }
                 
                 // HuggingFace remote loading takes priority
