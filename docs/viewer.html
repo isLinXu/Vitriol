@@ -420,20 +420,73 @@
             const expertSize = config.moe_intermediate_size || textConfig.moe_intermediate_size || 64;
             const isMoE = numExperts > 0;
             
+            // DeepSeek V4 specific parameters
+            const firstKDense = config.first_k_dense_replace || textConfig.first_k_dense_replace || 0;
+            const nSharedExperts = config.n_shared_experts || textConfig.n_shared_experts || 0;
+            const qLoraRank = config.q_lora_rank || textConfig.q_lora_rank || 0;
+            const vHeadDim = config.v_head_dim || textConfig.v_head_dim || headDim;
+            const qkNopeHeadDim = config.qk_nope_head_dim || textConfig.qk_nope_head_dim || 0;
+            const qkRopeHeadDim = config.qk_rope_head_dim || textConfig.qk_rope_head_dim || 0;
+            const isDeepSeekV4 = config.model_type === 'deepseek_v4' || textConfig.model_type === 'deepseek_v4';
+            const tieWordEmbeddings = config.tie_word_embeddings || textConfig.tie_word_embeddings || false;
+            
             // Calculate total parameters
             let totalParams = vocabSize * hiddenSize; // Embedding
-            totalParams += hiddenSize * vocabSize; // LM Head
-            
-            let layerParams = 0;
-            layerParams += hiddenSize * 3 * hiddenSize; // QKV projection
-            layerParams += hiddenSize * hiddenSize; // Output projection
-            layerParams += intermediateSize * hiddenSize; // FFN up
-            layerParams += hiddenSize * intermediateSize; // FFN down
-            if (isMoE) {
-                layerParams += numExperts * hiddenSize * expertSize * 3; // Expert FFNs
-                layerParams += hiddenSize * numExperts; // Router
+            if (!tieWordEmbeddings) {
+                totalParams += hiddenSize * vocabSize; // LM Head
             }
-            totalParams += layerParams * numLayers;
+            
+            // Calculate per-layer parameters
+            let layerParams = 0;
+            
+            if (isDeepSeekV4 && qLoraRank > 0) {
+                // DeepSeek V4 MLA attention
+                // Q projection: hiddenSize -> qLoraRank -> numHeads * headDim
+                const qParams = hiddenSize * qLoraRank + qLoraRank * (numHeads * headDim);
+                // K/V projection: hiddenSize -> numKvHeads * vHeadDim
+                const kvParams = 2 * hiddenSize * (numKvHeads * vHeadDim);
+                // O projection: numHeads * headDim -> hiddenSize
+                const oParams = (numHeads * headDim) * hiddenSize;
+                layerParams += qParams + kvParams + oParams;
+            } else {
+                // Standard attention
+                layerParams += hiddenSize * 3 * hiddenSize; // QKV projection
+                layerParams += hiddenSize * hiddenSize; // Output projection
+            }
+            
+            // LayerNorm parameters (2 * hiddenSize per layer)
+            layerParams += 2 * hiddenSize;
+            
+            if (isMoE) {
+                // Mixed architecture: first_k_dense layers are dense, rest are MoE
+                let denseLayerParams = 0;
+                let moeLayerParams = 0;
+                
+                // Dense FFN (SwiGLU: up, gate, down)
+                denseLayerParams += 3 * hiddenSize * intermediateSize;
+                
+                // MoE FFN
+                // Router
+                moeLayerParams += hiddenSize * numExperts;
+                // Shared experts
+                if (nSharedExperts > 0) {
+                    moeLayerParams += nSharedExperts * 3 * hiddenSize * expertSize;
+                }
+                // Routed experts
+                moeLayerParams += numExperts * 3 * hiddenSize * expertSize;
+                
+                // Add layer params based on architecture
+                const denseLayers = Math.min(firstKDense, numLayers);
+                const moeLayers = numLayers - denseLayers;
+                
+                totalParams += denseLayers * (layerParams + denseLayerParams);
+                totalParams += moeLayers * (layerParams + moeLayerParams);
+            } else {
+                // Standard dense FFN
+                layerParams += intermediateSize * hiddenSize; // FFN up
+                layerParams += hiddenSize * intermediateSize; // FFN down
+                totalParams += layerParams * numLayers;
+            }
             
             return {
                 name,
@@ -455,6 +508,9 @@
                 rootLayers,
                 rootLayerTypes,
                 totalParams,
+                firstKDense,
+                nSharedExperts,
+                isDeepSeekV4,
                 raw: config
             };
         }
