@@ -18,29 +18,27 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy attribute loading to keep `import vitriol` lightweight.
+    """Lazy import to avoid importing heavy dependencies unless needed.
 
-    This avoids importing heavy optional dependencies (e.g., torch/transformers)
-    unless the user actually accesses those symbols.
+    This keeps `import vitriol` lightweight, deferring torch/transformers
+    imports until the user actually accesses those symbols.
     """
     if name == "MinimalWeightGenerator":
         from .core.generator import MinimalWeightGenerator as _MinimalWeightGenerator
-
         return _MinimalWeightGenerator
-    if name == "ModelValidator":
+    elif name == "ModelValidator":
         from .core.validator import ModelValidator as _ModelValidator
-
         return _ModelValidator
-    if name == "ModelAnalyzer":
+    elif name == "ModelAnalyzer":
         from .core.analyzer import ModelAnalyzer as _ModelAnalyzer
-
         return _ModelAnalyzer
-    if name == "GenerationConfig":
+    elif name == "GenerationConfig":
         from .config.manager import GenerationConfig as _GenerationConfig
-
         return _GenerationConfig
-    raise AttributeError(f"module 'vitriol' has no attribute '{name}'")
+    else:
+        raise AttributeError(f"module 'vitriol' has no attribute '{name}'")
 
 
 def __dir__():
-    return sorted(list(globals().keys()) + __all__)
+    """List all exported names."""
+    return sorted(list(globals().keys()) + list(__all__))
