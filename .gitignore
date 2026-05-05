@@ -209,3 +209,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Vitriol project-specific
+VITRIOL_*_REPORT*.md
+ARTIFACT_*.md
+GIT_RELEASE_*.md
+progress.md
+verification/
+src/vitriol.egg-info/
+

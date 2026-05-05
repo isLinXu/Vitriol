@@ -470,7 +470,7 @@ class HybridUltraStrategy(WeightGenerationStrategy):
         Example:
             >>> model = AutoModelForCausalLM.from_pretrained(output_dir)
             >>> stats = HybridUltraStrategy.optimize_loaded_model(model)
-            >>> print(f"Memory saved: {stats['saved_mb']:.1f} MB")
+            logging.info(f"Memory saved: {stats['saved_mb']:.1f} MB")
         """
         before_bytes = 0
         after_bytes = 0

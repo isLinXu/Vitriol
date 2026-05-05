@@ -946,7 +946,7 @@ class MinimalWeightGenerator:
             manifest_path=manifest_path if os.path.exists(manifest_path) else None,
             index_path=index_path if os.path.exists(index_path) else None,
             total_size=self.total_size,
-            generated_at=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            generated_at=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
 
     def generate(self) -> GenerationResult:
@@ -1501,7 +1501,7 @@ class MinimalWeightGenerator:
 
             manifest = build_manifest(
                 schema_version=2,
-                generated_at=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                generated_at=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 source={
                     "model_id": self.model_id,
                     "source_config_sha256": _hash_file(meta_path),
@@ -1936,7 +1936,7 @@ class MinimalWeightGenerator:
         ) if has_viz else "## 🔍 Architecture Visualization\n*(Unavailable)*\n"
 
         # [B6 fix] datetime instead of subprocess call
-        ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         content = f"""---
 library_name: transformers
