@@ -217,4 +217,6 @@ GIT_RELEASE_*.md
 progress.md
 verification/
 src/vitriol.egg-info/
+output/
+docs/archive/
 
