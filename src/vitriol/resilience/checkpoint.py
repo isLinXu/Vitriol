@@ -158,11 +158,31 @@ class CheckpointManager:
             with open(checkpoint_path, 'r') as f:
                 data = json.load(f)
             
-            # Load state from pickle if exists
+            # Load state from pickle if exists (restricted deserialization)
             state_path = self.checkpoint_dir / f"{checkpoint_id}_state.pkl"
             if state_path.exists():
                 with open(state_path, 'rb') as f:
-                    data['state'] = pickle.load(f)
+                    # Restrict unpickling to safe built-in types only
+                    class _RestrictedUnpickler(pickle.Unpickler):
+                        """Unpickler that only allows safe built-in types."""
+                        ALLOWED_CLASSES = {
+                            'builtins': ('dict', 'list', 'tuple', 'set', 'frozenset', 'str', 'int', 'float', 'bool', 'bytes', 'NoneType'),
+                            'collections': ('OrderedDict', 'defaultdict'),
+                            'numpy.core.multiarray': ('_reconstruct', 'scalar'),
+                            'numpy': ('dtype', 'ndarray'),
+                            'torch': ('Tensor',),
+                            'torch._utils': ('_rebuild_tensor_v2',),
+                        }
+
+                        def find_class(self, module, name):
+                            if module in self.ALLOWED_CLASSES and name in self.ALLOWED_CLASSES[module]:
+                                return super().find_class(module, name)
+                            raise pickle.UnpicklingError(
+                                f"Forbidden class: {module}.{name} — "
+                                f"only allowlisted types can be deserialized"
+                            )
+
+                    data['state'] = _RestrictedUnpickler(f).load()
             
             checkpoint = Checkpoint.from_dict(data)
             logger.info(f"Checkpoint loaded: {checkpoint_id}")
