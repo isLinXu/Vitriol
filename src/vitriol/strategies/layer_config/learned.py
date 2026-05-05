@@ -34,7 +34,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from .base import WeightGenerationStrategy, StrategyCapabilities
+from vitriol.strategies.base import WeightGenerationStrategy, StrategyCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -1012,7 +1012,7 @@ class LearnedWeightStrategy(WeightGenerationStrategy):
 
         try:
             # Strategy A: Try loading via transformers (works for HF models on disk/internet)
-            from ..utils.hf_loading import load_config as hf_load_config
+            from vitriol.utils.hf_loading import load_config as hf_load_config
 
             hf_config = hf_load_config(
                 model_path,
@@ -1265,7 +1265,7 @@ class HybridLearnedStrategy(LearnedWeightStrategy):
         self.compression_target = compression_target
 
         # Import fallback strategy
-        from .compact import CompactStrategy
+        from vitriol.strategies.compact import CompactStrategy
 
         self._fallback = CompactStrategy(device=device)
 
