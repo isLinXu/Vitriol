@@ -48,7 +48,7 @@ Usage
         fusion_mode="replace",
     )
     result = pipeline.infer("What is the capital of France?")
-    print(result["generated_text"])
+    logger.info(result["generated_text"])
 
     # Knowledge distillation (KV → weights)
     from vitriol.kv.exobrain_inference import KnowledgeDistiller
@@ -2185,7 +2185,7 @@ class ExoBrainProfiler:
             teacher_kv = extractor.extract_kv(prompt)
         with profiler.stage("brain_build"):
             pipeline._build_brain(teacher_kv)
-        print(profiler.report())
+        logger.info(profiler.report())
     """
 
     def __init__(self) -> None:
@@ -2320,7 +2320,7 @@ class ExoBrainEvaluator:
     Usage:
         evaluator = ExoBrainEvaluator(pipeline)
         metrics = evaluator.evaluate("What is the capital of France?")
-        print(metrics["logit_divergence"])
+        logger.info("logit_divergence=%.4f", metrics["logit_divergence"])
     """
 
     def __init__(self, pipeline: ExoBrainInferencePipeline) -> None:

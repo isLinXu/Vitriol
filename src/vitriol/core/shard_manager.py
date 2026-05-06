@@ -119,9 +119,9 @@ class ShardManager:
             Formatted shard filename
         """
         if format == "safetensors":
-            return f"model-{shard_idx+1:05d}-of-XXXXX.safetensors"
+            return f"model-{shard_idx+1:05d}-of-{{total:05d}}.safetensors"
         else:
-            return f"pytorch_model-{shard_idx+1:05d}-of-XXXXX.bin"
+            return f"pytorch_model-{shard_idx+1:05d}-of-{{total:05d}}.bin"
     
     def estimate_total_shards(
         self,

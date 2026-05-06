@@ -184,7 +184,7 @@ def _build_layer_data_from_config(model_path: Path, max_layers: int = 12) -> Dic
                 meta = json.loads(meta_path.read_text())
                 break
             except Exception:
-                pass
+                logger.debug("Failed to load meta-config for weight visualization")
 
     effective = meta if meta else config
     text_cfg = effective.get("text_config", effective)

@@ -1,6 +1,9 @@
+import logging
 import plotly.express as px
 import pandas as pd
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 class VocabVisualizer:
     """Visualizes tokenizer vocabulary sizes using Treemaps or other charts."""
@@ -31,7 +34,7 @@ class VocabVisualizer:
         """Loads a tokenizer from HF model ID and adds it to the list."""
         try:
             from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
-            print(f"Loading tokenizer for {model_id}...")
+            logger.info("Loading tokenizer for %s...", model_id)
             tokenizer = hf_load_tokenizer(
                 model_id,
                 security={
@@ -53,9 +56,9 @@ class VocabVisualizer:
                 "vocab": vocab_size,
                 "family": family
             })
-            print(f"Added {model_id}: {vocab_size} tokens")
+            logger.info("Added %s: %d tokens", model_id, vocab_size)
         except Exception as e:
-            print(f"Failed to load tokenizer for {model_id}: {e}")
+            logger.warning("Failed to load tokenizer for %s: %s", model_id, e)
 
     def generate_treemap(self, output_path: str = "vocab_treemap.html"):
         """Generates a Treemap where area represents vocab size."""
@@ -106,7 +109,7 @@ class VocabVisualizer:
             from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
             import unicodedata
             
-            print(f"Analyzing tokenizer distribution for {model_id}...")
+            logger.info("Analyzing tokenizer distribution for %s...", model_id)
             tokenizer = hf_load_tokenizer(
                 model_id,
                 security={
@@ -499,5 +502,5 @@ class VocabVisualizer:
             return output_path
             
         except Exception as e:
-            print(f"Failed to analyze tokenizer for {model_id}: {e}")
+            logger.warning("Failed to analyze tokenizer for %s: %s", model_id, e)
             return None

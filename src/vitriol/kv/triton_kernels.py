@@ -23,10 +23,13 @@ from __future__ import annotations
 
 import math
 import warnings
+import logging
 from typing import Tuple
 
 import torch
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 # Try importing Triton; gracefully fall back to pure PyTorch if not available
 _HAS_TRITON = False
@@ -387,7 +390,7 @@ def triton_blockwise_quantize_dequant(
         try:
             return _triton_blockwise_qdq_impl(x, levels, block_size)
         except Exception:
-            pass
+            logger.debug("Triton blockwise QDQ failed, falling back to PyTorch implementation")
 
     return _torch_blockwise_quantize_dequant(x, levels, block_size)
 

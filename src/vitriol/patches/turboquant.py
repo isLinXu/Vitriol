@@ -527,7 +527,7 @@ def sparse_v_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_caus
 class TurboQuantPatch:
     @staticmethod
     def patch_attention(model, use_sparse_v=True, kv_quant_format="turbo3"):
-        print(f"[TurboQuant] Patching model with KV format: {kv_quant_format}")
+        logger.info("[TurboQuant] Patching model with KV format: %s", kv_quant_format)
         if use_sparse_v:
-            print("[TurboQuant] Enabling Sparse V (Attention-gated KV decoding)")
+            logger.info("[TurboQuant] Enabling Sparse V (Attention-gated KV decoding)")
         return model

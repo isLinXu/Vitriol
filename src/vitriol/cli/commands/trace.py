@@ -5,7 +5,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 import click
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 def _token_ids_to_tokens(tokenizer: Any, token_ids: list[int]) -> list[str]:
     # `convert_ids_to_tokens` handles special tokens more faithfully than decode().
@@ -419,7 +422,7 @@ def trace(
         try:
             h.remove()
         except Exception:
-            pass
+            logger.debug("Failed to remove handler hook")
 
     trace_payload = _build_trace_v1(
         model_path=str(model_path),

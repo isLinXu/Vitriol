@@ -114,8 +114,8 @@ class Scope:
     Usage:
         scope = Scope(model_id_or_path)
         info = scope.model_info()  # Now returns ModelInfo, not dict or None!
-        print(info.model_type)     # Safe, known string
-        print(info.vocab_size)     # Safe, known int
+        logger.info("model_type=%s", info.model_type)
+        logger.info("vocab_size=%d", info.vocab_size)
     """
 
     def __init__(self, model_id_or_path: str, trust_remote_code: bool = True,

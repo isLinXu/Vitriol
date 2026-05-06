@@ -110,7 +110,7 @@ class ArchSimulator:
     Usage:
         simulator = ArchSimulator()
         result = simulator.simulate(config)
-        print(f"VRAM needed: {result.vram_inference} GB")
+        logger.info("VRAM needed: %.1f GB", result.vram_inference)
     """
 
     def __init__(

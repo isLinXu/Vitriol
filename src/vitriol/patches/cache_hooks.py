@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import threading
+import logging
 from typing import Any, Callable, Optional, Type
 
 import torch
 
 from ..kv.backend import KVStoreBackend
 
+
+logger = logging.getLogger(__name__)
 
 _thread_local = threading.local()
 
@@ -191,7 +194,7 @@ class UniversalAttentionPatcher:
                             attn_output = attn_output.transpose(1, 2).contiguous()
                             return attn_output, None
                         except Exception:
-                            pass
+                            logger.debug("Failed to call attention interface for cache hooks")
                 return orig_interface(module, query_states, key_states, value_states, attention_mask, **kwargs)
 
             return custom_attention_forward

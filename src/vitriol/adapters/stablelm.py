@@ -29,7 +29,7 @@ class StableLMAdapter(ModelAdapter):
             try:
                 config.num_key_value_heads = getattr(config, "num_attention_heads", 1)
             except Exception:
-                pass
+                logger.debug("Failed to set num_key_value_heads in StableLM config")
         return config
 
     def register_classes(self):
@@ -42,7 +42,7 @@ class StableLMAdapter(ModelAdapter):
                 except (ValueError, AttributeError):
                     pass
         except Exception:
-            pass
+            logger.debug("Failed to register StableLM config mapping")
 
 
 # Register adapter

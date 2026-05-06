@@ -39,7 +39,7 @@ class MiniMaxAdapter(ModelAdapter):
                     except AttributeError:
                         pass
         except Exception:
-            pass
+            logger.debug("Failed to process triton quantization config in MiniMax")
 
         if hasattr(config, "is_encoder_decoder"):
             config.is_encoder_decoder = False
@@ -67,7 +67,7 @@ class MiniMaxAdapter(ModelAdapter):
 
             config.rope_parameters = normalized
         except Exception:
-            pass
+            logger.debug("Failed to normalize rope parameters in MiniMax config")
 
         return config
 

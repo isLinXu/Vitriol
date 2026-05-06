@@ -1,5 +1,8 @@
 """Weight Generator Network."""
 
+from dataclasses import dataclass
+from typing import Tuple, List, Optional
+
 import torch
 import torch.nn as nn
 import numpy as np

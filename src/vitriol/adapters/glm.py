@@ -36,12 +36,12 @@ class GLMAdapter(ModelAdapter):
             try:
                 config.add_bias_linear = False
             except Exception:
-                pass
+                logger.debug("Failed to set add_bias_linear in GLM config")
         if not hasattr(config, "add_qkv_bias"):
             try:
                 config.add_qkv_bias = True
             except Exception:
-                pass
+                logger.debug("Failed to set add_qkv_bias in GLM config")
         return config
 
     def get_model_class(self, config: PretrainedConfig) -> Optional[Type]:

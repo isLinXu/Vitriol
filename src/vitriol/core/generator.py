@@ -318,7 +318,7 @@ class MinimalWeightGenerator:
         try:
             return int(tensor.untyped_storage().nbytes())
         except Exception:
-            pass
+            logger.debug("tensor.untyped_storage().nbytes() failed, falling back to element_size * nelement")
         try:
             return int(tensor.element_size() * tensor.nelement())
         except Exception:
@@ -1020,13 +1020,13 @@ class MinimalWeightGenerator:
                     try:
                         setattr(active_config, k, v)
                     except Exception:
-                        pass
+                        logger.debug("Failed to set config attribute %s", k)
             for k in ("qk_nope_head_dim", "qk_rope_head_dim", "qk_head_dim", "v_head_dim"):
                 if hasattr(hf_config, k) and not hasattr(active_config, k):
                     try:
                         setattr(active_config, k, getattr(hf_config, k))
                     except Exception:
-                        pass
+                        logger.debug("Failed to copy config attribute %s from hf_config", k)
 
         # ── 3. Prepare ──────────────────────────────────────────────────
         logger.info("Strategy: %s", self.config.strategy)
@@ -1109,7 +1109,7 @@ class MinimalWeightGenerator:
                     target = expected_shards[param_seq_idx % n_expected] if n_expected else None
                 if not target:
                     target = (
-                        f"{self.strategy.get_shard_prefix()}-00001-of-XXXXX"
+                        f"{self.strategy.get_shard_prefix()}-00001-of-{{total:05d}}"
                         f".{self.strategy.file_extension}"
                     )
 
@@ -1135,7 +1135,7 @@ class MinimalWeightGenerator:
 
                 # [A5] Streaming flush when buffer reaches max_shard_size
                 if (buf_bytes.get(target, 0) >= self.max_shard_size
-                        and "XXXXX" not in target):
+                        and "{total:05d}" not in target):
                     self._save_shard(shard_buffers[target], target, shard_count)
                     shard_buffers[target] = {}
                     buf_bytes[target]     = 0
@@ -1184,7 +1184,7 @@ class MinimalWeightGenerator:
                 f"{self.strategy.get_shard_prefix()}"
                 f"-{i + 1:05d}-of-{n_ordered:05d}"
                 f".{self.strategy.file_extension}"
-                if "XXXXX" in filename else filename
+                if "{total:05d}" in filename else filename
             )
             self._save_shard(buf, real, i)
 

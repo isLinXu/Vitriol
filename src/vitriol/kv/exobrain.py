@@ -143,6 +143,7 @@ import hashlib
 import json
 import math
 import time
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Protocol
 
@@ -164,6 +165,8 @@ try:
     _HAS_REQUESTS = True
 except ImportError:
     _HAS_REQUESTS = False
+
+logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -2157,7 +2160,7 @@ class ExoBrainAttentionPatcher:
                             attn_output = attn_output.transpose(1, 2).contiguous()
                             return attn_output, None
                         except Exception:
-                            pass
+                            logger.debug("Failed to call attention interface for external brain KV injection")
 
                 return orig_interface(module, query_states, key_states, value_states, attention_mask, **kwargs)
 

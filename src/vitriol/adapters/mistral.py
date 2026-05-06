@@ -29,7 +29,7 @@ class MistralAdapter(ModelAdapter):
             try:
                 config.sliding_window = None
             except Exception:
-                pass
+                logger.debug("Failed to disable sliding window in Mistral config")
         return config
 
 

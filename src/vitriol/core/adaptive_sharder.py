@@ -116,7 +116,7 @@ class HardwareDetector:
                     rotational = int(result.stdout.strip())
                     return 'hdd' if rotational else 'ssd'
             except Exception:
-                pass
+                logger.debug("Failed to detect disk type via /sys/block/sda/queue/rotational")
         
         return 'unknown'
     

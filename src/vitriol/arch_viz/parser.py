@@ -29,9 +29,9 @@ class ConfigParser:
                 try:
                     adapter_cls().register_classes()
                 except Exception:
-                    pass
+                    logger.debug("Failed to register adapter classes")
         except Exception:
-            pass
+            logger.debug("Failed to load builtin adapters")
         
         # For local directories: prefer meta-config.json → config_meta.json → config.json
         if path.is_dir():
@@ -77,6 +77,6 @@ class ConfigParser:
                     try:
                         return build_config_object(json.loads(cfg_path.read_text(encoding="utf-8")))
                     except Exception:
-                        pass
+                        logger.debug("Failed to load config.json from local path")
             logger.error(f"Failed to load config for {model_id_or_path}: {e}")
             raise e

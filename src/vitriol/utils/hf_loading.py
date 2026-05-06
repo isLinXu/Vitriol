@@ -10,9 +10,12 @@ Goals:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 from vitriol.config.manager import SecurityOptions
 
@@ -246,7 +249,7 @@ def _load_config_with_patches(model_id: str, *, security: Optional[SecurityOptio
         if mod is not None:
             patch_remote_module(mod)
     except Exception:
-        pass
+        logger.debug("Failed to patch remote module for %s", cfg.__class__.__module__)
     return cfg
 
 
