@@ -49,7 +49,7 @@ class TestShardManagerPlanShards:
         manager = ShardManager("1GB")
         result = list(manager.plan_shards(["layer1"], {"layer1": 100}))
         assert len(result) == 1
-        assert result[0][0] == "pytorch_model-00001-of-XXXXX.bin"
+        assert result[0][0] == "pytorch_model-00001-of-{total:05d}.bin"
         assert result[0][1] == {"layer1": 100}
 
     def test_single_param_exceeds(self):
@@ -92,9 +92,9 @@ class TestShardManagerPlanShards:
             {"a": 600 * 1024 ** 2, "b": 600 * 1024 ** 2, "c": 600 * 1024 ** 2}
         ))
         assert len(result) == 3
-        assert result[0][0] == "pytorch_model-00001-of-XXXXX.bin"
-        assert result[1][0] == "pytorch_model-00002-of-XXXXX.bin"
-        assert result[2][0] == "pytorch_model-00003-of-XXXXX.bin"
+        assert result[0][0] == "pytorch_model-00001-of-{total:05d}.bin"
+        assert result[1][0] == "pytorch_model-00002-of-{total:05d}.bin"
+        assert result[2][0] == "pytorch_model-00003-of-{total:05d}.bin"
 
     def test_param_size_zero(self):
         manager = ShardManager("1GB")

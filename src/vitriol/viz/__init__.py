@@ -1,5 +1,4 @@
-# ⚠️ DEPRECATED: Use vitriol.arch_viz instead.
-# This module will be removed in a future version.
+"""Weight inspection and visualization utilities."""
 
 from vitriol.viz.weight_inspector import (
     inspect_weights,

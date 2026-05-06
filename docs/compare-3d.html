@@ -118,7 +118,7 @@
         </div>
         <div class="flex gap-2">
             <button onclick="swapModels()" class="view-btn" title="交换左右模型">↔️ 交换</button>
-            <button onclick="syncCameras()" class="view-btn" title="同步镜头">🔗 同步视角</button>
+            <button onclick="toggleRealtimeSync()" id="syncBtn" class="view-btn" title="实时同步镜头">🔗 同步视角</button>
             <a href="arch-compare.html" class="view-btn">📊 特性对比</a>
             <a href="viewer.html" class="view-btn">🎨 单视图</a>
             <a href="index.html" class="view-btn">🏠 主页</a>
@@ -242,16 +242,15 @@ function swapModels() {
 function syncCameras() {
     const left = document.getElementById('leftFrame').contentWindow;
     const right = document.getElementById('rightFrame').contentWindow;
-    
+
     try {
         // Try to read camera from left and apply to right
         if (left && left.camera && right && right.camera && right.controls) {
-            const cam = left.camera;
-            right.camera.position.copy(cam.position);
-            right.camera.quaternion.copy(cam.quaternion);
+            right.camera.position.copy(left.camera.position);
+            right.camera.quaternion.copy(left.camera.quaternion);
             right.controls.target.copy(left.controls.target);
             right.controls.update();
-            
+
             // Flash feedback
             const btn = event.target;
             const originalText = btn.textContent;
@@ -267,6 +266,70 @@ function syncCameras() {
     } catch (e) {
         console.error('Camera sync failed:', e);
         alert('同步失败：iframe 可能尚未加载完成');
+    }
+}
+
+// ============================================
+// Real-time Camera Sync via postMessage
+// ============================================
+let _realtimeSyncEnabled = false;
+
+function enableRealtimeSync() {
+    const left = document.getElementById('leftFrame').contentWindow;
+    const right = document.getElementById('rightFrame').contentWindow;
+    left.postMessage({ type: 'vitriol:camera-sync-enable' }, '*');
+    right.postMessage({ type: 'vitriol:camera-sync-enable' }, '*');
+    _realtimeSyncEnabled = true;
+}
+
+function disableRealtimeSync() {
+    const left = document.getElementById('leftFrame').contentWindow;
+    const right = document.getElementById('rightFrame').contentWindow;
+    left.postMessage({ type: 'vitriol:camera-sync-disable' }, '*');
+    right.postMessage({ type: 'vitriol:camera-sync-disable' }, '*');
+    _realtimeSyncEnabled = false;
+}
+
+// Listen for camera updates from either iframe and relay to the other
+window.addEventListener('message', (e) => {
+    if (!e.data || e.data.type !== 'vitriol:camera-update') return;
+    if (!_realtimeSyncEnabled) return;
+
+    // Determine source iframe and relay to the other
+    const leftFrame = document.getElementById('leftFrame');
+    const rightFrame = document.getElementById('rightFrame');
+    const sourceFrame = e.source;
+
+    let targetFrame = null;
+    if (sourceFrame === leftFrame.contentWindow) {
+        targetFrame = rightFrame;
+    } else if (sourceFrame === rightFrame.contentWindow) {
+        targetFrame = leftFrame;
+    }
+
+    if (targetFrame && targetFrame.contentWindow) {
+        targetFrame.contentWindow.postMessage({
+            type: 'vitriol:camera-sync',
+            payload: e.data.payload
+        }, '*');
+    }
+});
+
+// Toggle real-time sync on/off
+function toggleRealtimeSync() {
+    const btn = document.getElementById('syncBtn');
+    if (_realtimeSyncEnabled) {
+        disableRealtimeSync();
+        btn.textContent = '🔗 同步视角';
+        btn.classList.remove('primary');
+        // Also do one-shot sync before disabling
+        syncCameras();
+    } else {
+        enableRealtimeSync();
+        btn.textContent = '🔓 取消同步';
+        btn.classList.add('primary');
+        // Initial one-shot sync
+        syncCameras();
     }
 }
 

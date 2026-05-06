@@ -8,7 +8,7 @@ def test_viz_html_templates_declared_as_package_data():
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
 
     assert '[tool.setuptools.package-data]' in pyproject
-    assert '"vitriol.viz" = ["*.html"]' in pyproject
+    assert '"vitriol.viz" = ["*.html", "*.js"]' in pyproject
 
 
 def test_built_distributions_include_viz_html_templates(tmp_path):
