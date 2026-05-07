@@ -8,4 +8,5 @@ def test_benchmark_memory_stats_shape_is_stable() -> None:
     out = _benchmark_memory_stats(dummy, backend=None, device=type("D", (), {"type": "cpu"})())
     assert "estimated_kv_bytes" in out
     assert "layer_stats" in out
-
+    assert isinstance(out["estimated_kv_bytes"], int)
+    assert isinstance(out["layer_stats"], dict)
