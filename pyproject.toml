@@ -92,7 +92,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-n1 --ignore=tests/integration"
+addopts = "--ignore=tests/integration"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "ignore::DeprecationWarning:torchao.*",

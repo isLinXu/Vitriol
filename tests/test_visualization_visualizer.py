@@ -1,4 +1,14 @@
 """Tests for vitriol.visualization.visualizer module."""
+import pytest
+
+try:
+    import plotly  # noqa: F401
+    _HAS_PLOTLY = True
+except ModuleNotFoundError:
+    _HAS_PLOTLY = False
+
+pytestmark = pytest.mark.skipif(not _HAS_PLOTLY, reason="plotly is an optional dependency")
+
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -6,7 +16,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import torch
 
-from vitriol.visualization.visualizer import WeightVisualizer
+if _HAS_PLOTLY:
+    from vitriol.visualization.visualizer import WeightVisualizer
+else:
+    WeightVisualizer = object  # type: ignore[misc,assignment]
 
 
 class TestWeightVisualizer:
