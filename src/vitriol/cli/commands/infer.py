@@ -162,6 +162,17 @@ def _stats_text(result: dict[str, object]) -> str:
     ]
     if estimated_kv_mb is not None and peak_device_mb is not None:
         lines.insert(-2, f"peak_minus_estimated_mb: {float(peak_device_mb) - float(estimated_kv_mb):.2f}")
+
+    # KV hook 统计（只读展示；不影响推理流程）
+    try:
+        from ...patches.cache_hooks import get_cache_hook_stats
+
+        hook_stats = get_cache_hook_stats()
+        lines.append("kv_hook_stats:")
+        for k in sorted(hook_stats.keys()):
+            lines.append(f"  {k}: {hook_stats[k]}")
+    except Exception:
+        lines.append("kv_hook_stats: -")
     return "\n".join(lines)
 
 
