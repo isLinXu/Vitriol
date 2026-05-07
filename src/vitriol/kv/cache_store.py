@@ -47,6 +47,11 @@ def _get_turbo_utils():
 
 @dataclass
 class KVCacheStoreConfig:
+    # When False, KVCacheStore will drop the raw bf16 tensors (_k_raw/_v_raw) after encoding.
+    # This reduces host/device memory usage at the cost of occasionally having to decode
+    # from the encoded representation for certain operations (e.g., eviction or threshold crossing).
+    keep_raw_cache: bool = True
+
     enable_turbo_quant: bool = False
     turbo_format: Optional[str] = None
     turbo_bits: Optional[float] = None
@@ -127,6 +132,15 @@ class KVCacheStoreConfig:
     exobrain_use_cross_attention: bool = True
     exobrain_auto_project: bool = True
 
+    # ── Codec feature flags: mutually exclusive with explicit validation ──
+    _CODEC_FEATURE_FLAGS: tuple[str, ...] = (
+        "enable_spectral_kv",
+        "enable_predictive_kv",
+        "enable_cross_layer_kv",
+        "enable_attention_gated_kv",
+        "enable_dict_kv",
+    )
+
     def __post_init__(self) -> None:
         self.turbo_block_size = int(self.turbo_block_size)
         if self.turbo_block_size <= 0:
@@ -142,6 +156,15 @@ class KVCacheStoreConfig:
         self.sparse_v_threshold = float(self.sparse_v_threshold)
         if not math.isfinite(self.sparse_v_threshold) or self.sparse_v_threshold < 0:
             raise ValueError(f"sparse_v_threshold must be finite and non-negative, got {self.sparse_v_threshold!r}")
+
+        # ── P0 Fix: Validate mutually exclusive codec features ──
+        enabled_codecs = [flag for flag in self._CODEC_FEATURE_FLAGS if getattr(self, flag, False)]
+        if len(enabled_codecs) > 1:
+            raise ValueError(
+                f"At most one KV codec feature may be enabled at a time, but {len(enabled_codecs)} are active: "
+                f"{', '.join(enabled_codecs)}. These codecs use independent attention() branches; "
+                f"enabling multiple causes silent priority conflicts where only the first-matched branch executes."
+            )
 
         _, _, resolve_turbo_kv_formats = _get_turbo_utils()
         self.turbo_k_format, self.turbo_v_format = resolve_turbo_kv_formats(
@@ -301,9 +324,13 @@ class KVCacheStore:
         return encoded
 
     def _rebuild_encoded_cache(self) -> None:
+        # If raw cache is not available, we generally cannot "rebuild" encoding from scratch.
+        # In keep_raw_cache=False mode we retain the existing encoded representation and avoid
+        # clobbering it here.
         if self._k_raw is None or self._v_raw is None:
-            self._k_enc = None
-            self._v_enc = None
+            if self._k_enc is None or self._v_enc is None:
+                self._k_enc = None
+                self._v_enc = None
             return
         if not self._should_quantize(int(self._k_raw.size(-2))):
             self._k_enc = self._k_raw
@@ -314,9 +341,17 @@ class KVCacheStore:
 
     @property
     def seq_len(self) -> int:
-        if self._k_raw is None:
+        if self._k_raw is not None:
+            return int(self._k_raw.size(-2))
+        if self._k_enc is None:
             return 0
-        return int(self._k_raw.size(-2))
+        if isinstance(self._k_enc, torch.Tensor):
+            return int(self._k_enc.size(-2))
+        if isinstance(self._k_enc, ResidualQJLPackedTensor):
+            return int(self._k_enc.base.orig_shape[-2])
+        if isinstance(self._k_enc, PackedKVTensor):
+            return int(self._k_enc.orig_shape[-2])
+        return 0
 
     def set_prefill(self, key: torch.Tensor, value: torch.Tensor) -> None:
         self._k_raw = key
@@ -341,6 +376,10 @@ class KVCacheStore:
 
         self._rebuild_encoded_cache()
 
+        if not bool(self.cfg.keep_raw_cache):
+            self._k_raw = None
+            self._v_raw = None
+
     def append(self, key_new: torch.Tensor, value_new: torch.Tensor) -> None:
         """
         Incremental append to KV cache with optimized encoding.
@@ -350,89 +389,156 @@ class KVCacheStore:
             - For PackedKVTensors: incremental encode + concat (was full rebuild)
             - For adaptive bits: vectorized batched encode (no per-head loop)
         """
-        if self._k_raw is None or self._v_raw is None:
+        # Empty store: behave like prefill.
+        if self._k_enc is None or self._v_enc is None:
             self.set_prefill(key_new, value_new)
             return
 
         was_quantized = self._should_quantize()
 
-        # Always maintain raw cache for potential rebuilds
-        self._k_raw = torch.cat([self._k_raw, key_new], dim=-2)
-        self._v_raw = torch.cat([self._v_raw, value_new], dim=-2)
-
-        # ── New: Apply sliding window eviction after concat ──
-        evicted = False
-        if self._evictor is not None and self._evictor.should_evict(self.seq_len, "full_attention"):
-            keep = self._evictor.compute_eviction_indices(self.seq_len)
-            self._k_raw, self._v_raw = self._evictor.evict_kv(self._k_raw, self._v_raw, keep)
-            evicted = True
-
         # ── New: Invalidate decode cache (KV has changed) ──
         if self._decode_cache is not None:
             self._decode_cache.invalidate()
 
-        # After eviction, must rebuild encoded cache from raw
-        if evicted:
-            self._k_enc = None
-            self._v_enc = None
-            self._rebuild_encoded_cache()
+        # If we keep raw cache and it exists, use the optimized raw-path implementation.
+        if bool(self.cfg.keep_raw_cache) and self._k_raw is not None and self._v_raw is not None:
+            # Always maintain raw cache for potential rebuilds
+            self._k_raw = torch.cat([self._k_raw, key_new], dim=-2)
+            self._v_raw = torch.cat([self._v_raw, value_new], dim=-2)
+
+            # ── New: Apply sliding window eviction after concat ──
+            evicted = False
+            if self._evictor is not None and self._evictor.should_evict(self.seq_len, "full_attention"):
+                keep = self._evictor.compute_eviction_indices(self.seq_len)
+                self._k_raw, self._v_raw = self._evictor.evict_kv(self._k_raw, self._v_raw, keep)
+                evicted = True
+
+            # After eviction, must rebuild encoded cache from raw
+            if evicted:
+                self._k_enc = None
+                self._v_enc = None
+                self._rebuild_encoded_cache()
+                return
+
+            if self._k_enc is None or self._v_enc is None:
+                self._rebuild_encoded_cache()
+                return
+
+            if not self._should_quantize():
+                self._k_enc = self._k_raw
+                self._v_enc = self._v_raw
+                return
+
+            if not was_quantized:
+                self._rebuild_encoded_cache()
+                return
+
+            k_add = key_new
+            v_add = value_new
+
+            # ── OPTIMIZED PATH 1: PackedKVTensor → Incremental encode only new tokens ──
+            if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) or isinstance(
+                self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)
+            ):
+                # Encode ONLY the new tokens (not the entire cache!)
+                k_enc_new = self._encode_tensor(k_add, is_key=True)
+                v_enc_new = self._encode_tensor(v_add, is_key=False)
+
+                # Concatenate packed representations along sequence dimension
+                # PackedKVTensor stores data as [total_blocks, ...] where total_blocks ∝ seq_len
+                self._k_enc = self._concat_packed(self._k_enc, k_enc_new)
+                self._v_enc = self._concat_packed(self._v_enc, v_enc_new)
+                return
+
+            # ── PATH 2: Tensor (non-packed) encoded cache ──
+            if self.cfg.enable_turbo_quant:
+                k_add = self._encode_tensor(k_add, is_key=True)
+                v_add = self._encode_tensor(v_add, is_key=False)
+
+            if self.cfg.enable_adaptive_bits and self._k_levels is not None and self._v_levels is not None:
+                if self._rotated_k:
+                    k_add = walsh_hadamard_rotate(k_add)
+                if self._rotated_v:
+                    v_add = walsh_hadamard_rotate(v_add)
+
+                b, h, s, d = k_add.shape
+                k_levels_flat = self._k_levels.unsqueeze(0).expand(b, -1).reshape(b * h)
+                v_levels_flat = self._v_levels.unsqueeze(0).expand(b, -1).reshape(b * h)
+                k_out = _vectorized_blockwise_qdq(
+                    k_add.reshape(b * h, s, d), k_levels_flat, self.cfg.adaptive_bits.block_size
+                )
+                v_out = _vectorized_blockwise_qdq(
+                    v_add.reshape(b * h, s, d), v_levels_flat, self.cfg.adaptive_bits.block_size
+                )
+                k_add = k_out.reshape(b, h, s, d)
+                v_add = v_out.reshape(b, h, s, d)
+
+            self._k_enc = torch.cat([self._k_enc, k_add], dim=-2)
+            self._v_enc = torch.cat([self._v_enc, v_add], dim=-2)
             return
 
-        if self._k_enc is None or self._v_enc is None:
-            self._rebuild_encoded_cache()
+        # ── keep_raw_cache=False (or raw cache missing): encoded-only append ──
+        new_total_len = self.seq_len + int(key_new.size(-2))
+        will_quantize = self._should_quantize(new_total_len)
+
+        # If eviction is enabled, we need to operate in decoded space since we no longer have raw tensors.
+        if self._evictor is not None and self._evictor.should_evict(new_total_len, "full_attention"):
+            k_full = torch.cat([self._decode_tensor(self._k_enc), key_new], dim=-2)
+            v_full = torch.cat([self._decode_tensor(self._v_enc), value_new], dim=-2)
+            keep = self._evictor.compute_eviction_indices(int(k_full.size(-2)))
+            k_full, v_full = self._evictor.evict_kv(k_full, v_full, keep)
+            if self.cfg.enable_turbo_quant and self._should_quantize(int(k_full.size(-2))):
+                self._k_enc = self._encode_tensor(k_full, is_key=True)
+                self._v_enc = self._encode_tensor(v_full, is_key=False)
+            else:
+                self._k_enc = k_full
+                self._v_enc = v_full
             return
 
-        if not self._should_quantize():
-            self._k_enc = self._k_raw
-            self._v_enc = self._v_raw
+        if not will_quantize:
+            # Unquantized regime: keep tensors and just concat.
+            if isinstance(self._k_enc, torch.Tensor) and isinstance(self._v_enc, torch.Tensor):
+                self._k_enc = torch.cat([self._k_enc, key_new], dim=-2)
+                self._v_enc = torch.cat([self._v_enc, value_new], dim=-2)
+                return
+            # If somehow encoded is packed while we are not quantizing, decode to tensor.
+            self._k_enc = torch.cat([self._decode_tensor(self._k_enc), key_new], dim=-2)
+            self._v_enc = torch.cat([self._decode_tensor(self._v_enc), value_new], dim=-2)
             return
 
+        # Quantized regime.
         if not was_quantized:
-            self._rebuild_encoded_cache()
+            # Crossed the quantization threshold; rebuild encoding from decoded + new tokens.
+            k_full = torch.cat([self._decode_tensor(self._k_enc), key_new], dim=-2)
+            v_full = torch.cat([self._decode_tensor(self._v_enc), value_new], dim=-2)
+            self._k_enc = self._encode_tensor(k_full, is_key=True)
+            self._v_enc = self._encode_tensor(v_full, is_key=False)
             return
 
-        k_add = key_new
-        v_add = value_new
-
-        # ── OPTIMIZED PATH 1: PackedKVTensor → Incremental encode only new tokens ──
+        # Already quantized: incrementally encode new tokens and concat encoded representations.
         if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) or isinstance(
             self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)
         ):
-            # Encode ONLY the new tokens (not the entire cache!)
-            k_enc_new = self._encode_tensor(k_add, is_key=True)
-            v_enc_new = self._encode_tensor(v_add, is_key=False)
-
-            # Concatenate packed representations along sequence dimension
-            # PackedKVTensor stores data as [total_blocks, ...] where total_blocks ∝ seq_len
+            k_enc_new = self._encode_tensor(key_new, is_key=True)
+            v_enc_new = self._encode_tensor(value_new, is_key=False)
             self._k_enc = self._concat_packed(self._k_enc, k_enc_new)
             self._v_enc = self._concat_packed(self._v_enc, v_enc_new)
             return
 
-        # ── PATH 2: Tensor (non-packed) encoded cache ──
+        # Fallback: tensor-based encoded cache in quantized regime (e.g., quantize_k/v disabled).
+        k_add = key_new
+        v_add = value_new
         if self.cfg.enable_turbo_quant:
             k_add = self._encode_tensor(k_add, is_key=True)
             v_add = self._encode_tensor(v_add, is_key=False)
-
-        if self.cfg.enable_adaptive_bits and self._k_levels is not None and self._v_levels is not None:
-            if self._rotated_k:
-                k_add = walsh_hadamard_rotate(k_add)
-            if self._rotated_v:
-                v_add = walsh_hadamard_rotate(v_add)
-
-            b, h, s, d = k_add.shape
-            k_levels_flat = self._k_levels.unsqueeze(0).expand(b, -1).reshape(b * h)
-            v_levels_flat = self._v_levels.unsqueeze(0).expand(b, -1).reshape(b * h)
-            k_out = _vectorized_blockwise_qdq(
-                k_add.reshape(b * h, s, d), k_levels_flat, self.cfg.adaptive_bits.block_size
-            )
-            v_out = _vectorized_blockwise_qdq(
-                v_add.reshape(b * h, s, d), v_levels_flat, self.cfg.adaptive_bits.block_size
-            )
-            k_add = k_out.reshape(b, h, s, d)
-            v_add = v_out.reshape(b, h, s, d)
-
-        self._k_enc = torch.cat([self._k_enc, k_add], dim=-2)
-        self._v_enc = torch.cat([self._v_enc, v_add], dim=-2)
+        if isinstance(self._k_enc, torch.Tensor) and isinstance(k_add, torch.Tensor):
+            self._k_enc = torch.cat([self._k_enc, k_add], dim=-2)
+        else:
+            self._k_enc = self._concat_packed(self._k_enc, k_add)
+        if isinstance(self._v_enc, torch.Tensor) and isinstance(v_add, torch.Tensor):
+            self._v_enc = torch.cat([self._v_enc, v_add], dim=-2)
+        else:
+            self._v_enc = self._concat_packed(self._v_enc, v_add)
 
     def _concat_packed(self, existing: Any, new_packed: Any) -> Any:
         """
@@ -507,10 +613,54 @@ class KVCacheStore:
         # Ultimate fallback: return as-is
         return combined
 
+    # ── P1 Fix: Extract GQA expand into reusable helper ──
+
+    @staticmethod
+    def _expand_gqa_kv(
+        query: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Expand K/V heads to match query head count for GQA/MQA/MLA attention."""
+        num_q_heads = query.size(1)
+        num_kv_heads = v.size(1)
+        if num_q_heads == num_kv_heads:
+            return k, v
+        num_key_value_groups = num_q_heads // num_kv_heads
+        if num_key_value_groups == 1:
+            return k, v
+        b, kvh, s, d = v.shape
+        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, d).reshape(b, kvh * num_key_value_groups, s, d)
+        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, d).reshape(b, kvh * num_key_value_groups, s, d)
+        return k, v
+
+    def _decode_kv_if_packed(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Decode K/V from packed format if needed, return as plain tensors."""
+        k_dec = self._decode_tensor(self._k_enc) if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._k_enc
+        v_dec = self._decode_tensor(self._v_enc) if isinstance(self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._v_enc
+        return k_dec, v_dec
+
+    def _run_codec_attention(
+        self,
+        codec: Any,
+        query: torch.Tensor,
+        k_dec: torch.Tensor,
+        v_dec: torch.Tensor,
+        attn_mask: Optional[torch.Tensor],
+        dropout_p: float,
+        is_causal: bool,
+        scale: Optional[float],
+        codec_kwargs: Optional[dict] = None,
+    ) -> torch.Tensor:
+        """Run a codec's compress_kv then standard attention — unified path for all codecs."""
+        kw = codec_kwargs or {}
+        k_compressed, v_compressed, _ = codec.compress_kv(k_dec, v_dec, **kw)
+        k_compressed, v_compressed = self._expand_gqa_kv(query, k_compressed, v_compressed)
+        return F.scaled_dot_product_attention(
+            query, k_compressed, v_compressed,
+            attn_mask=attn_mask, dropout_p=dropout_p, scale=scale, is_causal=is_causal,
+        )
+
     def _ensure_adaptive_ready(self, query: torch.Tensor) -> None:
         if not self.cfg.enable_adaptive_bits:
-            return
-        if self._k_raw is None or self._v_raw is None:
             return
         if self._k_enc is None or self._v_enc is None:
             return
@@ -682,103 +832,56 @@ class KVCacheStore:
         q_len = query.size(-2)
         is_decode = q_len == 1
 
-        # ── New: SpectralKV path ──
+        # ── Codec attention paths (mutually exclusive, validated in __post_init__) ──
+        # P1 Fix: All codec paths unified through _run_codec_attention + _decode_kv_if_packed
+
         if self.cfg.enable_spectral_kv and self._spectral_codec is not None:
-            k_dec = self._decode_tensor(self._k_enc) if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._k_enc
-            v_dec = self._decode_tensor(self._v_enc) if isinstance(self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._v_enc
+            k_dec, v_dec = self._decode_kv_if_packed()
             if k_dec is not None and v_dec is not None:
-                k_spectral, v_spectral, _ = self._spectral_codec.compress_kv(k_dec, v_dec)
-                # Continue with standard attention on spectral-reconstructed K/V
-                k = k_spectral
-                v = v_spectral
-                # GQA handling below
-                num_q_heads = query.size(1)
-                num_kv_heads = v.size(1)
-                if num_q_heads != num_kv_heads:
-                    num_key_value_groups = num_q_heads // num_kv_heads
-                    b, kvh, s_dim, d_dim = v.shape
-                    if num_key_value_groups != 1:
-                        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                return F.scaled_dot_product_attention(query, k, v, attn_mask=attn_mask, dropout_p=dropout_p, scale=scale, is_causal=is_causal)
+                return self._run_codec_attention(
+                    self._spectral_codec, query, k_dec, v_dec,
+                    attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                )
 
-        # ── New: PredictiveKV path ──
         if self.cfg.enable_predictive_kv and self._predictive_codec is not None:
-            k_dec = self._decode_tensor(self._k_enc) if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._k_enc
-            v_dec = self._decode_tensor(self._v_enc) if isinstance(self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._v_enc
+            k_dec, v_dec = self._decode_kv_if_packed()
             if k_dec is not None and v_dec is not None:
-                k_pred, v_pred, _ = self._predictive_codec.compress_kv(k_dec, v_dec)
-                k = k_pred
-                v = v_pred
-                num_q_heads = query.size(1)
-                num_kv_heads = v.size(1)
-                if num_q_heads != num_kv_heads:
-                    num_key_value_groups = num_q_heads // num_kv_heads
-                    b, kvh, s_dim, d_dim = v.shape
-                    if num_key_value_groups != 1:
-                        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                return F.scaled_dot_product_attention(query, k, v, attn_mask=attn_mask, dropout_p=dropout_p, scale=scale, is_causal=is_causal)
+                return self._run_codec_attention(
+                    self._predictive_codec, query, k_dec, v_dec,
+                    attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                )
 
-        # ── New: CrossLayerKV path ──
         if self.cfg.enable_cross_layer_kv and self._cross_layer_codec is not None:
-            k_dec = self._decode_tensor(self._k_enc) if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._k_enc
-            v_dec = self._decode_tensor(self._v_enc) if isinstance(self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._v_enc
+            k_dec, v_dec = self._decode_kv_if_packed()
             if k_dec is not None and v_dec is not None:
-                # Use previous layer's KV for differential coding if available
                 prev_k = getattr(self, '_cross_layer_prev_k', None)
                 prev_v = getattr(self, '_cross_layer_prev_v', None)
-                k_cl, v_cl, _ = self._cross_layer_codec.compress_kv(k_dec, v_dec, prev_key=prev_k, prev_value=prev_v)
-                # Cache current KV for next layer
-                self._cross_layer_prev_k = k_cl.detach()
-                self._cross_layer_prev_v = v_cl.detach()
-                k = k_cl
-                v = v_cl
-                num_q_heads = query.size(1)
-                num_kv_heads = v.size(1)
-                if num_q_heads != num_kv_heads:
-                    num_key_value_groups = num_q_heads // num_kv_heads
-                    b, kvh, s_dim, d_dim = v.shape
-                    if num_key_value_groups != 1:
-                        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                return F.scaled_dot_product_attention(query, k, v, attn_mask=attn_mask, dropout_p=dropout_p, scale=scale, is_causal=is_causal)
+                result = self._run_codec_attention(
+                    self._cross_layer_codec, query, k_dec, v_dec,
+                    attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                    codec_kwargs={"prev_key": prev_k, "prev_value": prev_v},
+                )
+                # Cache current KV for next layer (differential coding)
+                self._cross_layer_prev_k = k_dec.detach()
+                self._cross_layer_prev_v = v_dec.detach()
+                return result
 
-        # ── New: AttentionGatedKV path ──
         if self.cfg.enable_attention_gated_kv and self._attention_gated_codec is not None:
-            k_dec = self._decode_tensor(self._k_enc) if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._k_enc
-            v_dec = self._decode_tensor(self._v_enc) if isinstance(self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._v_enc
+            k_dec, v_dec = self._decode_kv_if_packed()
             if k_dec is not None and v_dec is not None:
-                k_ag, v_ag, _ = self._attention_gated_codec.compress_kv(k_dec, v_dec, query=query)
-                k = k_ag
-                v = v_ag
-                num_q_heads = query.size(1)
-                num_kv_heads = v.size(1)
-                if num_q_heads != num_kv_heads:
-                    num_key_value_groups = num_q_heads // num_kv_heads
-                    b, kvh, s_dim, d_dim = v.shape
-                    if num_key_value_groups != 1:
-                        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                return F.scaled_dot_product_attention(query, k, v, attn_mask=attn_mask, dropout_p=dropout_p, scale=scale, is_causal=is_causal)
+                return self._run_codec_attention(
+                    self._attention_gated_codec, query, k_dec, v_dec,
+                    attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                    codec_kwargs={"query": query},
+                )
 
-        # ── New: DictKV path ──
         if self.cfg.enable_dict_kv and self._dict_kv_codec is not None:
-            k_dec = self._decode_tensor(self._k_enc) if isinstance(self._k_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._k_enc
-            v_dec = self._decode_tensor(self._v_enc) if isinstance(self._v_enc, (PackedKVTensor, ResidualQJLPackedTensor)) else self._v_enc
+            k_dec, v_dec = self._decode_kv_if_packed()
             if k_dec is not None and v_dec is not None:
-                k_dict, v_dict, _ = self._dict_kv_codec.compress_kv(k_dec, v_dec)
-                k = k_dict
-                v = v_dict
-                num_q_heads = query.size(1)
-                num_kv_heads = v.size(1)
-                if num_q_heads != num_kv_heads:
-                    num_key_value_groups = num_q_heads // num_kv_heads
-                    b, kvh, s_dim, d_dim = v.shape
-                    if num_key_value_groups != 1:
-                        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s_dim, d_dim).reshape(b, kvh * num_key_value_groups, s_dim, d_dim)
-                return F.scaled_dot_product_attention(query, k, v, attn_mask=attn_mask, dropout_p=dropout_p, scale=scale, is_causal=is_causal)
+                return self._run_codec_attention(
+                    self._dict_kv_codec, query, k_dec, v_dec,
+                    attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                )
 
         if is_decode and self._decode_cache is not None:
             k_dec, v_dec = self._decode_cache.get_decoded_kv(
@@ -824,12 +927,14 @@ class KVCacheStore:
         num_q_heads = query.size(1)
         num_kv_heads = k.size(1) if k is not None else v.size(1)
         if num_q_heads != num_kv_heads:
-            num_key_value_groups = num_q_heads // num_kv_heads
-            b, kvh, s, d = v.shape if k is None else k.shape
-            if num_key_value_groups != 1:
-                if k is not None:
-                    k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, d).reshape(b, kvh * num_key_value_groups, s, d)
-                v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, d).reshape(b, kvh * num_key_value_groups, s, d)
+            if k is not None:
+                k, v = self._expand_gqa_kv(query, k, v)
+            else:
+                # k is None (residual proxy path) — expand v only
+                num_key_value_groups = num_q_heads // num_kv_heads
+                if num_key_value_groups != 1:
+                    b, kvh, s, d = v.shape
+                    v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, d).reshape(b, kvh * num_key_value_groups, s, d)
 
         if self.cfg.enable_compute_skip:
             if residual_proxy_eligible:
