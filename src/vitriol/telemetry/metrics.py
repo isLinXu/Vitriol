@@ -10,7 +10,7 @@ Provides monitoring through:
 
 import logging
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Iterable, List
 from dataclasses import dataclass, field
 from collections import defaultdict
 import threading
@@ -89,6 +89,52 @@ class MetricsCollector:
             # Limit history
             if len(self._histograms[f"{name}{label_key}"]) > 10000:
                 self._histograms[f"{name}{label_key}"] = self._histograms[f"{name}{label_key}"][-5000:]
+
+    def ingest_dict(
+        self,
+        prefix: str,
+        data: Dict[str, Any],
+        labels: Optional[Dict] = None,
+        *,
+        numeric_kind: str = "gauge",
+        sep: str = "_",
+    ) -> None:
+        """
+        Ingest a nested dict into metrics by flattening numeric leaves.
+
+        This is a minimal Phase2 helper intended for exporting runtime stats
+        (e.g. cache_hooks / turboquant / kv_store) into MetricsCollector.
+
+        Behavior:
+        - Only dict nesting is traversed; non-dict containers are ignored.
+        - Numeric leaves (int/float, excluding bool) are exported.
+        - By default values are exported as gauges. If numeric_kind="counter",
+          values are ingested as counter deltas (increment).
+
+        Args:
+            prefix: Metric name prefix, e.g. "kv".
+            data: Nested dict of stats.
+            labels: Optional labels applied to all exported metrics.
+            numeric_kind: "gauge" (default) or "counter".
+            sep: Path separator for flattened metric names.
+        """
+        if not isinstance(data, dict):
+            return
+
+        kind = str(numeric_kind or "gauge").lower()
+        for path, value in _iter_numeric_leaves(data):
+            suffix = sep.join(_sanitize_metric_token(p) for p in path if p)
+            name = _sanitize_metric_token(prefix) if prefix else ""
+            if suffix:
+                name = f"{name}{sep}{suffix}" if name else suffix
+            if not name:
+                continue
+
+            v = float(value)
+            if kind == "counter":
+                self.counter(name, v, labels=labels)
+            else:
+                self.gauge(name, v, labels=labels)
     
     def _labels_to_key(self, labels: Optional[Dict]) -> str:
         """Convert labels to string key."""
@@ -288,3 +334,41 @@ def get_health_checker() -> HealthChecker:
     if _health_checker is None:
         _health_checker = HealthChecker()
     return _health_checker
+
+
+def _is_number(value: Any) -> bool:
+    # bool is a subclass of int; treat it as non-numeric for metrics export.
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _iter_numeric_leaves(data: Dict[str, Any]) -> Iterable[tuple[List[str], float]]:
+    """
+    Yield (path, value) for numeric leaves in a nested dict.
+
+    Note: for Phase2 we only traverse dicts. Lists/tuples/etc are ignored.
+    """
+
+    def walk(node: Any, path: List[str]) -> Iterable[tuple[List[str], float]]:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from walk(v, [*path, str(k)])
+            return
+        if _is_number(node):
+            yield (path, float(node))
+
+    yield from walk(data, [])
+
+
+def _sanitize_metric_token(token: str) -> str:
+    """
+    Sanitize a metric name token to be Prometheus-friendly-ish.
+
+    We keep ASCII letters/digits/underscore; everything else becomes underscore.
+    """
+    out = []
+    for ch in str(token):
+        if ("a" <= ch <= "z") or ("A" <= ch <= "Z") or ("0" <= ch <= "9") or ch == "_":
+            out.append(ch)
+        else:
+            out.append("_")
+    return "".join(out).strip("_")

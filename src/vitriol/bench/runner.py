@@ -28,7 +28,7 @@ from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
 from ..kv.backend import KVStoreBackend
 from ..kv.cache_store import KVCacheStoreConfig
 from ..kv.policy import KVLayerType, KVPolicyPreset, Turbo3ExactKApproxVPolicy, apply_policy_to_store_cfg, build_policy, classify_kv_layer, resolve_layer_strategy
-from ..patches.cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher
+from ..patches.cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher, get_cache_hook_stats
 from ..patches.turboquant import get_turboquant_stats, reset_turboquant_stats, turbo_quantize
 from ..telemetry.run_context import new_run_id
 try:
@@ -1333,6 +1333,11 @@ def run_smoke(
             "estimated_kv_bytes": int((tuned_memory or {}).get("estimated_kv_bytes", 0) or 0),
             "layer_stats": (tuned_memory or {}).get("layer_stats", {}) or {},
         },
+        "stats": {
+            "cache_hooks": get_cache_hook_stats(),
+            "turboquant": tuned_turboquant,
+            "kv_store": tuned_memory,
+        },
         "tuned_memory": tuned_memory,
         "tuned_turboquant": tuned_turboquant,
         "passthrough_update": bool(passthrough_update),
@@ -1441,6 +1446,11 @@ def run_generate_preset(
             "storage_path": "packed" if bool(tuned_cfg.enable_turbo_quant) else "raw",
             "estimated_kv_bytes": int((tuned_memory or {}).get("estimated_kv_bytes", 0) or 0),
             "layer_stats": (tuned_memory or {}).get("layer_stats", {}) or {},
+        },
+        "stats": {
+            "cache_hooks": get_cache_hook_stats(),
+            "turboquant": tuned_turboquant,
+            "kv_store": tuned_memory,
         },
         "tuned_memory": tuned_memory,
         "tuned_turboquant": tuned_turboquant,
