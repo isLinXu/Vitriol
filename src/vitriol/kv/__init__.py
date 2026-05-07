@@ -17,6 +17,7 @@ except ImportError:
     _HAS_TRITON = False
 from .cache_store import KVCacheStore, KVCacheStoreConfig
 from .backend import KVMeta, KVStoreBackend
+from .utils import clear_vitriol_kv
 from .policy import (
     ApproxMode,
     KVLayerStrategy,
@@ -269,4 +270,5 @@ __all__ = [
     "BrainKVCompressor",
     "ProgressiveDistiller",
     "ExoBrainProfiler",
+    "clear_vitriol_kv",
 ]

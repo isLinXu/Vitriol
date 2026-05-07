@@ -14,6 +14,36 @@ logger = logging.getLogger(__name__)
 
 _thread_local = threading.local()
 
+_STATS_LOCK = threading.Lock()
+_CACHE_HOOK_STATS: dict[str, int] = {}
+
+
+def _bump_cache_hook_stat(name: str, delta: int = 1) -> None:
+    """线程安全地累加 KV hook 统计计数（仅用于可观测性，禁止改变逻辑分支）。"""
+    try:
+        d = int(delta)
+    except Exception:
+        d = 1
+    if d == 0:
+        return
+    with _STATS_LOCK:
+        _CACHE_HOOK_STATS[name] = int(_CACHE_HOOK_STATS.get(name, 0)) + d
+
+
+def get_cache_hook_stats(*, reset: bool = False) -> dict[str, int]:
+    """获取 KV hook 统计快照；如 reset=True 则清空计数器。"""
+    with _STATS_LOCK:
+        snap = dict(_CACHE_HOOK_STATS)
+        if reset:
+            _CACHE_HOOK_STATS.clear()
+    return snap
+
+
+def reset_cache_hook_stats() -> None:
+    """清空 KV hook 统计计数器。"""
+    with _STATS_LOCK:
+        _CACHE_HOOK_STATS.clear()
+
 
 def _cache_position_query_len(cache_position: Any) -> int:
     if isinstance(cache_position, torch.Tensor):
@@ -59,6 +89,7 @@ class CacheHookPatcher:
             layer_idx: int,
             cache_kwargs: Optional[dict[str, Any]] = None,
         ):
+            _bump_cache_hook_stat("cache_update_calls")
             if self.cfg.auto_enable_mode and not getattr(self_cache, "_vitriol_kv_store_mode", False):
                 setattr(self_cache, "_vitriol_kv_store_mode", True)
             mode = getattr(self_cache, "_vitriol_kv_store_mode", False)
@@ -68,7 +99,9 @@ class CacheHookPatcher:
             _thread_local.current_cache = self_cache
 
             info = dict(cache_kwargs or {})
-            info["q_len"] = int(key_states.size(-2))
+            q_len = int(key_states.size(-2))
+            info["q_len"] = q_len
+            _bump_cache_hook_stat("write_kv_calls")
             self.backend.write_kv(self_cache, int(layer_idx), key_states, value_states, info)
 
             seq_lens = getattr(self_cache, "_vitriol_seq_lens", None)
@@ -80,11 +113,14 @@ class CacheHookPatcher:
             if int(layer_idx) >= len(seq_lens):
                 seq_lens.extend([0] * (int(layer_idx) - len(seq_lens) + 1))
 
-            seq_lens[int(layer_idx)] += int(key_states.size(-2))
-            if int(key_states.size(-2)) > 1:
+            seq_lens[int(layer_idx)] += q_len
+            if q_len > 1:
+                _bump_cache_hook_stat("update_passthrough_prefill")
                 return self._orig_update(self_cache, key_states, value_states, layer_idx, cache_kwargs)
             if self.cfg.passthrough_update:
+                _bump_cache_hook_stat("update_passthrough_decode")
                 return self._orig_update(self_cache, key_states, value_states, layer_idx, cache_kwargs)
+            _bump_cache_hook_stat("update_short_circuit_decode")
             return key_states.contiguous(), value_states.contiguous()
 
         def get_seq_length_wrapped(self_cache, layer_idx: int | None = 0) -> int:
@@ -154,9 +190,16 @@ class UniversalAttentionPatcher:
         self._supported = registry is not None and hasattr(registry, "get_interface")
         self.orig_get_interface = registry.get_interface if self._supported else None
         self._patched = False
+        self._warned_unsupported = False
 
     def apply(self) -> None:
         if not self._supported:
+            _bump_cache_hook_stat("attention_hook_unsupported")
+            if not self._warned_unsupported:
+                self._warned_unsupported = True
+                logger.warning(
+                    "UniversalAttentionPatcher unsupported: transformers.modeling_utils.ALL_ATTENTION_FUNCTIONS.get_interface not found"
+                )
             return
         if self._patched:
             return
@@ -172,6 +215,7 @@ class UniversalAttentionPatcher:
                 if cache is not None and q_len == 1 and getattr(cache, "_vitriol_kv_store_mode", False):
                     layer_idx = getattr(module, "layer_idx", None)
                     if layer_idx is not None:
+                        _bump_cache_hook_stat("read_attention_attempt")
                         dropout = kwargs.get("dropout", 0.0)
                         scaling = kwargs.get("scaling", None)
                         is_causal = kwargs.get("is_causal", False)
@@ -191,9 +235,11 @@ class UniversalAttentionPatcher:
                                 scale=scaling,
                                 info=info
                             )
+                            _bump_cache_hook_stat("read_attention_hit")
                             attn_output = attn_output.transpose(1, 2).contiguous()
                             return attn_output, None
                         except Exception:
+                            _bump_cache_hook_stat("read_attention_fallback")
                             logger.debug("Failed to call attention interface for cache hooks")
                 return orig_interface(module, query_states, key_states, value_states, attention_mask, **kwargs)
 
@@ -201,6 +247,7 @@ class UniversalAttentionPatcher:
 
         mu.ALL_ATTENTION_FUNCTIONS.get_interface = custom_get_interface
         self._patched = True
+        _bump_cache_hook_stat("attention_hook_enabled")
 
     def restore(self) -> None:
         if not self._supported:
