@@ -281,6 +281,8 @@ def infer(
             trust_remote_code=trust_remote_code,
         )
     if fmt == "json":
+        if isinstance(result, dict):
+            result.setdefault("kv", {})
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
         return
     if fmt == "summary":
