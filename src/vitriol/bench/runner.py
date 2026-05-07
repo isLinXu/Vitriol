@@ -30,6 +30,7 @@ from ..kv.cache_store import KVCacheStoreConfig
 from ..kv.policy import KVLayerType, KVPolicyPreset, Turbo3ExactKApproxVPolicy, apply_policy_to_store_cfg, build_policy, classify_kv_layer, resolve_layer_strategy
 from ..patches.cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher
 from ..patches.turboquant import get_turboquant_stats, reset_turboquant_stats, turbo_quantize
+from ..telemetry.run_context import new_run_id
 try:
     from ..kv.turboquantum import (
         TurboQuantumConfig,
@@ -1241,6 +1242,7 @@ def run_smoke(
     preset_params: Dict[str, Any] | None = None,
     trust_remote_code: bool = True,
 ) -> Dict[str, Any]:
+    run_id = new_run_id()
     device = select_device()
     dtype = torch.float16 if device.type in {"cuda", "mps"} else torch.float32
 
@@ -1257,6 +1259,7 @@ def run_smoke(
         )
     except Exception as e:
         return {
+            "run_id": run_id,
             "model_id": model_id,
             "ok": False,
             "error": repr(e),
@@ -1317,6 +1320,7 @@ def run_smoke(
     sp = (tuned_public["decode_toks_per_s"] / base["decode_toks_per_s"]) if base["decode_toks_per_s"] > 0 else 0.0
 
     return {
+        "run_id": run_id,
         "model_id": model_id,
         "device": device.type,
         "dtype": str(dtype),
@@ -1350,6 +1354,7 @@ def run_generate_preset(
     preset_params: Dict[str, Any] | None = None,
     trust_remote_code: bool = True,
 ) -> Dict[str, Any]:
+    run_id = new_run_id()
     device = select_device()
     dtype = torch.float16 if device.type in {"cuda", "mps"} else torch.float32
 
@@ -1366,6 +1371,7 @@ def run_generate_preset(
         )
     except Exception as e:
         return {
+            "run_id": run_id,
             "model_id": model_id,
             "ok": False,
             "error": f"Failed to load model or tokenizer. This architecture may not be supported by your current version of transformers. Error: {e}",
@@ -1419,6 +1425,7 @@ def run_generate_preset(
     generated_text = tokenizer.decode(gen_token_ids, skip_special_tokens=True)
 
     return {
+        "run_id": run_id,
         "model_id": model_id,
         "device": device.type,
         "dtype": str(dtype),

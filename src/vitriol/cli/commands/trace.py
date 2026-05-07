@@ -7,6 +7,8 @@ from typing import Any, Optional
 import click
 import logging
 
+from vitriol.telemetry.run_context import new_run_id
+
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ def _token_ids_to_tokens(tokenizer: Any, token_ids: list[int]) -> list[str]:
 
 def _build_trace_v1(
     *,
+    run_id: str,
     model_path: str,
     prompt: str,
     max_new_tokens: int,
@@ -30,6 +33,7 @@ def _build_trace_v1(
     # Minimal schema for tests + replay: keep it stable and small.
     return {
         "schema_version": "trace.v1",
+        "run_id": str(run_id),
         "model_path": model_path,
         "prompt": prompt,
         "max_new_tokens": int(max_new_tokens),
@@ -424,7 +428,9 @@ def trace(
         except Exception:
             logger.debug("Failed to remove handler hook")
 
+    run_id = new_run_id()
     trace_payload = _build_trace_v1(
+        run_id=run_id,
         model_path=str(model_path),
         prompt=prompt,
         max_new_tokens=int(max_new_tokens),
