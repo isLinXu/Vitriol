@@ -88,6 +88,8 @@ class DashboardDataStore:
         self.generation_metrics = GenerationMetrics()
         self.nas_metrics = NASMetrics()
         self.active_operation: Optional[str] = None
+        # Phase2 Task6: minimal dashboard run_id support
+        self.current_run_id: Optional[str] = None
         self.logs: List[str] = []
         
         # Callbacks for real-time updates
@@ -156,6 +158,23 @@ class DashboardDataStore:
                 event_type="operation",
                 data={"operation": operation, "status": "started"}
             ))
+
+    def set_run_id(self, run_id: Optional[str]):
+        """Set the current run id (thread-safe).
+
+        Backward compatible: does not affect existing state keys, only adds a new one.
+        Emits a 'run' event so SSE clients can react to run changes.
+        """
+        with self.lock:
+            self.current_run_id = run_id
+
+        self.add_event(
+            DashboardEvent(
+                timestamp=time.time(),
+                event_type="run",
+                data={"run_id": run_id},
+            )
+        )
     
     def get_state(self) -> Dict[str, Any]:
         """Get current state for dashboard."""
@@ -164,6 +183,7 @@ class DashboardDataStore:
                 "generation": self.generation_metrics.to_dict(),
                 "nas": self.nas_metrics.to_dict(),
                 "active_operation": self.active_operation,
+                "run_id": self.current_run_id,
                 "logs": self.logs[-20:],  # Last 20 logs
                 "events": [e.to_dict() for e in self.events[-50:]]  # Last 50 events
             }
