@@ -3607,7 +3607,7 @@
                         <div class="text-xs text-gray-500 uppercase mb-2">Parameters</div>
                         <div class="bg-black/30 rounded p-3 text-xs">
                             <div class="text-2xl font-bold text-white font-mono mb-1">${formatParams(cfg.totalParams)}</div>
-                            <div class="text-gray-400">${cfg.isMoE ? '~397B' : cfg.totalParams > 1e12 ? formatParams(cfg.totalParams) : ''} parameters total</div>
+                            <div class="text-gray-400">${cfg.totalParams > 0 ? formatParams(cfg.totalParams) + ' parameters (estimated)' : 'Parameters not available'}</div>
                         </div>
                     </div>
                     
@@ -4452,16 +4452,27 @@
                     modelPath = urlParams.get('model') || '';
                 }
                 
-                if (!modelPath) {
-                     // Default placeholder only: pass a real model path via URL hash (model=...) or inject INLINE_CONFIG via CLI.
-                     modelPath = 'output/Qwen3.5-397B-A17B-Vitriol-ultra-dummy';
-                }
-                
                 // Override with localStorage if set
                 const savedPath = localStorage.getItem('vitriol_model_path');
                 if (savedPath) modelPath = savedPath;
                 
-                document.getElementById('modelPath').textContent = modelPath;
+                // P0: No implicit fallback to default model path
+                // User must explicitly provide a model path via URL hash (model=...) or inject INLINE_CONFIG via CLI
+                // Otherwise, config loading will fail and show BLOCKED state
+                if (!modelPath) {
+                    // Try to load INLINE_CONFIG (injected by CLI)
+                    if (!window.__VITRIOL_INLINE_CONFIG__) {
+                        showBlockedIndicator(
+                            `No model path provided. ` +
+                            `Please pass model path via URL hash (e.g., #?model=output/your-model) ` +
+                            `or inject INLINE_CONFIG via CLI. ` +
+                            `For demo mode, add demo=1 to the URL hash (e.g., #?demo=1).`
+                        );
+                        return;
+                    }
+                }
+                
+                document.getElementById('modelPath').textContent = modelPath || '(using INLINE_CONFIG)';
 
                 // P0: dynamically update header height to position side panels and avoid overlap
                 function updateLayoutVars() {
