@@ -15,10 +15,42 @@ def test_model_3d_visualizer_does_not_fallback_to_default_config() -> None:
     assert "function getDefaultConfigForPath" not in html
 
 
+def test_model_3d_visualizer_no_implicit_default_model_path() -> None:
+    """Ensure no hardcoded default model path fallback (e.g., Qwen3.5-397B)."""
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    # The old implicit fallback that was removed:
+    assert "modelPath = 'output/Qwen3.5-397B-A17B-Vitriol-ultra-dummy'" not in html, \
+        "Implicit fallback to default model path still present - P0 violation"
+
+
+def test_model_3d_visualizer_info_missing_path_shows_error() -> None:
+    """Ensure missing model path triggers error handling, not fallback."""
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    # Should show BLOCKED state instead of using fallback
+    assert "showBlockedIndicator" in html
+    assert "window.__VITRIOL_VIZ_MODE__ = 'blocked'" in html
+
+
 def test_model_3d_visualizer_has_explicit_demo_switch() -> None:
     html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
     assert "demo=1" in html
     assert "isDemoEnabled" in html
+
+
+def test_model_3d_visualizer_no_hardcoded_397b_params() -> None:
+    """Ensure hardcoded ~397B parameter display is removed."""
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    # The old hardcoded pattern:
+    assert "${cfg.isMoE ? '~397B'" not in html, \
+        "Hardcoded ~397B parameter display still present - P0 violation"
+
+
+def test_model_3d_visualizer_parameter_display_shows_source() -> None:
+    """Ensure parameter display indicates source or availability status."""
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    # New pattern that shows actual params or indicates they're not available:
+    assert ("parameters (estimated)" in html or "Parameters not available" in html), \
+        "Parameter display should indicate source or availability"
 
 
 def test_weight_inspector_viz_data_has_p0_metadata(tmp_path: Path) -> None:
