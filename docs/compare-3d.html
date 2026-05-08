@@ -118,7 +118,7 @@
         </div>
         <div class="flex gap-2">
             <button onclick="swapModels()" class="view-btn" title="交换左右模型">↔️ 交换</button>
-            <button onclick="toggleRealtimeSync()" id="syncBtn" class="view-btn" title="实时同步镜头">🔗 同步视角</button>
+            <button onclick="toggleRealtimeSync(event)" id="syncBtn" class="view-btn" title="实时同步镜头">🔗 同步视角</button>
             <a href="arch-compare.html" class="view-btn">📊 特性对比</a>
             <a href="viewer.html" class="view-btn">🎨 单视图</a>
             <a href="index.html" class="view-btn">🏠 主页</a>
@@ -239,7 +239,7 @@ function swapModels() {
 }
 
 // Sync camera positions between iframes (best-effort)
-function syncCameras() {
+function syncCameras(evt) {
     const left = document.getElementById('leftFrame').contentWindow;
     const right = document.getElementById('rightFrame').contentWindow;
 
@@ -252,14 +252,16 @@ function syncCameras() {
             right.controls.update();
 
             // Flash feedback
-            const btn = event.target;
-            const originalText = btn.textContent;
-            btn.textContent = '✅ 已同步';
-            btn.style.background = 'rgba(34,197,94,0.3)';
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.style.background = '';
-            }, 1500);
+            const btn = evt?.target;
+            if (btn && btn instanceof HTMLElement) {
+                const originalText = btn.textContent;
+                btn.textContent = '✅ 已同步';
+                btn.style.background = 'rgba(34,197,94,0.3)';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.background = '';
+                }, 1500);
+            }
         } else {
             console.warn('Cameras not yet available in iframes');
         }
@@ -316,20 +318,20 @@ window.addEventListener('message', (e) => {
 });
 
 // Toggle real-time sync on/off
-function toggleRealtimeSync() {
+function toggleRealtimeSync(evt) {
     const btn = document.getElementById('syncBtn');
     if (_realtimeSyncEnabled) {
         disableRealtimeSync();
         btn.textContent = '🔗 同步视角';
         btn.classList.remove('primary');
         // Also do one-shot sync before disabling
-        syncCameras();
+        syncCameras(evt);
     } else {
         enableRealtimeSync();
         btn.textContent = '🔓 取消同步';
         btn.classList.add('primary');
         // Initial one-shot sync
-        syncCameras();
+        syncCameras(evt);
     }
 }
 

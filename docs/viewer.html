@@ -429,6 +429,24 @@
         let compareModels = [];
         let modelLayers = []; // Store layers globally for nav tree functions
 
+        // Expose internals for runtime verification (avoid relying on window.<var> for top-level let bindings)
+        window.__VITRIOL_INTERNALS__ = {
+            get nodes() { return nodes; },
+            get layerGroups() { return layerGroups; },
+            get modelLayers() { return modelLayers; },
+            get currentCfg() { return window._currentCfg; }
+        };
+
+        // Runtime verification surface (populated after buildModel)
+        window.__VITRIOL_DEBUG__ = {
+            version: 'lod-debug-v1',
+            lastBuildTs: null,
+            cfg: null,
+            stats: null,
+            lod: null,
+            assertions: null
+        };
+
         // Camera sync via postMessage (for compare-3d side-by-side)
         let _cameraSyncEnabled = false;
         let _cameraSyncThrottle = null;
@@ -564,8 +582,24 @@
             let rootLayers = 0;
             let rootLayerTypes = [];
             // Only use root layers if they are distinct from text_config, or if text_config is missing
-            if (config.num_hidden_layers && config.num_hidden_layers !== textLayers || (config.layer_types && config.layer_types !== textLayerTypes)) {
-                rootLayers = config.num_hidden_layers;
+            const shallowArrayEqual = (a, b) => {
+                if (a === b) return true;
+                if (!Array.isArray(a) || !Array.isArray(b)) return false;
+                if (a.length !== b.length) return false;
+                for (let i = 0; i < a.length; i++) {
+                    if (a[i] !== b[i]) return false;
+                }
+                return true;
+            };
+
+            const hasDistinctRootLayers =
+                (typeof config.num_hidden_layers === 'number' &&
+                    config.num_hidden_layers > 0 &&
+                    config.num_hidden_layers !== textLayers) ||
+                (Array.isArray(config.layer_types) && !shallowArrayEqual(config.layer_types, textLayerTypes));
+
+            if (hasDistinctRootLayers) {
+                rootLayers = config.num_hidden_layers || 0;
                 rootLayerTypes = config.layer_types || [];
             } else if (!config.text_config) {
                 // Fallback for models without text_config
@@ -1201,53 +1235,237 @@
             let currentY = 22; // Start position after embeddings
             const layerSpacing = cfg.isMoE ? 35 : 22; // Increased spacing for better visibility
             
-            // ========= LOD (Level of Detail) for large models =========
-            // When layers > 32, render only HEAD (first 4) + MIDDLE MARKER + TAIL (last 4)
-            // This prevents browser freeze for DeepSeek-V4 (64+ layers) etc.
+            // ========= LOD（Level of Detail）用于大模型 =========
+            // 目标：避免浏览器卡死的同时，尽量减少“架构被误读”的风险。
+            // 策略：
+            // - 小模型：全量渲染
+            // - 大模型：渲染 HEAD/Tail + 少量“中间抽样层”，并在出现缺口的位置插入“折叠标记层（LOD marker）”
+            //   marker 只表达“此处被折叠”，不再声称“中间层完全同构/identical”。
             const LOD_THRESHOLD = 32;
             const LOD_HEAD = 4;
             const LOD_TAIL = 4;
+            const LOD_MAX_RENDER_LAYERS = 14; // 不含 marker 的最大实际层数（越大越细，但越吃性能）
             const useLOD = cfg.textLayers > LOD_THRESHOLD;
-            const lodSkippedCount = useLOD ? cfg.textLayers - LOD_HEAD - LOD_TAIL : 0;
-            
-            // Build list of layer indices to actually render
-            let layerIndicesToRender = [];
+
+            const summarizeLayerTypes = (types) => {
+                const summary = {};
+                for (const t of types || []) summary[t] = (summary[t] || 0) + 1;
+                return summary;
+            };
+
+            const buildLodPlan = () => {
+                // 返回：[{ kind: 'layer', index: number } | { kind: 'marker', from: number, to: number, typesSummary: object }]
+                const total = cfg.textLayers || 0;
+                if (!useLOD || total <= 0) {
+                    return Array.from({ length: total }, (_, i) => ({ kind: 'layer', index: i }));
+                }
+
+                // 1) 固定渲染：头 + 尾
+                const indices = new Set();
+                for (let i = 0; i < Math.min(LOD_HEAD, total); i++) indices.add(i);
+                for (let i = Math.max(0, total - LOD_TAIL); i < total; i++) indices.add(i);
+
+                // 2) 中间抽样：优先抽样“结构变化点”（layer_types 发生变化），再补均匀抽样
+                const targetCount = Math.min(LOD_MAX_RENDER_LAYERS, total);
+                const midStart = LOD_HEAD;
+                const midEnd = total - LOD_TAIL - 1;
+
+                const addIndex = (i) => {
+                    if (typeof i !== 'number') return;
+                    if (i < 0 || i >= total) return;
+                    indices.add(i);
+                };
+
+                const getLayerType = (i) => {
+                    if (!Array.isArray(cfg.textLayerTypes)) return 'dense';
+                    return cfg.textLayerTypes[i] || 'dense';
+                };
+
+                // 2.1 抽样结构变化点（例如 dense -> moe / linear_attention 等）
+                let budget = Math.max(0, targetCount - indices.size);
+                if (budget > 0 && midEnd >= midStart) {
+                    const changePoints = [];
+                    for (let i = 1; i < total; i++) {
+                        const prev = getLayerType(i - 1);
+                        const cur = getLayerType(i);
+                        if (prev !== cur) {
+                            // 同时保留变化点两侧，避免只看到单侧导致误读
+                            changePoints.push(i - 1, i);
+                        }
+                    }
+
+                    // 去重 + 限定在中间范围
+                    const cps = Array.from(new Set(changePoints))
+                        .filter((i) => i >= midStart && i <= midEnd)
+                        .sort((a, b) => a - b);
+
+                    // 若变化点过多，则均匀抽取一部分
+                    if (cps.length > 0) {
+                        if (cps.length <= budget) {
+                            cps.forEach(addIndex);
+                        } else {
+                            const step = cps.length / budget;
+                            for (let k = 0; k < budget; k++) {
+                                const idx = cps[Math.floor(k * step)];
+                                addIndex(idx);
+                            }
+                        }
+                    }
+                }
+
+                // 2.2 若还有预算，补充均匀抽样（让中间结构有“整体感”）
+                budget = Math.max(0, targetCount - indices.size);
+                if (budget > 0 && midEnd >= midStart) {
+                    const midLen = Math.max(0, midEnd - midStart + 1);
+                    for (let k = 1; k <= budget; k++) {
+                        let idx = midStart + Math.floor((k * midLen) / (budget + 1));
+                        // 避免重复命中已选中的索引（向后找一个空位）
+                        while (idx <= midEnd && indices.has(idx)) idx++;
+                        if (idx > midEnd) break;
+                        addIndex(idx);
+                    }
+                }
+
+                // 3) 按排序输出，并在缺口处插入 marker（可附带类型摘要，避免“同构”误导）
+                const sorted = Array.from(indices).sort((a, b) => a - b);
+                const plan = [];
+                for (let s = 0; s < sorted.length; s++) {
+                    const cur = sorted[s];
+                    const prev = s > 0 ? sorted[s - 1] : null;
+                    if (prev !== null && cur - prev > 1) {
+                        const from = prev + 1;
+                        const to = cur - 1;
+                        const types = Array.isArray(cfg.textLayerTypes)
+                            ? cfg.textLayerTypes.slice(from, to + 1)
+                            : [];
+                        plan.push({
+                            kind: 'marker',
+                            from,
+                            to,
+                            typesSummary: summarizeLayerTypes(types),
+                        });
+                    }
+                    plan.push({ kind: 'layer', index: cur });
+                }
+                return plan;
+            };
+
+            const layerPlan = buildLodPlan();
+            const renderedLayerCount = layerPlan.filter((x) => x.kind === 'layer').length;
             if (useLOD) {
-                // First LOD_HEAD layers
-                for (let i = 0; i < LOD_HEAD; i++) layerIndicesToRender.push(i);
-                // Middle marker (rendered as a single folded layer)
-                layerIndicesToRender.push(-1);  // -1 = LOD marker
-                // Last LOD_TAIL layers
-                for (let i = cfg.textLayers - LOD_TAIL; i < cfg.textLayers; i++) layerIndicesToRender.push(i);
-                console.log(`🔬 LOD activated: rendering ${LOD_HEAD}+${LOD_TAIL} of ${cfg.textLayers} layers (skipping ${lodSkippedCount})`);
-            } else {
-                for (let i = 0; i < cfg.textLayers; i++) layerIndicesToRender.push(i);
+                const collapsedLayers = cfg.textLayers - renderedLayerCount;
+                console.log(`🔬 LOD activated: rendering ${renderedLayerCount}/${cfg.textLayers} layers (collapsed ${collapsedLayers})`);
+                // Expose LOD info to UI panels (stats/tooltip)
+                cfg.lodRenderedLayers = renderedLayerCount;
+                cfg.lodStrategy = 'change-points+uniform';
+                cfg.lodMaxRenderLayers = LOD_MAX_RENDER_LAYERS;
+                // Refresh stats panel to avoid stale "Rendering 8" display
+                updateStatsPanel(cfg);
             }
             
             // TEXT ENCODER LAYERS
-            for (const i of layerIndicesToRender) {
+            for (const item of layerPlan) {
                 const layerY = currentY;
                 
-                // LOD marker layer
-                if (i === -1) {
+                // LOD marker layer（折叠提示，不再声称“中间层 identical”）
+                if (item.kind === 'marker') {
+                    const collapsedCount = (item.to - item.from + 1);
+                    const typesSegment = Array.isArray(cfg.textLayerTypes)
+                        ? cfg.textLayerTypes.slice(item.from, item.to + 1)
+                        : [];
+                    let transitions = 0;
+                    const changePoints = [];
+                    for (let j = 1; j < typesSegment.length; j++) {
+                        if (typesSegment[j] !== typesSegment[j - 1]) {
+                            transitions++;
+                            // change point index = where new type begins (global layer index)
+                            changePoints.push(item.from + j);
+                        }
+                    }
+
+                    const summaryEntries = item.typesSummary ? Object.entries(item.typesSummary) : [];
+                    const uniqueTypes = summaryEntries.length;
+                    const dominant = summaryEntries.length
+                        ? summaryEntries.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0]
+                        : 'unknown';
+
+                    // Key structural feature summary inside collapsed range
+                    const typeCount = (k) => (item.typesSummary && item.typesSummary[k]) ? item.typesSummary[k] : 0;
+                    const moeCount = typeCount('moe');
+                    const linearCount = typeCount('linear_attention');
+                    const denseCount = typeCount('dense') + typeCount('full_attention') + typeCount('hash_attention');
+                    const otherCount = Math.max(0, collapsedCount - moeCount - linearCount - denseCount);
+                    const pct = (n) => collapsedCount > 0 ? Math.round((n / collapsedCount) * 100) : 0;
+
+                    // Build contiguous segments for each type inside collapsed range (for explainability)
+                    const buildSegments = (types, baseIndex) => {
+                        const segs = [];
+                        if (!types || types.length === 0) return segs;
+                        let curType = types[0] || 'dense';
+                        let start = 0;
+                        for (let k = 1; k <= types.length; k++) {
+                            const t = k < types.length ? (types[k] || 'dense') : null;
+                            if (t !== curType) {
+                                segs.push({
+                                    type: curType,
+                                    from: baseIndex + start,
+                                    to: baseIndex + (k - 1),
+                                    len: k - start
+                                });
+                                curType = t;
+                                start = k;
+                            }
+                        }
+                        return segs;
+                    };
+                    const segments = buildSegments(typesSegment, item.from);
+                    const typeSummaryStr = item.typesSummary && Object.keys(item.typesSummary).length
+                        ? Object.entries(item.typesSummary)
+                            .map(([k, v]) => `${k}:${v}`)
+                            .join(', ')
+                        : 'unknown';
+
                     modelLayers.push({
-                        name: `⋯ ${lodSkippedCount} Layers Skipped (LOD) ⋯`,
+                        name: `⋯ ${collapsedCount} Layers Collapsed (LOD) ⋯`,
                         y: layerY, type: 'attention',
                         modules: [
                             { name: 'LOD_Marker', pos: [0, 0, 0], size: [24, 4, 8], color: 0x64748b,
                               data: { 
                                   type: 'LOD (Level of Detail)',
-                                  skipped: lodSkippedCount,
+                                  sampling_strategy: 'change-points+uniform',
+                                  sampling_budget: LOD_MAX_RENDER_LAYERS,
+                                  range: `[${item.from}..${item.to}]`,
+                                  range_from: item.from,
+                                  range_to: item.to,
+                                  collapsed: collapsedCount,
                                   total: cfg.textLayers,
-                                  rendered: LOD_HEAD + LOD_TAIL,
-                                  note: 'Middle layers collapsed for performance',
-                                  desc: `${lodSkippedCount} identical layers hidden for performance. Structure is homogeneous with the visible layers above and below.` }}
+                                  rendered: renderedLayerCount,
+                                  layer_types: typeSummaryStr,
+                                  layer_types_summary: item.typesSummary || {},
+                                  layer_types_unique: uniqueTypes,
+                                  layer_types_dominant: dominant,
+                                  layer_type_transitions: transitions,
+                                  change_points: changePoints,
+                                  segments,
+                                  features: {
+                                      has_moe: moeCount > 0,
+                                      has_linear_attention: linearCount > 0,
+                                      has_dense: denseCount > 0,
+                                      moe: { count: moeCount, pct: pct(moeCount) },
+                                      linear_attention: { count: linearCount, pct: pct(linearCount) },
+                                      dense_like: { count: denseCount, pct: pct(denseCount) },
+                                      other: { count: otherCount, pct: pct(otherCount) }
+                                  },
+                                  note: 'Collapsed for performance (sampled visualization)',
+                                  desc: `Layers ${item.from}..${item.to} are collapsed for performance. This is a sampled visualization (strategy: change-points+uniform), not a claim that hidden layers are identical. Type transitions inside collapsed range: ${transitions}.` }}
                         ],
                         connections: []
                     });
                     currentY -= layerSpacing;
                     continue;
                 }
+
+                const i = item.index;
                 
                 let lType = cfg.textLayerTypes[i] || 'dense';
                 let layerName = `TEXT_ENCODER_L${i}`;
@@ -1474,7 +1692,15 @@
                 label.position.set(0, 11, 0);
                 group.add(label);
 
-                const layerGroup = { name: layer.name, group, type: layer.type, modules: [] };
+                // Keep references to enclosure meshes so we can flash/highlight layers during navigation (LOD jump)
+                const layerGroup = {
+                    name: layer.name,
+                    group,
+                    type: layer.type,
+                    modules: [],
+                    enclosureBox: boxMesh,
+                    enclosureWire: line
+                };
                 layerGroups.push(layerGroup);
 
                 // Modules
@@ -1521,6 +1747,90 @@
             
             controls.target.set(0, (50 + outputY) / 2, 0);
             controls.update();
+
+            // ============================================
+            // Runtime verification snapshot (LOD markers, etc.)
+            // ============================================
+            try {
+                const allNodes = window.__VITRIOL_INTERNALS__?.nodes || [];
+                const lodMarkers = allNodes
+                    .filter(m => m?.userData?.data && typeof m.userData.data.type === 'string' && m.userData.data.type.startsWith('LOD'))
+                    .map(m => {
+                        const d = m.userData.data || {};
+                        return {
+                            name: m.userData.name,
+                            range: d.range,
+                            range_from: d.range_from,
+                            range_to: d.range_to,
+                            collapsed: d.collapsed,
+                            rendered: d.rendered,
+                            total: d.total,
+                            sampling_strategy: d.sampling_strategy,
+                            sampling_budget: d.sampling_budget,
+                            layer_types_unique: d.layer_types_unique,
+                            layer_types_dominant: d.layer_types_dominant,
+                            layer_type_transitions: d.layer_type_transitions,
+                            has_change_points: Array.isArray(d.change_points) && d.change_points.length > 0,
+                            change_points_count: Array.isArray(d.change_points) ? d.change_points.length : 0,
+                            has_segments: Array.isArray(d.segments) && d.segments.length > 0,
+                            segments_count: Array.isArray(d.segments) ? d.segments.length : 0,
+                            has_features: !!d.features,
+                            features: d.features || null
+                        };
+                    });
+
+                // Basic assertions to support automated verification
+                const missing = [];
+                if (cfg.textLayers > 32 && (!cfg.lodRenderedLayers || cfg.lodRenderedLayers <= 0)) {
+                    missing.push('cfg.lodRenderedLayers missing/invalid while textLayers>32');
+                }
+                if (cfg.textLayers > 32 && lodMarkers.length === 0) {
+                    // NOTE: should be >0 because markers are inserted for gaps in layerPlan
+                    missing.push('No LOD markers found in nodes while textLayers>32');
+                }
+                for (const m of lodMarkers) {
+                    const must = ['range', 'range_from', 'range_to', 'collapsed', 'total', 'rendered', 'sampling_strategy'];
+                    for (const k of must) {
+                        if (m[k] === undefined || m[k] === null || m[k] === '') missing.push(`LOD marker missing ${k}`);
+                    }
+                }
+
+                window.__VITRIOL_DEBUG__ = {
+                    version: 'lod-debug-v1',
+                    lastBuildTs: Date.now(),
+                    cfg: {
+                        name: cfg.name,
+                        textLayers: cfg.textLayers,
+                        numLayers: cfg.numLayers,
+                        isMoE: cfg.isMoE,
+                        isQwen35: cfg.isQwen35,
+                        isDeepSeekV4: cfg.isDeepSeekV4,
+                        lodRenderedLayers: cfg.lodRenderedLayers || null,
+                        lodStrategy: cfg.lodStrategy || null,
+                        lodMaxRenderLayers: cfg.lodMaxRenderLayers || null
+                    },
+                    stats: {
+                        nodes: allNodes.length,
+                        layerGroups: (window.__VITRIOL_INTERNALS__?.layerGroups || []).length,
+                        modelLayers: (window.__VITRIOL_INTERNALS__?.modelLayers || []).length
+                    },
+                    lod: {
+                        markerCount: lodMarkers.length,
+                        markers: lodMarkers.slice(0, 20)
+                    },
+                    assertions: {
+                        ok: missing.length === 0,
+                        missing
+                    }
+                };
+            } catch (e) {
+                window.__VITRIOL_DEBUG__ = {
+                    version: 'lod-debug-v1',
+                    lastBuildTs: Date.now(),
+                    cfg: { name: cfg?.name || 'unknown' },
+                    assertions: { ok: false, missing: [`debug_snapshot_failed: ${e.message}`] }
+                };
+            }
         }
 
         function buildDenseLayer(idx, y, cfg) {
@@ -2740,7 +3050,7 @@
                 ${cfg.textLayers > 32 ? `
                 <div class="stat-card" style="border-color:#64748b40;">
                     <div class="stat-value" style="color:#94a3b8;font-size:14px;">🔬 LOD Active</div>
-                    <div class="stat-label">Rendering 8 of ${cfg.textLayers}</div>
+                    <div class="stat-label">Rendering ${cfg.lodRenderedLayers || 8} of ${cfg.textLayers}</div>
                 </div>
                 ` : ''}
                 ${cfg.isMultimodal ? `
@@ -2937,6 +3247,47 @@
             `;
         }
 
+        function flashLayerGroup(layerGroup) {
+            if (!layerGroup) return;
+            const box = layerGroup.enclosureBox;
+            const wire = layerGroup.enclosureWire;
+            const durationMs = 900;
+
+            // Box
+            if (box && box.material) {
+                if (box.userData._origOpacity === undefined) box.userData._origOpacity = box.material.opacity;
+                box.material.opacity = Math.min(0.18, (box.userData._origOpacity || 0) + 0.12);
+            }
+            // Wire
+            if (wire && wire.material) {
+                if (wire.userData._origOpacity === undefined) wire.userData._origOpacity = wire.material.opacity;
+                wire.material.opacity = Math.min(0.75, (wire.userData._origOpacity || 0) + 0.5);
+            }
+
+            setTimeout(() => {
+                if (box && box.material && box.userData._origOpacity !== undefined) {
+                    box.material.opacity = box.userData._origOpacity;
+                }
+                if (wire && wire.material && wire.userData._origOpacity !== undefined) {
+                    wire.material.opacity = wire.userData._origOpacity;
+                }
+            }, durationMs);
+        }
+
+        // Jump helper: focus to a specific TEXT encoder layer by index (for LOD markers)
+        function jumpToLayerIndex(idx) {
+            const i = Number(idx);
+            if (!Number.isFinite(i)) return;
+            const name = `TEXT_ENCODER_L${i}`;
+            const lg = layerGroups.find(g => g.name === name);
+            if (lg) {
+                selectLayer(lg);
+                flashLayerGroup(lg);
+            } else {
+                console.warn('Layer not found for jump:', name);
+            }
+        }
+
         function selectModule(layer, mod) {
             // Highlight module
             if (highlightedObject) {
@@ -3006,6 +3357,78 @@
             }
             if (data.intermediate) {
                 content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Intermediate</div><div class="text-orange-400 font-mono">${data.intermediate}</div></div>`;
+            }
+            // LOD marker extra info: expose collapsed-range summary directly in detail panel
+            if (data.type && String(data.type).startsWith('LOD')) {
+                if (data.range) {
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Range</div><div class="text-slate-200 font-mono">${data.range}</div></div>`;
+                }
+                if (data.collapsed !== undefined) {
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Collapsed</div><div class="text-slate-200 font-mono">${data.collapsed}</div></div>`;
+                }
+                if (data.rendered !== undefined && data.total !== undefined) {
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Rendered/Total</div><div class="text-slate-200 font-mono">${data.rendered}/${data.total}</div></div>`;
+                }
+                if (data.sampling_strategy) {
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Sampling</div><div class="text-slate-200 font-mono">${data.sampling_strategy}</div></div>`;
+                }
+                if (data.layer_types_dominant) {
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Dominant</div><div class="text-slate-200 font-mono">${data.layer_types_dominant}</div></div>`;
+                }
+                if (data.layer_types_unique !== undefined) {
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Unique Types</div><div class="text-slate-200 font-mono">${data.layer_types_unique}</div></div>`;
+                }
+                if (data.layer_type_transitions !== undefined) {
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Transitions</div><div class="text-slate-200 font-mono">${data.layer_type_transitions}</div></div>`;
+                }
+                if (data.features) {
+                    const f = data.features;
+                    const fmt = (x) => x ? `${x.count} (${x.pct}%)` : '0 (0%)';
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">MoE in range</div><div class="text-amber-300 font-mono">${fmt(f.moe)}</div></div>`;
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">LinearAttn in range</div><div class="text-teal-300 font-mono">${fmt(f.linear_attention)}</div></div>`;
+                }
+                // Show change points and segments, plus jump buttons to key layers
+                if (Array.isArray(data.change_points) && data.change_points.length) {
+                    const cps = data.change_points.slice(0, 8).join(', ');
+                    content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Change Points</div><div class="text-slate-200 font-mono">L${cps.replaceAll(',', ', L')}</div></div>`;
+                }
+                if (Array.isArray(data.segments) && data.segments.length) {
+                    const interesting = data.segments
+                        .filter(s => ['moe', 'linear_attention'].includes(s.type))
+                        .slice(0, 6)
+                        .map(s => `${s.type}[${s.from}-${s.to}]`)
+                        .join(' · ');
+                    if (interesting) {
+                        content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Segments</div><div class="text-slate-200 font-mono">${interesting}</div></div>`;
+                    }
+                }
+                if (data.range_from !== undefined && data.range_to !== undefined) {
+                    const from = Number(data.range_from);
+                    const to = Number(data.range_to);
+                    if (Number.isFinite(from) && Number.isFinite(to)) {
+                        const mid = Math.floor((from + to) / 2);
+                        content += `<div class="col-span-2 bg-black/30 rounded p-2">
+                            <div class="text-gray-500 mb-2">Jump</div>
+                            <div class="flex flex-wrap gap-2">
+                                <button class="view-btn" style="cursor:pointer;" onclick="jumpToLayerIndex(${from})">L${from}</button>
+                                <button class="view-btn" style="cursor:pointer;" onclick="jumpToLayerIndex(${mid})">L${mid}</button>
+                                <button class="view-btn" style="cursor:pointer;" onclick="jumpToLayerIndex(${to})">L${to}</button>
+                            </div>
+                        </div>`;
+                    }
+                }
+
+                // Jump directly to structural change points inside the collapsed range
+                if (Array.isArray(data.change_points) && data.change_points.length) {
+                    const btns = data.change_points
+                        .slice(0, 12)
+                        .map(cp => `<button class="view-btn" style="cursor:pointer;" onclick="jumpToLayerIndex(${cp})">L${cp}</button>`)
+                        .join('');
+                    content += `<div class="col-span-2 bg-black/30 rounded p-2">
+                        <div class="text-gray-500 mb-2">Jump to Change Points</div>
+                        <div class="flex flex-wrap gap-2">${btns}</div>
+                    </div>`;
+                }
             }
             content += '</div></div>';
             
@@ -4201,6 +4624,36 @@
                 if (data.desc) content += '<div class="tooltip-row"><span class="tooltip-label">Desc</span><span class="tooltip-value">' + data.desc + '</span></div>';
                 if (data.params) content += '<div class="tooltip-row"><span class="tooltip-label">Params</span><span class="tooltip-value">' + data.params + '</span></div>';
                 if (data.shape) content += '<div class="tooltip-row"><span class="tooltip-label">Shape</span><span class="tooltip-value">' + data.shape + '</span></div>';
+                // LOD marker: show collapsed-range structure summary to reduce misinterpretation
+                if (data.type && String(data.type).startsWith('LOD')) {
+                    if (data.range) content += '<div class="tooltip-row"><span class="tooltip-label">Range</span><span class="tooltip-value">' + data.range + '</span></div>';
+                    if (data.collapsed !== undefined) content += '<div class="tooltip-row"><span class="tooltip-label">Collapsed</span><span class="tooltip-value">' + data.collapsed + '</span></div>';
+                    if (data.rendered !== undefined && data.total !== undefined) {
+                        content += '<div class="tooltip-row"><span class="tooltip-label">Rendered/Total</span><span class="tooltip-value">' + data.rendered + '/' + data.total + '</span></div>';
+                    }
+                    if (data.sampling_strategy) content += '<div class="tooltip-row"><span class="tooltip-label">Sampling</span><span class="tooltip-value">' + data.sampling_strategy + '</span></div>';
+                    if (data.layer_types_dominant) content += '<div class="tooltip-row"><span class="tooltip-label">Dominant</span><span class="tooltip-value">' + data.layer_types_dominant + '</span></div>';
+                    if (data.layer_types_unique !== undefined) content += '<div class="tooltip-row"><span class="tooltip-label">Unique Types</span><span class="tooltip-value">' + data.layer_types_unique + '</span></div>';
+                    if (data.layer_type_transitions !== undefined) content += '<div class="tooltip-row"><span class="tooltip-label">Transitions</span><span class="tooltip-value">' + data.layer_type_transitions + '</span></div>';
+                    if (data.features) {
+                        const f = data.features;
+                        const fmt = (x) => x ? `${x.count} (${x.pct}%)` : '0 (0%)';
+                        content += '<div class="tooltip-row"><span class="tooltip-label">MoE</span><span class="tooltip-value">' + fmt(f.moe) + '</span></div>';
+                        content += '<div class="tooltip-row"><span class="tooltip-label">LinearAttn</span><span class="tooltip-value">' + fmt(f.linear_attention) + '</span></div>';
+                    }
+                    if (Array.isArray(data.change_points) && data.change_points.length) {
+                        const cps = data.change_points.slice(0, 6).join(', ');
+                        content += '<div class="tooltip-row"><span class="tooltip-label">ChangePts</span><span class="tooltip-value">L' + cps.replaceAll(',', ', L') + '</span></div>';
+                    }
+                    if (Array.isArray(data.segments) && data.segments.length) {
+                        const segs = data.segments
+                            .filter(s => ['moe', 'linear_attention'].includes(s.type))
+                            .slice(0, 4)
+                            .map(s => `${s.type}[${s.from}-${s.to}]`)
+                            .join(' · ');
+                        if (segs) content += '<div class="tooltip-row"><span class="tooltip-label">Segments</span><span class="tooltip-value">' + segs + '</span></div>';
+                    }
+                }
                 showTooltip(e, obj.userData.name, content);
             } else {
                 hideTooltip();
