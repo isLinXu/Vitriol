@@ -43,7 +43,9 @@ def build_inline_config_model(model_path):
                 "text_encoder_config": text_encoder_config,
                 "hidden_size": unet_config.get('cross_attention_dim', 768),
                 "num_layers": unet_layers,
-                "total_params": 1000000000,  # placeholder
+                "total_params": 0,
+                "params_source": "unavailable",
+                "config_source": "model_index.json",
                 "raw": model_index
             }
         except Exception as e:
@@ -156,12 +158,20 @@ def build_inline_config_model(model_path):
         "vocab_size": text_config.get('vocab_size', 0),
         "num_experts": num_experts,
         "total_params": total_params,
+        "params_source": "analyzer" if total_params > 0 else "config_derived",
         "activated_params": effective_config.get('activated_params', 0),
         "max_position": effective_config.get('max_position_embeddings', 0),
         "text_config": text_config,  # Include for parseConfig compatibility
         "vision_config": vision_config,
         "audio_config": audio_config,
         "tts_config": tts_config,
+        "config_source": (
+            "meta-config.json"
+            if (model_path / "meta-config.json").exists()
+            else "config_meta.json"
+            if (model_path / "config_meta.json").exists()
+            else "config.json"
+        ),
         "raw": raw_config,
         "meta": meta_config
     }
@@ -192,6 +202,10 @@ def collect_weight_stats(model_path: Path, max_layers: int = 64) -> dict:
             "config_source": viz_data.get("config_source", "unknown"),
             "weight_stats_available": viz_data.get("weight_stats_available", False),
             "total_params": viz_data.get("total_params", 0),
+            "model_total_params": viz_data.get("model_total_params", 0),
+            "display_params_estimate": viz_data.get("display_params_estimate", 0),
+            "params_source": viz_data.get("params_source", "unknown"),
+            "sampling": viz_data.get("sampling", {}),
             "layers": [],
         }
 

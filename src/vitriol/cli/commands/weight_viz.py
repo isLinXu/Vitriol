@@ -147,6 +147,10 @@ def _build_layer_data_from_weights(
             "config_source": viz_data.get("config_source", "unknown"),
             "weight_stats_available": viz_data.get("weight_stats_available", False),
             "total_params": viz_data.get("total_params", 0),
+            "model_total_params": viz_data.get("model_total_params", 0),
+            "display_params_estimate": viz_data.get("display_params_estimate", 0),
+            "params_source": viz_data.get("params_source", "unknown"),
+            "sampling": viz_data.get("sampling", {}),
             "layers": layers_out,
         }
 
@@ -216,6 +220,13 @@ def _build_layer_data_from_config(model_path: Path, max_layers: int = 12) -> Dic
         "num_heads": num_heads,
         "config_source": "meta-config.json" if meta else "config.json",
         "weight_stats_available": False,
+        "params_source": "config_derived",
+        "sampling": {
+            "enabled": False,
+            "method": "none",
+            "sample_size": 0,
+            "seed": None,
+        },
         "layers": [],
     }
 
@@ -238,6 +249,15 @@ def _build_layer_data_from_config(model_path: Path, max_layers: int = 12) -> Dic
         ])
 
     data["layers"].append({"name": "lm_head", "shape": [vocab_size, hidden_size], "type": "Linear"})
+
+    display_params_estimate = sum(
+        int(layer["shape"][0]) * int(layer["shape"][1])
+        for layer in data["layers"]
+        if isinstance(layer.get("shape"), list) and len(layer["shape"]) >= 2
+    )
+    data["display_params_estimate"] = display_params_estimate
+    data["model_total_params"] = 0
+    data["total_params"] = display_params_estimate
 
     return data
 

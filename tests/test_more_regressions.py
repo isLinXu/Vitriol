@@ -119,6 +119,31 @@ def test_build_inline_config_model_prefers_meta_config(tmp_path: Path) -> None:
     assert m.get("raw") == meta
     assert m.get("hidden_size") == 64
     assert m.get("num_layers") == 2
+    assert m.get("config_source") == "meta-config.json"
+    assert m.get("params_source") in {"analyzer", "config_derived"}
+
+
+def test_build_inline_config_model_diffusers_does_not_emit_placeholder_params(tmp_path: Path) -> None:
+    model_dir = tmp_path / "sd"
+    (model_dir / "unet").mkdir(parents=True)
+    (model_dir / "vae").mkdir()
+    (model_dir / "text_encoder").mkdir()
+
+    (model_dir / "model_index.json").write_text(
+        json.dumps({"_class_name": "StableDiffusionPipeline"}, indent=2),
+        encoding="utf-8",
+    )
+    (model_dir / "unet" / "config.json").write_text(
+        json.dumps({"cross_attention_dim": 1024, "down_block_types": ["A", "B", "C"]}, indent=2),
+        encoding="utf-8",
+    )
+
+    m = build_inline_config_model(model_dir)
+    assert m is not None
+    assert m.get("is_diffusion") is True
+    assert m.get("total_params") == 0
+    assert m.get("params_source") == "unavailable"
+    assert m.get("config_source") == "model_index.json"
 
 
 def test_generator_rope_defaults_do_not_add_unsupported_default_keys() -> None:

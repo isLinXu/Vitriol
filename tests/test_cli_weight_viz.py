@@ -48,6 +48,10 @@ class TestWeightVizBuildLayerData:
             assert result["vocab_size"] == 1000
             assert result["config_source"] == "config.json"
             assert result["weight_stats_available"] is False
+            assert result["params_source"] == "config_derived"
+            assert result["sampling"]["enabled"] is False
+            assert result["display_params_estimate"] > 0
+            assert result["total_params"] == result["display_params_estimate"]
             # embed_tokens + 2 layers * 7 sublayers + lm_head
             expected_layers = 1 + 2 * 7 + 1
             assert len(result["layers"]) == expected_layers
@@ -74,6 +78,37 @@ class TestWeightVizBuildLayerData:
             assert result["model_name"] == "meta_model"
             assert result["hidden_size"] == 256
             assert result["config_source"] == "meta-config.json"
+
+    def test_build_layer_data_from_weights_preserves_provenance_fields(self):
+        from vitriol.cli.commands.weight_viz import _build_layer_data_from_weights
+
+        fake_viz = {
+            "model_name": "test",
+            "hidden_size": 128,
+            "num_layers": 2,
+            "vocab_size": 1000,
+            "intermediate_size": 512,
+            "num_attention_heads": 4,
+            "config_source": "meta-config.json",
+            "weight_stats_available": True,
+            "total_params": 123456,
+            "model_total_params": 999999,
+            "display_params_estimate": 123456,
+            "params_source": "analyzer",
+            "sampling": {"enabled": True, "method": "uniform_random", "sample_size": 1024, "seed": 42},
+            "layers": [
+                {"name": "embed", "type": "Embedding", "shape": [10, 10], "stats": {"mean": 0.0, "std": 1.0, "sparsity": 0.0, "l2_norm": 1.0}},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("vitriol.viz.weight_inspector.generate_viz_data", return_value=fake_viz):
+                result = _build_layer_data_from_weights(Path(tmpdir), max_layers=12)
+
+        assert result["params_source"] == "analyzer"
+        assert result["model_total_params"] == 999999
+        assert result["display_params_estimate"] == 123456
+        assert result["sampling"]["sample_size"] == 1024
 
     def test_build_layer_data_from_config_max_layers(self):
         from vitriol.cli.commands.weight_viz import _build_layer_data_from_config
