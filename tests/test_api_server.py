@@ -216,6 +216,21 @@ def test_api_main_binds_localhost_by_default(monkeypatch):
     assert captured["port"] == 8000
 
 
+def test_status_reports_process_uptime_not_boot_timestamp(monkeypatch):
+    cfg = init_config()
+    cfg.set("security.api_key_required", False)
+    monkeypatch.setattr(server, "_APP_STARTED_AT", 100.0)
+    monkeypatch.setattr(server.time, "monotonic", lambda: 142.5)
+    client = TestClient(server.app)
+
+    response = client.get("/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["uptime"] == pytest.approx(42.5)
+    assert body["system_info"]["system_boot_time"] > body["uptime"]
+
+
 def test_process_batch_job_records_missing_model_id_as_item_failure():
     request = server.BatchGenerateRequest(
         models=[{}],

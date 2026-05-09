@@ -35,6 +35,7 @@ from ..config.settings import get_config
 from ..version import __version__
 
 logger = get_logger("vitriol.api")
+_APP_STARTED_AT = time.monotonic()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -349,17 +350,20 @@ async def health_check():
 async def get_status():
     """Get system status."""
     import psutil
+
+    uptime_seconds = max(0.0, time.monotonic() - _APP_STARTED_AT)
     
     return SystemStatus(
         status="running",
         version=__version__,
-        uptime=psutil.boot_time(),
+        uptime=uptime_seconds,
         active_jobs=len(active_jobs),
         queue_size=job_queue.qsize(),
         system_info={
             "cpu_percent": psutil.cpu_percent(),
             "memory_percent": psutil.virtual_memory().percent,
-            "disk_free_gb": psutil.disk_usage('/').free / (1024**3)
+            "disk_free_gb": psutil.disk_usage('/').free / (1024**3),
+            "system_boot_time": psutil.boot_time(),
         }
     )
 
