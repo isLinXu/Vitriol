@@ -15,9 +15,9 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
-
 from vitriol.config.manager import SecurityOptions
+
+logger = logging.getLogger(__name__)
 
 
 class RawConfig:
