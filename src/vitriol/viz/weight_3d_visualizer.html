@@ -73,6 +73,30 @@
             font-size: 0.75rem; color: #64748b; margin-top: 8px; padding-top: 8px;
             border-top: 1px solid rgba(100, 150, 255, 0.15);
         }
+
+        .toolbar-note {
+            font-size: 0.72rem;
+            color: #94a3b8;
+            margin-left: 10px;
+        }
+
+        .mini-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(100, 150, 255, 0.25);
+            background: rgba(30, 41, 59, 0.35);
+            color: #dbeafe;
+            font-size: 0.72rem;
+            margin-top: 8px;
+            margin-right: 6px;
+        }
+
+        .meta-kv { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; }
+        .meta-kv .k { color: #7c93b2; }
+        .meta-kv .v { color: #dbeafe; font-family: monospace; text-align: right; }
         
         #loading {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -132,6 +156,7 @@
             <span style="color: #80a0c0; margin-right: 10px; font-weight: 600;">SYSTEM:</span>
             <span id="model-name-display" style="font-weight: bold; color: #a0c0ff; text-shadow: 0 0 8px rgba(160, 192, 255, 0.4);">Loading...</span>
             <span id="stats-mode-badge" class="stats-badge synthetic" style="display:none;">SYNTHETIC</span>
+            <span class="toolbar-note" id="toolbar-note">Displays sampled tensor values for visual inspection.</span>
         </div>
         <div>
             <button class="btn" onclick="exportPNG()">Export PNG</button>
@@ -201,6 +226,7 @@
             <div style="display: flex; align-items: center; margin-top: 6px;">
                 <div style="width: 12px; height: 12px; background: #fbbf24; border-radius: 2px; margin-right: 10px; box-shadow: 0 0 5px rgba(251,191,36,0.5);"></div> Ultra Strided (broadcast)
             </div>
+            <div id="layer-flags"></div>
         </div>
         <div class="config-source" id="config-source-info"></div>
     </div>
@@ -245,16 +271,28 @@
                     badge.textContent = 'REAL STATS';
                     badge.className = 'stats-badge real';
                     badge.style.display = 'inline';
+                    document.getElementById('toolbar-note').textContent = 'Displays sampled real-weight statistics; colors are distribution-guided, not raw tensor dumps.';
                 } else {
                     badge.textContent = 'SYNTHETIC';
                     badge.className = 'stats-badge synthetic';
                     badge.style.display = 'inline';
+                    document.getElementById('toolbar-note').textContent = 'Displays structurally-derived synthetic values for exploration only.';
                 }
 
-                // Show config source info
-                if (modelData.config_source) {
-                    const sourceInfo = document.getElementById('config-source-info');
-                    sourceInfo.textContent = `Config: ${modelData.config_source}`;
+                // Show config/provenance info
+                const sourceInfo = document.getElementById('config-source-info');
+                if (sourceInfo) {
+                    const paramsSource = modelData.params_source || 'unknown';
+                    const sampling = modelData.sampling || {};
+                    const modelTotal = Number(modelData.model_total_params || 0);
+                    const displayEstimate = Number(modelData.display_params_estimate || 0);
+                    sourceInfo.innerHTML = `
+                        <div class="meta-kv"><span class="k">Config</span><span class="v">${modelData.config_source || 'unknown'}</span></div>
+                        <div class="meta-kv"><span class="k">Params</span><span class="v">${paramsSource}</span></div>
+                        ${modelTotal > 0 ? `<div class="meta-kv"><span class="k">Model Total</span><span class="v">${modelTotal.toLocaleString()}</span></div>` : ''}
+                        ${displayEstimate > 0 ? `<div class="meta-kv"><span class="k">Display Slice</span><span class="v">${displayEstimate.toLocaleString()}</span></div>` : ''}
+                        ${sampling.sample_size ? `<div class="meta-kv"><span class="k">Sampling</span><span class="v">${sampling.method || 'unknown'} · ${Number(sampling.sample_size).toLocaleString()} · seed ${sampling.seed ?? '-'}</span></div>` : ''}
+                    `;
                 }
 
                 buildLayerList();
@@ -346,7 +384,17 @@
             document.getElementById('stat-layer').textContent = layer.name;
             document.getElementById('stat-shape').textContent = `[${layer.shape.join(', ')}]`;
             const params = layer.shape.reduce((a, b) => a * b, 1);
-            document.getElementById('stat-params').textContent = params.toLocaleString();
+            const paramsSource = modelData?.params_source || 'unknown';
+            document.getElementById('stat-params').textContent = `${params.toLocaleString()} (${paramsSource})`;
+            const flagsEl = document.getElementById('layer-flags');
+            if (flagsEl) {
+                const pills = [];
+                if (layer.stats?.metadata_only) pills.push('<span class="mini-pill">Header-only metadata</span>');
+                if (layer.stats?.is_strided) pills.push('<span class="mini-pill">Ultra stride=0</span>');
+                if (layer.stats?.compression_ratio > 1.1) pills.push(`<span class="mini-pill">Compression ${layer.stats.compression_ratio.toFixed(1)}×</span>`);
+                if (!layer.stats && !modelData.weight_stats_available) pills.push('<span class="mini-pill">Synthetic preview</span>');
+                flagsEl.innerHTML = pills.join('');
+            }
 
             // Show weight stats if available
             const statsSection = document.getElementById('weight-stats-section');
@@ -498,7 +546,9 @@
                     const actualCol = Math.floor((c / visCols) * cols);
                     weightValues.push({
                         val: val,
-                        idx: `[${actualRow}, ${actualCol}]`
+                        idx: `[${actualRow}, ${actualCol}]`,
+                        synthetic: !layer.stats,
+                        metadataOnly: !!layer.stats?.metadata_only,
                     });
                     
                     // Color based on value
@@ -741,6 +791,13 @@
                         } else {
                             valEl.className = 'value-zero';
                         }
+
+                        const extra = [];
+                        if (weight.synthetic) extra.push('synthetic preview');
+                        if (weight.metadataOnly) extra.push('metadata-only stats');
+                        tooltip.querySelector('div').textContent = extra.length > 0
+                            ? `Weight Info · ${extra.join(' · ')}`
+                            : 'Weight Info';
                         
                         tooltip.style.display = 'block';
                         tooltip.style.left = (event.clientX + 15) + 'px';

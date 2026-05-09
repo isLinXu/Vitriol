@@ -19,3 +19,11 @@ def test_2d_file_protocol_hint_has_handshake_probe_markers() -> None:
     assert "postMessage" in html
     assert "vitriol_handshake" in html
     assert "iframe" in html
+
+
+
+def test_2d_file_protocol_hint_uses_toast_feedback_for_open_and_copy() -> None:
+    html = Path("src/vitriol/viz/model_visualizer.html").read_text(encoding="utf-8")
+    assert "Opening HTTP demo" in html
+    assert "Opening fallback HTTP demo" in html
+    assert "copyTextWithFeedback" in html

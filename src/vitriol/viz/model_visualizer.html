@@ -231,6 +231,45 @@
             box-shadow: var(--shadow);
         }
 
+        .toast-stack {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .toast {
+            min-width: 240px;
+            max-width: 360px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(37, 99, 235, 0.18);
+            background: rgba(26, 26, 46, 0.94);
+            color: #f8fafc;
+            box-shadow: var(--shadow);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }
+
+        .toast-title {
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .toast-body {
+            font-size: 11px;
+            color: rgba(226, 232, 240, 0.86);
+            line-height: 1.45;
+        }
+
+        .toast-success { border-color: rgba(5, 150, 105, 0.35); }
+        .toast-warn { border-color: rgba(234, 88, 12, 0.35); }
+        .toast-error { border-color: rgba(220, 38, 38, 0.35); }
+
         .stat-card {
             background: var(--bg-secondary);
             border-radius: 12px;
@@ -355,12 +394,88 @@
             box-shadow: var(--shadow);
         }
 
-        .details-title {
-            font-size: 16px;
-            font-weight: 600;
+        .details-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
             margin-bottom: 16px;
             padding-bottom: 12px;
             border-bottom: 1px solid var(--border-color);
+        }
+
+        .details-title {
+            font-size: 16px;
+            font-weight: 600;
+            min-width: 0;
+        }
+
+        .details-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .details-clear-btn {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .details-clear-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow);
+            color: var(--text-primary);
+        }
+
+        .details-provenance {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .details-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .details-chip.real {
+            border-color: rgba(5, 150, 105, 0.35);
+            background: rgba(5, 150, 105, 0.08);
+            color: var(--accent-green);
+        }
+
+        .details-chip.estimated {
+            border-color: rgba(234, 88, 12, 0.35);
+            background: rgba(234, 88, 12, 0.08);
+            color: var(--accent-orange);
+        }
+
+        .details-chip.demo {
+            border-color: rgba(124, 58, 237, 0.35);
+            background: rgba(124, 58, 237, 0.08);
+            color: var(--accent-purple);
+        }
+
+        .details-chip.synthetic {
+            border-color: rgba(37, 99, 235, 0.30);
+            background: rgba(37, 99, 235, 0.08);
+            color: var(--accent-blue);
         }
 
         .details-row {
@@ -383,6 +498,38 @@
             font-family: 'JetBrains Mono', monospace;
             font-size: 13px;
             font-weight: 500;
+        }
+
+        .details-note {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            border: 1px dashed var(--border-color);
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .mini-note {
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--text-tertiary);
+            line-height: 1.5;
+        }
+
+        .layer-hint {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+            font-size: 10px;
+            color: var(--text-tertiary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .layer-item.active .layer-hint {
+            color: var(--accent-blue);
         }
 
         /* Animations */
@@ -482,6 +629,8 @@
         </div>
     </div>
 
+    <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
     <div class="main-container">
         <div class="diagram-section">
             <div class="section-title">Figure 1: Model Architecture Overview</div>
@@ -501,6 +650,7 @@
                             <span id="paramsSourceBadge" class="source-badge"></span>
                             <span id="configSourceBadge" class="source-badge"></span>
                         </div>
+                        <div class="mini-note" id="statsNarrative">Waiting for backend-injected config or explicit demo mode.</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-value" id="hiddenSize">-</div>
@@ -575,7 +725,13 @@
             </div>
 
             <div class="details-panel" id="detailsPanel" style="display: none;">
-                <div class="details-title" id="detailsTitle">Layer Details</div>
+                <div class="details-header">
+                    <div class="details-title" id="detailsTitle">Layer Details</div>
+                    <div class="details-actions">
+                        <button class="details-clear-btn" id="clearDetailsBtn" type="button">Clear Selection</button>
+                    </div>
+                </div>
+                <div class="details-provenance" id="detailsProvenance"></div>
                 <div id="detailsContent"></div>
             </div>
         </div>
@@ -1277,11 +1433,15 @@
                 this.svg = svgElement;
                 this.layerComponents = [];
                 this._lastHighlighted = null;
+                this._selectedLayerKey = null;
+                this._selectionSource = 'none';
             }
 
             render(modelData) {
                 this.svg.innerHTML = '';
                 this.layerComponents = [];
+                this._selectedLayerKey = null;
+                this._selectionSource = 'none';
 
                 const layers = modelData.layers;
                 const startY = 40;
@@ -1363,6 +1523,17 @@
                 // Fine-grained submodules (best-effort, aligns with trace node_path)
                 const traceId = this._layerKey(layer);
                 const _mkSub = (subId, label, bx, by, bw = 26, bh = 14) => {
+                    const detailLayer = {
+                        id: subId,
+                        trace_id: subId,
+                        parent_trace_id: traceId,
+                        parent_name: layer.name,
+                        name: `${layer.name} • ${label}`,
+                        type: 'submodule',
+                        params: 0,
+                        description: subId,
+                        color: layer.color
+                    };
                     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                     g.setAttribute('class', 'component');
                     g.setAttribute('data-id', subId);
@@ -1391,15 +1562,12 @@
 
                     g.addEventListener('click', (evt) => {
                         evt.stopPropagation();
-                        showDetails({
-                            id: subId,
-                            trace_id: subId,
-                            name: `${layer.name} • ${label}`,
-                            type: 'submodule',
-                            params: 0,
-                            description: subId,
-                            color: layer.color
-                        });
+                        this.clearSelection(false, 'manual');
+                        g.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.55))';
+                        this._lastHighlighted = g;
+                        this._selectedLayerKey = traceId;
+                        this._selectionSource = 'manual';
+                        showDetails(detailLayer);
                         // Cross-page sync: publish focus command to 3D (fine-grained nodes)
                         try {
                             const sync = window.__VITRIOL_CROSS_PAGE_SYNC_2D__;
@@ -1480,15 +1648,54 @@
                 this.svg.appendChild(line);
             }
 
-            selectComponent(layer) {
+            clearSelection(resetDetails = true, source = 'none') {
                 document.querySelectorAll('.component').forEach(el => {
                     el.style.filter = '';
                 });
+                if (this._lastHighlighted) {
+                    try { this._lastHighlighted.style.filter = ''; } catch (e) {}
+                    this._lastHighlighted = null;
+                }
+                this._selectedLayerKey = null;
+                this._selectionSource = source;
+                if (resetDetails) resetDetailPanel();
+            }
 
+            _findLayerByNodeId(nodeId) {
+                const id = String(nodeId || '');
+                if (!id) return null;
+                const candidates = [id];
+                if (id.includes(':attn:')) candidates.push(id.replace(/:attn:.*$/, ':attn'));
+                if (id.includes(':ffn:')) candidates.push(id.replace(/:ffn:.*$/, ':ffn'));
+                return this.layerComponents.find(c => candidates.includes(this._layerKey(c.layer))) || null;
+            }
+
+            _highlightExactNode(nodeId) {
+                const id = String(nodeId || '');
+                if (!id || !this.svg) return false;
+                const candidates = [id];
+                if (id.includes(':attn:')) candidates.push(id.replace(/:attn:.*$/, ':attn'));
+                if (id.includes(':ffn:')) candidates.push(id.replace(/:ffn:.*$/, ':ffn'));
+                for (const c of candidates) {
+                    const el = this.svg.querySelector(`[data-id="${c}"]`);
+                    if (el) {
+                        el.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.55))';
+                        this._lastHighlighted = el;
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            selectComponent(layer) {
+                this.clearSelection(false, 'manual');
                 const key = this._layerKey(layer);
                 const component = this.layerComponents.find(c => this._layerKey(c.layer) === key);
                 if (component) {
                     component.element.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.5))';
+                    this._lastHighlighted = component.element;
+                    this._selectedLayerKey = key;
+                    this._selectionSource = 'manual';
                     showDetails(layer);
                 }
             }
@@ -1502,24 +1709,19 @@
                 const id = String(nodeId || '');
                 if (!id || !this.svg) return;
 
-                const candidates = [id];
-                if (id.includes(':attn:')) candidates.push(id.replace(/:attn:.*$/, ':attn'));
-                if (id.includes(':ffn:')) candidates.push(id.replace(/:ffn:.*$/, ':ffn'));
-
-                // Clear previous highlight
-                if (this._lastHighlighted) {
-                    try { this._lastHighlighted.style.filter = ''; } catch (e) {}
-                    this._lastHighlighted = null;
+                const matched = this._findLayerByNodeId(id);
+                if (matched) {
+                    this.clearSelection(false, 'playback');
+                    this._selectedLayerKey = this._layerKey(matched.layer);
+                    this._selectionSource = 'playback';
+                    this._highlightExactNode(id);
+                    showDetails(matched.layer);
+                    return;
                 }
 
-                for (const c of candidates) {
-                    const el = this.svg.querySelector(`[data-id="${c}"]`);
-                    if (el) {
-                        el.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.55))';
-                        this._lastHighlighted = el;
-                        break;
-                    }
-                }
+                this.clearSelection(false, 'playback');
+                this._selectionSource = 'playback';
+                this._highlightExactNode(id);
             }
 
             formatParams(params) {
@@ -1536,6 +1738,7 @@
         let parser;
         let visualizer;
         let currentModelData;
+        let lastPlaybackNodeId = null;
 
         function setVizModeBadge(mode, message = '') {
             const badge = document.getElementById('vizModeBadge');
@@ -1555,6 +1758,35 @@
             if (message) badge.title = message;
         }
 
+        function showToast(title, message, level = 'success') {
+            const stack = document.getElementById('toastStack');
+            if (!stack) return;
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'success'}`;
+            toast.innerHTML = `<div class="toast-title">${title}</div><div class="toast-body">${message}</div>`;
+            stack.appendChild(toast);
+            window.setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-4px)';
+                window.setTimeout(() => toast.remove(), 180);
+            }, 2600);
+        }
+
+        async function copyTextWithFeedback(text, successTitle, successMessage, fallbackLabel = 'Copy this link:') {
+            try {
+                if (!navigator.clipboard || !navigator.clipboard.writeText) {
+                    throw new Error('Clipboard API unavailable');
+                }
+                await navigator.clipboard.writeText(text);
+                showToast(successTitle, successMessage, 'success');
+                return true;
+            } catch (e) {
+                showToast('Clipboard unavailable', 'Manual copy dialog opened because the browser blocked direct clipboard access.', 'warn');
+                window.prompt(fallbackLabel, text);
+                return false;
+            }
+        }
+
         function showBlockedIndicator(message) {
             setVizModeBadge('⛔ BLOCKED', message);
             const totalEl = document.getElementById('totalParams');
@@ -1571,6 +1803,7 @@
             }
             const title = document.querySelector('.diagram-section .section-title');
             if (title) title.textContent = message;
+            showToast('Model load blocked', message, 'error');
         }
 
         function formatNumber(num) {
@@ -1596,6 +1829,7 @@
 
             const s = state || window.__VITRIOL_PLAYBACK_STATE__;
             if (!s) {
+                lastPlaybackNodeId = null;
                 connEl.textContent = 'Not connected';
                 tokenEl.textContent = '-';
                 layerEl.textContent = '-';
@@ -1611,20 +1845,94 @@
             if (speedEl) speedEl.textContent = String(s.speed ?? '-');
 
             // If nodeId is present, sync-highlight it in the 2D graph (fine-grained first).
-            if (s.nodeId && visualizer && typeof visualizer.selectByNodeId === 'function') {
-                visualizer.selectByNodeId(s.nodeId);
+            const nextNodeId = s.nodeId ? String(s.nodeId) : null;
+            if (!nextNodeId) {
+                lastPlaybackNodeId = null;
+                if (visualizer && visualizer._selectionSource === 'playback') {
+                    visualizer.clearSelection();
+                }
+                return;
             }
+            if (nextNodeId === lastPlaybackNodeId) {
+                return;
+            }
+            lastPlaybackNodeId = nextNodeId;
+            if (visualizer && typeof visualizer.selectByNodeId === 'function') {
+                visualizer.selectByNodeId(nextNodeId);
+            }
+        }
+
+        function getDetailProvenance(layer) {
+            const layerKey = layer.trace_id || layer.id || 'unknown';
+            const parentTraceId = layer.parent_trace_id || '';
+            const paramsSource = currentModelData?.paramsSource || 'unknown';
+            const configSource = currentModelData?.configSource || 'unknown';
+            const isSynthetic = layer.type === 'submodule' || layer.params === 0;
+
+            const chips = [
+                `<span class="details-chip synthetic">Trace: ${layerKey}</span>`
+            ];
+            if (parentTraceId) {
+                chips.push(`<span class="details-chip synthetic">Parent: ${parentTraceId}</span>`);
+            }
+
+            if (configSource === 'demo') {
+                chips.push('<span class="details-chip demo">Config: DEMO</span>');
+            } else if (configSource === 'inline' || configSource === 'meta-config.json' || configSource === 'config_meta.json') {
+                chips.push(`<span class="details-chip real">Config: ${configSource}</span>`);
+            } else {
+                chips.push(`<span class="details-chip estimated">Config: ${configSource}</span>`);
+            }
+
+            if (paramsSource === 'demo') {
+                chips.push('<span class="details-chip demo">Params: DEMO</span>');
+            } else if (paramsSource === 'estimated_js') {
+                chips.push('<span class="details-chip estimated">Params: estimated</span>');
+            } else if (paramsSource) {
+                chips.push(`<span class="details-chip real">Params: ${paramsSource}</span>`);
+            }
+
+            chips.push(
+                isSynthetic
+                    ? '<span class="details-chip synthetic">Detail: structural preview</span>'
+                    : '<span class="details-chip real">Detail: model layer</span>'
+            );
+            return chips.join('');
+        }
+
+        function resetDetailPanel() {
+            const panel = document.getElementById('detailsPanel');
+            const title = document.getElementById('detailsTitle');
+            const content = document.getElementById('detailsContent');
+            const provenance = document.getElementById('detailsProvenance');
+            if (panel) panel.style.display = 'none';
+            if (title) title.textContent = 'Layer Details';
+            if (content) content.innerHTML = '';
+            if (provenance) provenance.innerHTML = '';
+            document.querySelectorAll('.layer-item').forEach(item => {
+                item.classList.remove('active');
+            });
         }
 
         function showDetails(layer) {
             const panel = document.getElementById('detailsPanel');
             const title = document.getElementById('detailsTitle');
             const content = document.getElementById('detailsContent');
+            const provenance = document.getElementById('detailsProvenance');
 
             panel.style.display = 'block';
             panel.classList.add('fade-in');
             title.textContent = layer.name;
+            if (provenance) provenance.innerHTML = getDetailProvenance(layer);
             content.innerHTML = `
+                <div class="details-row">
+                    <span class="details-label">Trace ID</span>
+                    <span class="details-value">${layer.trace_id || layer.id || 'unknown'}</span>
+                </div>
+                <div class="details-row">
+                    <span class="details-label">Parent Layer</span>
+                    <span class="details-value">${layer.parent_name || '—'}</span>
+                </div>
                 <div class="details-row">
                     <span class="details-label">Type</span>
                     <span class="details-value">${layer.type}</span>
@@ -1637,11 +1945,14 @@
                     <span class="details-label">Description</span>
                     <span class="details-value">${layer.description}</span>
                 </div>
+                <div class="details-note">
+                    This 2D view is a structural explanation layer. Parameter values come from backend injection when available; otherwise the page labels frontend estimates explicitly.
+                    Structural preview nodes may represent grouped or synthetic submodules for readability rather than standalone serialized tensors.
+                </div>
             `;
 
-            // Update layer list active state
             document.querySelectorAll('.layer-item').forEach(item => {
-                const k = layer.trace_id || layer.id;
+                const k = layer.parent_trace_id || layer.trace_id || layer.id;
                 item.classList.toggle('active', item.dataset.id === k);
             });
         }
@@ -1656,20 +1967,24 @@
             // Truthfulness / source badges
             const paramsBadge = document.getElementById('paramsSourceBadge');
             const configBadge = document.getElementById('configSourceBadge');
+            const statsNarrative = document.getElementById('statsNarrative');
 
             if (paramsBadge) {
                 if (modelData.paramsSource === 'estimated_js') {
                     paramsBadge.className = 'source-badge estimated';
                     paramsBadge.textContent = 'Estimated (JS)';
                     setVizModeBadge('⚠️ ESTIMATED', 'Parameter count is heuristically estimated in the frontend (not authoritative).');
+                    if (statsNarrative) statsNarrative.textContent = 'Current totals are browser-side estimates, suitable for quick exploration but not authoritative reporting.';
                 } else if (modelData.paramsSource === 'demo') {
                     paramsBadge.className = 'source-badge demo';
                     paramsBadge.textContent = 'DEMO (explicit)';
                     setVizModeBadge('🧪 DEMO', 'Explicit demo dataset enabled via #?demo=1.');
+                    if (statsNarrative) statsNarrative.textContent = 'Demo mode is explicitly enabled; values are illustrative and should not be treated as model truth.';
                 } else {
                     paramsBadge.className = 'source-badge real';
                     paramsBadge.textContent = 'REAL / backend';
                     setVizModeBadge('✅ REAL', 'Parameter count comes from CLI injection / backend source of truth.');
+                    if (statsNarrative) statsNarrative.textContent = 'Current totals come from backend-derived metadata or analyzer output and are safe to use as the view’s source of truth.';
                 }
             }
 
@@ -1724,6 +2039,7 @@
                     <div class="layer-info">
                         <div class="layer-name">${layer.name}</div>
                         <div class="layer-params">${formatNumber(layer.params)} params</div>
+                        <div class="layer-hint">${layer.trace_id || layer.id}</div>
                     </div>
                 `;
 
@@ -1735,7 +2051,7 @@
             });
         }
 
-        async function loadModel() {
+        async function loadModel(announce = true) {
             const path = document.getElementById('modelPath').value;
             parser = new UltraModelParser();
             try {
@@ -1754,6 +2070,15 @@
 
             updateStats(currentModelData);
             updateLayerList(currentModelData);
+
+            if (announce) {
+                const mode = currentModelData.paramsSource === 'estimated_js'
+                    ? 'Loaded with frontend estimate'
+                    : currentModelData.paramsSource === 'demo'
+                        ? 'Loaded explicit demo data'
+                        : 'Loaded backend-derived model data';
+                showToast('2D architecture loaded', `${mode}. Path: ${path}`, currentModelData.paramsSource === 'estimated_js' ? 'warn' : 'success');
+            }
         }
 
         // Initialize
@@ -1786,18 +2111,17 @@
                         const url = makeUrl(origin);
                         if (openBtn) openBtn.textContent = `Open with ${origin} (demo)`;
                         if (openBtn) {
-                            openBtn.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
+                            openBtn.onclick = () => {
+                                showToast('Opening HTTP demo', `Opening ${url} in a new tab under the detected same-origin server.`, 'success');
+                                window.open(url, '_blank', 'noopener,noreferrer');
+                            };
                         }
                         if (copyBtn) {
-                            copyBtn.onclick = async () => {
-                                try {
-                                    await navigator.clipboard.writeText(url);
-                                    copyBtn.textContent = 'Copied';
-                                    window.setTimeout(() => (copyBtn.textContent = 'Copy HTTP link'), 1200);
-                                } catch (e) {
-                                    window.prompt('Copy this link:', url);
-                                }
-                            };
+                            copyBtn.onclick = () => copyTextWithFeedback(
+                                url,
+                                'HTTP link copied',
+                                `Detected same-origin endpoint: ${origin}. Open this link over HTTP to restore 2D⇄3D sync.`
+                            );
                         }
                     }
 
@@ -1806,17 +2130,18 @@
                         const fallbackOrigin = 'http://localhost:8765';
                         const url = makeUrl(fallbackOrigin);
                         if (openBtn) openBtn.textContent = 'Not detected (open 8765)';
-                        if (openBtn) openBtn.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
-                        if (copyBtn) {
-                            copyBtn.onclick = async () => {
-                                try {
-                                    await navigator.clipboard.writeText(url);
-                                    copyBtn.textContent = 'Copied';
-                                    window.setTimeout(() => (copyBtn.textContent = 'Copy HTTP link'), 1200);
-                                } catch (e) {
-                                    window.prompt('Copy this link:', url);
-                                }
+                        if (openBtn) {
+                            openBtn.onclick = () => {
+                                showToast('Opening fallback HTTP demo', `No handshake response was detected, so the page is opening ${url}.`, 'warn');
+                                window.open(url, '_blank', 'noopener,noreferrer');
                             };
+                        }
+                        if (copyBtn) {
+                            copyBtn.onclick = () => copyTextWithFeedback(
+                                url,
+                                'Fallback HTTP link copied',
+                                'No handshake response was detected; copied the default localhost fallback for manual retry.'
+                            );
                         }
                     }
 
@@ -1861,7 +2186,19 @@
                 }
             } catch (e) {}
 
-            loadModel();
+            const clearDetailsBtn = document.getElementById('clearDetailsBtn');
+            if (clearDetailsBtn) {
+                clearDetailsBtn.addEventListener('click', () => {
+                    if (visualizer && typeof visualizer.clearSelection === 'function') {
+                        visualizer.clearSelection(true, 'none');
+                    } else {
+                        resetDetailPanel();
+                    }
+                    showToast('Selection cleared', 'The detail panel has been reset and all 2D highlights were removed.', 'success');
+                });
+            }
+
+            loadModel(false);
             updatePlaybackStatus();
             // Cross-page sync (optional):
             // - Prefer BroadcastChannel when available

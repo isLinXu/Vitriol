@@ -49,8 +49,73 @@ def test_model_3d_visualizer_parameter_display_shows_source() -> None:
     """Ensure parameter display indicates source or availability status."""
     html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
     # New pattern that shows actual params or indicates they're not available:
-    assert ("parameters (estimated)" in html or "Parameters not available" in html), \
+    assert (
+        "parameters (estimated in browser)" in html
+        or "Parameters not available" in html
+        or "parameters (' + (cfg.paramsSource || 'backend') + ')" in html
+    ), \
         "Parameter display should indicate source or availability"
+
+
+def test_model_3d_visualizer_exposes_weight_stats_provenance_markers() -> None:
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    assert "Params ${weightStats.params_source}" in html
+    assert "Sample ${Number(weightStats.sampling.sample_size).toLocaleString()}" in html
+    assert "Search filters visible modules only" in html
+    assert "Header-only metadata" in html
+    assert "Displayed slice:" in html
+
+
+def test_model_3d_visualizer_compare_mode_avoids_placeholder_competitor_data() -> None:
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    assert "No placeholder competitor data is shown" in html
+    assert "Only one trustworthy model snapshot is available" in html
+    assert "Compare import unavailable" in html
+    assert "Qwen3.5-397B-A17B" not in html
+    assert "DeepSeek-R1" not in html
+
+
+def test_model_3d_visualizer_search_has_status_and_clear_affordance() -> None:
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    assert "clearSearchBtn" in html
+    assert "searchStatus" in html
+    assert "No filter applied." in html
+    assert "modules visible" in html
+
+
+def test_model_3d_visualizer_shell_source_copy_is_explicit() -> None:
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    assert "meta-config.json (restored source)" in html
+    assert "meta-config.json (direct source)" in html
+    assert "Shell model only (Ultra export)" in html
+
+
+def test_model_3d_visualizer_detail_export_is_implemented() -> None:
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    assert "function _renderPanelToCanvas(panel)" in html
+    assert "function _downloadCanvas(canvas, filename)" in html
+    assert "Open a layer or module detail panel before exporting." in html
+    assert "vitriol-detail-" in html
+
+
+def test_model_3d_visualizer_has_toast_feedback_for_copy_and_export() -> None:
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    assert 'id="toastStack"' in html
+    assert "function showToast(title, message, level = 'success')" in html
+    assert "function copyTextWithFeedback(text, successTitle, successMessage)" in html
+    assert "Module config copied" in html
+    assert "Model config copied" in html
+    assert "JSON report exported" in html
+    assert "Compare import unavailable" in html
+
+
+def test_weight_3d_visualizer_exposes_provenance_markers() -> None:
+    html = Path("src/vitriol/viz/weight_3d_visualizer.html").read_text(encoding="utf-8")
+    assert "Display Slice" in html
+    assert "Sampling" in html
+    assert "(${paramsSource})" in html
+    assert "synthetic preview" in html
+    assert "metadata-only stats" in html
 
 
 def test_weight_inspector_viz_data_has_p0_metadata(tmp_path: Path) -> None:
