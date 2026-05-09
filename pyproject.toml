@@ -7,7 +7,7 @@ name = "vitriol"
 version = "0.3.0"
 description = "Unified framework for model structure visualization, compression, pruning, quantization and efficient inference"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {file = "LICENSE"}
 keywords = [
     "llm",
@@ -23,7 +23,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -100,3 +99,7 @@ filterwarnings = [
     "ignore::DeprecationWarning:websockets.*",
     "ignore::UserWarning:torch.*",
 ]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120

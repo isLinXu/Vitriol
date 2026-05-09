@@ -37,14 +37,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,viz]"
           
-      - name: Lint with ruff
+      - name: Lint governance layer with ruff
+        run: |
+          ruff check \
+            src/vitriol/api/server.py \
+            src/vitriol/cli/main.py \
+            src/vitriol/config \
+            src/vitriol/security \
+            src/vitriol/utils/hf_loading.py \
+            tests/test_api_server.py \
+            --output-format=github
+        
+      - name: Type check governance layer with mypy
+        run: |
+          mypy \
+            src/vitriol/api/server.py \
+            src/vitriol/cli/main.py \
+            src/vitriol/security/context.py \
+            --ignore-missing-imports \
+            --follow-imports=skip
+
+      - name: Advisory full lint
         run: |
           ruff check src/ tests/ --output-format=github
         continue-on-error: true
-        
-      - name: Type check with mypy
+
+      - name: Advisory focused legacy type check
         run: |
-          mypy src/vitriol/core/generator.py src/vitriol/core/validator.py src/vitriol/cli/main.py --ignore-missing-imports
+          mypy src/vitriol/core/generator.py src/vitriol/core/validator.py --ignore-missing-imports
         continue-on-error: true
         
       - name: Run tests
