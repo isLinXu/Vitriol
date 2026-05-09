@@ -51,8 +51,13 @@ from vitriol.nas.search_space import LLMSearchSpace  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
-def load_model_config(model_id: str, trust_remote_code: bool = True) -> Optional[Dict]:
-    """Load model configuration from HuggingFace."""
+def load_model_config(
+    model_id: str,
+    trust_remote_code: bool = True,
+    allow_network: bool = True,
+    local_files_only: bool = False,
+) -> Optional[Dict]:
+    """Load model configuration from HuggingFace or local cache."""
     try:
         from vitriol.utils.hf_loading import load_config as hf_load_config
 
@@ -60,8 +65,8 @@ def load_model_config(model_id: str, trust_remote_code: bool = True) -> Optional
             model_id,
             security={
                 "trust_remote_code": trust_remote_code,
-                "allow_network": True,
-                "local_files_only": False,
+                "allow_network": allow_network,
+                "local_files_only": local_files_only,
             },
         )
         return config.to_dict()
@@ -84,6 +89,9 @@ def format_params(params: int) -> str:
 
 def create_app(
     title: str = "Vitriol - LLM Architecture Explorer",
+    trust_remote_code: bool = True,
+    allow_network: bool = True,
+    local_files_only: bool = False,
 ) -> gr.Blocks:
     """
     Create the Vitriol Gradio application.
@@ -161,9 +169,19 @@ def create_app(
                     """Compare two model architectures."""
                     try:
                         progress(0, desc="Loading model 1...")
-                        config1 = load_model_config(m1_id, trust_remote_code=trc)
+                        config1 = load_model_config(
+                            m1_id,
+                            trust_remote_code=trc,
+                            allow_network=allow_network,
+                            local_files_only=local_files_only,
+                        )
                         progress(0.33, desc="Loading model 2...")
-                        config2 = load_model_config(m2_id, trust_remote_code=trc)
+                        config2 = load_model_config(
+                            m2_id,
+                            trust_remote_code=trc,
+                            allow_network=allow_network,
+                            local_files_only=local_files_only,
+                        )
                         progress(0.66, desc="Comparing...")
 
                         if not config1 or not config2:
@@ -423,7 +441,12 @@ def create_app(
                     try:
                         progress(0, desc="Loading configuration...")
 
-                        config = load_model_config(model_id, trust_remote_code=trc)
+                        config = load_model_config(
+                            model_id,
+                            trust_remote_code=trc,
+                            allow_network=allow_network,
+                            local_files_only=local_files_only,
+                        )
                         if not config:
                             return {}, "❌ Failed to load configuration"
 
@@ -510,7 +533,12 @@ def create_app(
                     """Generate architecture scorecard."""
                     try:
                         progress(0, desc="Loading configuration...")
-                        config = load_model_config(model_id, trust_remote_code=trc)
+                        config = load_model_config(
+                            model_id,
+                            trust_remote_code=trc,
+                            allow_network=allow_network,
+                            local_files_only=local_files_only,
+                        )
                         if not config:
                             return "<h3>❌ Failed to load model config</h3>"
 
@@ -758,6 +786,9 @@ def launch(
     share: bool = False,
     port: Optional[int] = None,
     debug: bool = False,
+    trust_remote_code: bool = True,
+    allow_network: bool = True,
+    local_files_only: bool = False,
 ) -> None:
     """
     Launch the Vitriol web UI.
@@ -767,7 +798,11 @@ def launch(
         port: Port to run on (default: 7860)
         debug: Enable debug mode
     """
-    app = create_app()
+    app = create_app(
+        trust_remote_code=trust_remote_code,
+        allow_network=allow_network,
+        local_files_only=local_files_only,
+    )
     app.launch(
         share=share,
         server_port=port or 7860,

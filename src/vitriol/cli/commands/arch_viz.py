@@ -20,6 +20,7 @@ def arch_viz(ctx, model_id, output, generate_all, block, detail, html, style):
             model_id,
             style=style,
             trust_remote_code=bool(ctx.obj.get("trust_remote_code", True)) if getattr(ctx, "obj", None) else True,
+            local_files_only=bool(ctx.obj.get("local_files_only", False)) if getattr(ctx, "obj", None) else False,
         )
         
         if generate_all:

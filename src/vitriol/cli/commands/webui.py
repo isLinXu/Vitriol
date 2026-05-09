@@ -18,7 +18,8 @@ def _load_webui_launch():
 @click.option("--port", "-p", default=7860, help="Port to run the web UI on")
 @click.option("--share", is_flag=True, help="Create a public share link")
 @click.option("--debug", is_flag=True, help="Enable debug mode")
-def launch_webui(port, share, debug):
+@click.pass_context
+def launch_webui(ctx, port, share, debug):
     """
     Launch the Vitriol Web UI.
 
@@ -32,7 +33,14 @@ def launch_webui(port, share, debug):
 
     try:
         launch = _load_webui_launch()
-        launch(share=share, port=port, debug=debug)
+        launch(
+            share=share,
+            port=port,
+            debug=debug,
+            trust_remote_code=bool(ctx.obj.get("trust_remote_code", True)) if getattr(ctx, "obj", None) else True,
+            allow_network=bool(ctx.obj.get("allow_network", True)) if getattr(ctx, "obj", None) else True,
+            local_files_only=bool(ctx.obj.get("local_files_only", False)) if getattr(ctx, "obj", None) else False,
+        )
     except KeyboardInterrupt:
         click.echo("\n👋 Web UI stopped.")
     except Exception as e:
