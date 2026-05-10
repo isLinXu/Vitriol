@@ -221,3 +221,7 @@ output/
 docs/archive/
 
 .thumbs/
+
+# Local audit & session temp artifacts
+.session_tmps/
+vitriol_visual_audit/
