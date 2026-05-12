@@ -79,6 +79,27 @@ class TestWeightVizBuildLayerData:
             assert result["hidden_size"] == 256
             assert result["config_source"] == "meta-config.json"
 
+    def test_build_layer_data_from_config_with_meta_only(self):
+        from vitriol.cli.commands.weight_viz import _build_layer_data_from_config
+        with tempfile.TemporaryDirectory() as tmpdir:
+            meta = {
+                "hidden_size": 192,
+                "num_hidden_layers": 2,
+                "vocab_size": 600,
+                "intermediate_size": 768,
+                "num_attention_heads": 6,
+                "num_key_value_heads": 3,
+                "model_type": "meta_only_model",
+            }
+            meta_path = Path(tmpdir) / "meta-config.json"
+            meta_path.write_text(json.dumps(meta))
+
+            result = _build_layer_data_from_config(Path(tmpdir), max_layers=12)
+            assert result["model_name"] == "meta_only_model"
+            assert result["hidden_size"] == 192
+            assert result["num_layers"] == 2
+            assert result["config_source"] == "meta-config.json"
+
     def test_build_layer_data_from_weights_preserves_provenance_fields(self):
         from vitriol.cli.commands.weight_viz import _build_layer_data_from_weights
 

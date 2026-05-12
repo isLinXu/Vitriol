@@ -156,3 +156,29 @@ def test_weight_inspector_sampling_is_deterministic_with_seed() -> None:
     assert a["mean"] == b["mean"]
     assert a["std"] == b["std"]
     assert a["sparsity"] == b["sparsity"]
+
+
+def test_weight_inspector_sampling_avoids_full_tensor_float32_cast(monkeypatch) -> None:
+    import pytest
+
+    torch = pytest.importorskip("torch")
+    from vitriol.viz.weight_inspector import _compute_tensor_stats
+
+    tensor = torch.arange(0, 2048, dtype=torch.float16)
+    orig_to = torch.Tensor.to
+    cast_sizes = []
+
+    def _tracking_to(self, *args, **kwargs):
+        dtype = kwargs.get("dtype")
+        if dtype is None and args and isinstance(args[0], torch.dtype):
+            dtype = args[0]
+        if dtype == torch.float32:
+            cast_sizes.append(int(self.numel()))
+        return orig_to(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "to", _tracking_to, raising=False)
+
+    _compute_tensor_stats(tensor, seed=42, sample_size=128)
+
+    assert cast_sizes
+    assert max(cast_sizes) <= 128

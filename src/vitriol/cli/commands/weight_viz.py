@@ -168,29 +168,31 @@ def _build_layer_data_from_weights(
 
 def _build_layer_data_from_config(model_path: Path, max_layers: int = 12) -> Dict[str, Any]:
     """Config-derived mode (used when weight files are unavailable)."""
-    config_path = model_path / "config.json"
-    if not config_path.exists():
+    try:
+        from vitriol.viz.weight_inspector import load_effective_config
+    except ImportError:
+        load_effective_config = None
+
+    if load_effective_config is not None:
+        effective = load_effective_config(str(model_path))
+    else:
+        effective = {}
+        for name in ("meta-config.json", "config_meta.json", "config.json"):
+            cfg_path = model_path / name
+            if not cfg_path.exists():
+                continue
+            try:
+                effective = json.loads(cfg_path.read_text(encoding="utf-8"))
+                break
+            except Exception as e:
+                click.echo(f"Error reading {name}: {e}", err=True)
+                return {"model_name": model_path.name, "layers": []}
+
+    if not effective:
         click.echo(f"Error: config.json not found in {model_path}", err=True)
         return {"model_name": model_path.name, "layers": []}
 
-    try:
-        config = json.loads(config_path.read_text())
-    except Exception as e:
-        click.echo(f"Error reading config.json: {e}", err=True)
-        return {"model_name": model_path.name, "layers": []}
-
-    # Prefer meta-config.json
-    meta = {}
-    for meta_name in ("meta-config.json", "config_meta.json"):
-        meta_path = model_path / meta_name
-        if meta_path.exists():
-            try:
-                meta = json.loads(meta_path.read_text())
-                break
-            except Exception:
-                logger.debug("Failed to load meta-config for weight visualization")
-
-    effective = meta if meta else config
+    config = effective
     text_cfg = effective.get("text_config", effective)
 
     hidden_size = text_cfg.get("hidden_size") or config.get("hidden_size", 4096)
@@ -218,7 +220,7 @@ def _build_layer_data_from_config(model_path: Path, max_layers: int = 12) -> Dic
         "vocab_size": vocab_size,
         "intermediate_size": intermediate_size,
         "num_heads": num_heads,
-        "config_source": "meta-config.json" if meta else "config.json",
+        "config_source": "meta-config.json" if (model_path / "meta-config.json").exists() or (model_path / "config_meta.json").exists() else "config.json",
         "weight_stats_available": False,
         "params_source": "config_derived",
         "sampling": {
@@ -294,10 +296,7 @@ def weight_viz(model_path, port, no_open, config_only, max_layers, seed):
     click.echo(f"Extracting model architecture from {model_path}...")
 
     # Decide whether to read from real weight files
-    has_weights = (
-        list(model_path.glob("*.safetensors")) or
-        list(model_path.glob("*.bin"))
-    )
+    has_weights = any(model_path.glob("*.safetensors")) or any(model_path.glob("*.bin"))
 
     if config_only or not has_weights:
         if not has_weights and not config_only:

@@ -722,6 +722,10 @@
         let highlightedObject = null;
         let compareModels = [];
         let modelLayers = []; // Store layers globally for nav tree functions
+        let navTreeItems = [];
+        let navItemsByNodeId = new Map();
+        let activeNavTreeItem = null;
+        let moduleSelectionByMesh = new Map();
 
         // ============================================
         // Playback: nodeId → 3D node position index
@@ -1343,7 +1347,7 @@
             if (!tokenParticle || !tokenParticleAnim) return;
             const now = performance.now();
             const t = Math.min(1, Math.max(0, (now - tokenParticleAnim.startTs) / tokenParticleAnim.durMs));
-            tokenParticle.position.copy(tokenParticleAnim.from.clone().lerp(tokenParticleAnim.to, t));
+            tokenParticle.position.lerpVectors(tokenParticleAnim.from, tokenParticleAnim.to, t);
             if (t >= 1) tokenParticleAnim = null;
         }
 
@@ -1495,24 +1499,25 @@
             }
             if (rebuilt) buildNavTree(modelLayers);
 
-            const items = Array.from(document.querySelectorAll('.nav-item[data-nodeid]'));
-            if (items.length === 0) return;
-
-            // Clear previous active
-            items.forEach(el => el.classList.remove('active'));
+            if (navTreeItems.length === 0) return;
 
             // Prefer exact node match; fallback to layer-level match (attn anchors)
-            let active = items.find(el => normalizeTraceNodeId(el.getAttribute('data-nodeid')) === nid);
+            let active = navItemsByNodeId.get(nid) || null;
             if (!active && m) {
                 const layerAnchor = `block:${Number.parseInt(m[1], 10)}:attn`;
-                active = items.find(el => normalizeTraceNodeId(el.getAttribute('data-nodeid')) === layerAnchor);
+                active = navItemsByNodeId.get(layerAnchor) || null;
             }
             if (!active && nid === 'embed') {
-                active = items.find(el => normalizeTraceNodeId(el.getAttribute('data-nodeid')) === 'embed');
+                active = navItemsByNodeId.get('embed') || null;
             }
             if (!active && nid === 'lm_head') {
-                active = items.find(el => normalizeTraceNodeId(el.getAttribute('data-nodeid')) === 'lm_head');
+                active = navItemsByNodeId.get('lm_head') || null;
             }
+
+            if (activeNavTreeItem && activeNavTreeItem !== active) {
+                activeNavTreeItem.classList.remove('active');
+            }
+            activeNavTreeItem = active || null;
 
             if (active) {
                 active.classList.add('active');
@@ -1541,8 +1546,8 @@
             const key = String(tabKey || 'tokens');
             const drawer = document.getElementById('lensDrawer');
             if (!drawer) return;
-            const tabs = Array.from(drawer.querySelectorAll('[role="tab"][data-tab]'));
-            const panels = Array.from(drawer.querySelectorAll('[data-panel]'));
+            const tabs = drawer.__vitriolTabs || [];
+            const panels = drawer.__vitriolPanels || [];
             tabs.forEach(t => t.setAttribute('aria-selected', t.getAttribute('data-tab') === key ? 'true' : 'false'));
             panels.forEach(p => {
                 const active = p.getAttribute('data-panel') === key;
@@ -1563,7 +1568,10 @@
                 });
             }
 
-            const tabs = Array.from(drawer.querySelectorAll('[role="tab"][data-tab]'));
+            const tabs = Array.from(drawer.getElementsByClassName('vitriol-tab'));
+            const panels = Array.from(drawer.getElementsByClassName('vitriol-drawer-panel'));
+            drawer.__vitriolTabs = tabs;
+            drawer.__vitriolPanels = panels;
             tabs.forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -1584,13 +1592,43 @@
             const promptTokens = Array.isArray(trace?.tokens?.prompt_tokens) ? trace.tokens.prompt_tokens : [];
             const generatedTokens = Array.isArray(trace?.tokens?.generated_tokens) ? trace.tokens.generated_tokens : [];
             const allTokens = [...promptTokens, ...generatedTokens];
+            tokenHoverIdx = null;
+            const events = Array.isArray(trace?.events) ? trace.events : [];
+            const eventByTokenGlobalIndex = new Map();
+            for (const event of events) {
+                const idx = Number(event?.token_global_index);
+                if (Number.isFinite(idx) && !eventByTokenGlobalIndex.has(idx)) {
+                    eventByTokenGlobalIndex.set(idx, event);
+                }
+            }
 
-            list.innerHTML = '';
+            const tokenChipByIndex = new Map();
+            let activeTokenChip = null;
+            let highlightedTokenChips = [];
+
+            function _clearTokenChipState() {
+                if (activeTokenChip) {
+                    activeTokenChip.classList.remove('active');
+                    activeTokenChip = null;
+                }
+                if (highlightedTokenChips.length) {
+                    for (const chip of highlightedTokenChips) {
+                        chip.classList.remove('token-chip-attn');
+                        chip.style.removeProperty('--vitriol-attn-border-a');
+                        chip.style.removeProperty('--vitriol-attn-fill-a');
+                        chip.style.removeProperty('--vitriol-attn-ring-a');
+                    }
+                    highlightedTokenChips = [];
+                }
+            }
+
+            const fragment = document.createDocumentFragment();
             allTokens.forEach((tok, idx) => {
                 const chip = document.createElement('button');
                 chip.type = 'button';
                 chip.className = `token-chip ${idx < promptTokens.length ? 'prompt' : 'generated'}`;
                 chip.setAttribute('data-tokenidx', String(idx));
+                tokenChipByIndex.set(idx, chip);
 
                 const idxSpan = document.createElement('span');
                 idxSpan.className = 'token-idx';
@@ -1617,15 +1655,19 @@
                     tokenHoverIdx = null;
                 };
 
-                list.appendChild(chip);
+                fragment.appendChild(chip);
             });
+            list.replaceChildren(fragment);
 
             // Drawer visibility: only show when trace exists (Task 3)
             setLensDrawerVisible(true);
             setLensDrawerTab('tokens');
             panel.style.display = 'block';
 
-            if (typeof tokenListUnsub === 'function') tokenListUnsub();
+            if (typeof tokenListUnsub === 'function') {
+                tokenListUnsub();
+                tokenListUnsub = null;
+            }
             function _resizeCanvasToCssPixels(canvas) {
                 if (!canvas) return;
                 const rect = canvas.getBoundingClientRect();
@@ -1694,14 +1736,13 @@
                         y: (r.top - panelRect.top + r.height / 2) * dpr
                     };
                 };
-                const chips = Array.from(list.querySelectorAll('.token-chip'));
-                const curChip = chips.find(el => Number(el.getAttribute('data-tokenidx')) === currentIdx);
+                const curChip = tokenChipByIndex.get(currentIdx);
                 if (!curChip) return;
                 const p0 = getCenter(curChip);
 
                 const maxW = Math.max(...weights.map(it => it.w), 1e-9);
                 for (const it of weights) {
-                    const srcChip = chips.find(el => Number(el.getAttribute('data-tokenidx')) === it.src);
+                    const srcChip = tokenChipByIndex.get(it.src);
                     if (!srcChip) continue;
                     const p1 = getCenter(srcChip);
                     // Task 4: arcs more subtle (thinner + lower alpha ceiling)
@@ -1721,15 +1762,7 @@
 
             tokenListUnsub = engine.onChange(({ tokenGlobalIndex, nodeId, tokenIndex, mode }) => {
                 const current = Number(tokenGlobalIndex);
-                const chips = Array.from(list.querySelectorAll('.token-chip'));
-                chips.forEach(el => el.classList.remove('active'));
-                // reset attention heat
-                chips.forEach(el => {
-                    el.classList.remove('token-chip-attn');
-                    el.style.removeProperty('--vitriol-attn-border-a');
-                    el.style.removeProperty('--vitriol-attn-fill-a');
-                    el.style.removeProperty('--vitriol-attn-ring-a');
-                });
+                _clearTokenChipState();
 
                 // Task 4: hide histogram/arcs by default (only show on attn step)
                 try {
@@ -1749,9 +1782,10 @@
                     // best-effort only
                 }
 
-                const active = chips.find(el => Number(el.getAttribute('data-tokenidx')) === current);
+                const active = tokenChipByIndex.get(current);
                 if (active) {
                     active.classList.add('active');
+                    activeTokenChip = active;
                     try {
                         active.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
                     } catch (err) {
@@ -1762,16 +1796,13 @@
                 // Attention heat (trace mode): highlight source tokens by attention_topk
                 try {
                     if (mode !== 'trace') return;
-                    const tr = engine?._trace;
-                    const events = Array.isArray(tr?.events) ? tr.events : [];
-
                     const frame = engine?._traceFrames?.[Number(tokenIndex) || 0];
                     const currentNode = String(nodeId || frame?.nodeId || '');
                     if (!currentNode.includes(':attn')) return;
                     const attnKey = _attnKeyForNode(currentNode);
 
                     const focusTok = Number.isFinite(Number(tokenHoverIdx)) ? Number(tokenHoverIdx) : current;
-                    const ev = events.find(e => Number(e?.token_global_index) === focusTok);
+                    const ev = eventByTokenGlobalIndex.get(focusTok);
                     const topk = ev?.attention_topk?.[attnKey] || [];
                     if (!Array.isArray(topk) || topk.length === 0) return;
 
@@ -1781,8 +1812,9 @@
                     if (weights.length === 0) return;
 
                     const maxW = Math.max(...weights.map(it => it.w), 1e-9);
+                    const nextHighlightedTokenChips = [];
                     for (const it of weights) {
-                        const chip = chips.find(el => Number(el.getAttribute('data-tokenidx')) === it.src);
+                        const chip = tokenChipByIndex.get(it.src);
                         if (!chip) continue;
                         const a = Math.max(0.08, Math.min(0.90, it.w / maxW));
                         chip.classList.add('token-chip-attn');
@@ -1790,7 +1822,9 @@
                         chip.style.setProperty('--vitriol-attn-border-a', String(Math.min(0.85, 0.18 + (0.55 * aa))));
                         chip.style.setProperty('--vitriol-attn-fill-a', String(Math.min(0.16, 0.02 + (0.06 * aa))));
                         chip.style.setProperty('--vitriol-attn-ring-a', String(Math.min(0.14, 0.02 + (0.06 * aa))));
+                        nextHighlightedTokenChips.push(chip);
                     }
+                    highlightedTokenChips = nextHighlightedTokenChips;
 
                     // Histogram + arcs (Attention Lens)
                     if (histWrap) histWrap.style.display = 'block';
@@ -2515,6 +2549,7 @@
             updateDetailPanel(cfg);
             
             modelLayers = [];
+            moduleSelectionByMesh = new Map();
             let currentY = 50;
             const layerSpacing = 18;
             
@@ -2911,18 +2946,21 @@
 
                 const layerGroup = { name: layer.name, group, type: layer.type, modules: [] };
                 layerGroups.push(layerGroup);
+                const moduleLayoutByName = new Map(layer.modules.map(module => [module.name, module]));
 
                 // Modules
                 layer.modules.forEach(m => {
                     const mesh = createModule(group, m.name, m.pos, m.size, m.color, m.data);
-                    layerGroup.modules.push({ name: m.name, mesh, data: m.data });
+                    const moduleRef = { name: m.name, mesh, data: m.data };
+                    layerGroup.modules.push(moduleRef);
+                    moduleSelectionByMesh.set(mesh, { layer: layerGroup, module: moduleRef });
                 });
 
                 // Internal connections
                 if (layer.connections) {
                     layer.connections.forEach(c => {
-                        const from = layer.modules.find(m => m.name === c.from);
-                        const to = layer.modules.find(m => m.name === c.to);
+                        const from = moduleLayoutByName.get(c.from);
+                        const to = moduleLayoutByName.get(c.to);
                         if (from && to) {
                             createInternalPipe(group, from.pos, to.pos, c.label, c.active !== false);
                         } else {
@@ -3748,15 +3786,25 @@
 
         function buildNavTree(layers) {
             const nav = document.getElementById('navTree');
-            nav.innerHTML = '';
+            if (!nav) return;
+            navTreeItems = [];
+            navItemsByNodeId = new Map();
+            activeNavTreeItem = null;
+            const fragment = document.createDocumentFragment();
+            const layerGroupByName = new Map(layerGroups.map(group => [group.name, group]));
             
             layers.forEach((layer, idx) => {
                 const isCollapsed = collapsedLayers.has(layer.name);
                 const item = document.createElement('div');
                 item.className = 'nav-item';
+                const layerGroup = layerGroupByName.get(layer.name) || null;
 
                 const layerNodeId = inferNodeIdForNavLayer(layer.name);
-                if (layerNodeId) item.setAttribute('data-nodeid', layerNodeId);
+                if (layerNodeId) {
+                    item.setAttribute('data-nodeid', layerNodeId);
+                    if (!navItemsByNodeId.has(layerNodeId)) navItemsByNodeId.set(layerNodeId, item);
+                }
+                navTreeItems.push(item);
                 
                 let layerColor = colors[layer.type] !== undefined ? colors[layer.type] : 0x888888;
                 let colorHex = layerColor.toString(16).padStart(6, '0');
@@ -3769,22 +3817,26 @@
                 `;
                 item.onclick = (e) => {
                     if (e.target.tagName !== 'SPAN' || !e.target.textContent.includes('▶') && !e.target.textContent.includes('▼')) {
-                        // Find the corresponding layerGroup
-                        const lg = layerGroups.find(g => g.name === layer.name);
-                        if (lg) {
-                            selectLayer(lg);
+                        if (layerGroup) {
+                            selectLayer(layerGroup);
                         }
                     }
                 };
-                nav.appendChild(item);
+                fragment.appendChild(item);
                 
                 if (!isCollapsed && layer.modules) {
+                    const moduleByName = new Map((layerGroup?.modules || []).map(mod => [mod.name, mod]));
                     layer.modules.forEach(m => {
                         const subItem = document.createElement('div');
                         subItem.className = 'nav-item pl-8 text-xs';
+                        const moduleRef = moduleByName.get(m.name) || null;
 
                         const modNodeId = inferNodeIdForNavModule(m.name, layer.name);
-                        if (modNodeId) subItem.setAttribute('data-nodeid', modNodeId);
+                        if (modNodeId) {
+                            subItem.setAttribute('data-nodeid', modNodeId);
+                            if (!navItemsByNodeId.has(modNodeId)) navItemsByNodeId.set(modNodeId, subItem);
+                        }
+                        navTreeItems.push(subItem);
                         
                         let mColor = m.color !== undefined ? m.color : 0x888888;
                         let mColorHex = mColor.toString(16).padStart(6, '0');
@@ -3796,20 +3848,16 @@
                         `;
                         subItem.onclick = (e) => {
                             e.stopPropagation();
-                            
-                            // Find the corresponding layerGroup and module
-                            const lg = layerGroups.find(g => g.name === layer.name);
-                            if (lg) {
-                                const mod = lg.modules.find(mod => mod.name === m.name);
-                                if (mod) {
-                                    selectModule(lg, mod);
-                                }
+
+                            if (layerGroup && moduleRef) {
+                                selectModule(layerGroup, moduleRef);
                             }
                         };
-                        nav.appendChild(subItem);
+                        fragment.appendChild(subItem);
                     });
                 }
             });
+            nav.replaceChildren(fragment);
         }
 
         function selectLayer(layer) {
@@ -4433,13 +4481,9 @@
             
             if (intersects.length > 0) {
                 selectedObject = intersects[0].object;
-                // Select module
-                const layer = layerGroups.find(lg => 
-                    lg.modules.some(m => m.mesh === selectedObject)
-                );
-                if (layer) {
-                    const mod = layer.modules.find(m => m.mesh === selectedObject);
-                    if (mod) selectModule(layer, mod);
+                const selection = moduleSelectionByMesh.get(selectedObject);
+                if (selection?.layer && selection?.module) {
+                    selectModule(selection.layer, selection.module);
                 }
             } else {
                 // Clear selection if clicking on empty space

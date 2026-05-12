@@ -144,6 +144,11 @@ python -m vitriol.cli.main evolve simulate Qwen/Qwen2.5-72B --gpu H100
 python -m vitriol.cli.main webui
 ```
 
+## Visualization Performance Notes
+
+- `viz` / `model_visualizer.html`: the 2D viewer caches repeated DOM lookups and remembers the last successful `http://localhost:*` origin in `sessionStorage` / `localStorage` when opened via `file://`, which reduces repeated 2D⇄3D sync setup work.
+- `weight-viz`: `weight_inspector.generate_viz_data()` now uses safetensors header metadata to load only the tensors and shards needed for visualization when possible, reducing I/O on large models.
+
 ## CLI Reference
 
  Vitriol provides **18 commands** via:

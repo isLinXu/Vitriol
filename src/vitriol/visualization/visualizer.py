@@ -33,29 +33,56 @@ class WeightVisualizer:
             
         self.colors = sns.color_palette("husl", 8)
 
+    @staticmethod
+    def _tensor_to_numpy(tensor: torch.Tensor) -> np.ndarray:
+        """Safely materialize a tensor for visualization.
+
+        Visualization utilities should work for tensors that live on accelerators
+        or still require gradients from upstream experiments.
+        """
+        return tensor.detach().float().cpu().numpy()
+
     def _flatten_weights(self, weights: Dict[str, torch.Tensor]) -> np.ndarray:
         """Flatten all weights into a single numpy array"""
-        all_values = []
+        ordered_items = [(name, weights[name]) for name in sorted(weights.keys())]
+        if not ordered_items:
+            return np.array([], dtype=np.float32)
+
         # P0: reproducibility: stable iteration order + deterministic sampling with a fixed seed
         gen = torch.Generator(device="cpu")
         gen.manual_seed(self.seed)
 
-        for name in sorted(weights.keys()):
-            param = weights[name]
-            if param.numel() > 0:
-                # Sample large tensors to avoid OOM
-                if param.numel() > self.sample_size:
-                     # Deterministic uniform sampling (with replacement) to avoid randperm cost
-                     indices = torch.randint(0, param.numel(), (self.sample_size,), generator=gen)
-                     values = param.flatten()[indices].float().cpu().numpy()
-                else:
-                     values = param.flatten().float().cpu().numpy()
-                all_values.append(values)
-        
-        if not all_values:
-            return np.array([])
-            
-        return np.concatenate(all_values)
+        sample_counts = []
+        total_values = 0
+        for _, param in ordered_items:
+            count = min(int(param.numel()), self.sample_size) if param.numel() > 0 else 0
+            sample_counts.append(count)
+            total_values += count
+
+        if total_values == 0:
+            return np.array([], dtype=np.float32)
+
+        flattened = np.empty(total_values, dtype=np.float32)
+        offset = 0
+
+        for (_, param), count in zip(ordered_items, sample_counts):
+            if count <= 0:
+                continue
+
+            flat = param.detach().reshape(-1)
+            # Sample large tensors to avoid OOM
+            if flat.numel() > self.sample_size:
+                # Deterministic uniform sampling (with replacement) to avoid randperm cost
+                indices = torch.randint(0, flat.numel(), (self.sample_size,), generator=gen)
+                values = self._tensor_to_numpy(flat.index_select(0, indices.to(device=flat.device)))
+            else:
+                values = self._tensor_to_numpy(flat)
+
+            end = offset + values.shape[0]
+            flattened[offset:end] = values
+            offset = end
+
+        return flattened
 
     def visualize_weight_distribution(self, weights: Dict[str, torch.Tensor], title: str = "Weight Distribution"):
         """1. Weight Distribution Histogram"""
@@ -99,7 +126,7 @@ class WeightVisualizer:
             return None
 
         # Downsample if too large for heatmap
-        w_np = target_w.float().numpy()
+        w_np = self._tensor_to_numpy(target_w)
         rows, cols = w_np.shape
         if rows > 1000 or cols > 1000:
             # Simple slicing for visualization
@@ -131,7 +158,7 @@ class WeightVisualizer:
         if target_w is None:
             return None
 
-        w_np = target_w.float().numpy()
+        w_np = self._tensor_to_numpy(target_w)
         rows, cols = w_np.shape
         if rows > 1000 or cols > 1000:
             w_np = w_np[:min(rows, 500), :min(cols, 500)]
@@ -286,7 +313,7 @@ Estimated Compression Ratio (vs FP32): {est_ratio:.2f}x
         # Treat rows as data points
         from sklearn.decomposition import PCA
         
-        w_np = target_w.float().numpy()
+        w_np = self._tensor_to_numpy(target_w)
         # Downsample rows
         if w_np.shape[0] > 1000:
             w_np = w_np[:1000]

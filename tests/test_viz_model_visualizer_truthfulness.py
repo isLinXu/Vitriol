@@ -115,3 +115,29 @@ def test_model_visualizer_distinguishes_manual_and_playback_selection_sources() 
     assert "this.clearSelection(false, 'playback')" in html
     assert "visualizer._selectionSource === 'playback'" in html
     assert "visualizer.clearSelection(true, 'none')" in html
+
+
+def test_model_visualizer_caches_component_and_layer_list_lookups() -> None:
+    html = Path("src/vitriol/viz/model_visualizer.html").read_text(encoding="utf-8")
+    assert "const domCache = new Map()" in html
+    assert "function byId(id)" in html
+    assert "domCache.has(key)" in html
+    assert "document.getElementById(key)" in html
+    assert "return domCache.get(key) || null" in html
+    assert "this.layerComponentByKey = new Map()" in html
+    assert "this.componentElementById = new Map()" in html
+    assert "const component = this.layerComponentByKey.get(key)" in html
+    assert "const el = this.componentElementById.get(c)" in html
+    assert "let layerListItemsById = new Map()" in html
+    assert "let activeLayerListItem = null" in html
+    assert "function setActiveLayerListItem(layerKey)" in html
+    assert "list.replaceChildren(fragment)" in html
+    assert "document.querySelectorAll('.layer-item')" not in html
+    assert "this.layerComponents.find" not in html
+
+
+def test_model_visualizer_short_circuits_demo_before_fetching_configs() -> None:
+    html = Path("src/vitriol/viz/model_visualizer.html").read_text(encoding="utf-8")
+    demo_idx = html.index("if (this.isDemoEnabled()) {")
+    fetch_idx = html.index("Promise.allSettled([")
+    assert demo_idx < fetch_idx

@@ -16,6 +16,7 @@ import re
 import json
 import logging
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -28,6 +29,11 @@ try:
     from safetensors.torch import load_file as _safetensors_load
 except ImportError:
     _safetensors_load = None
+
+try:
+    from safetensors import safe_open as _safetensors_safe_open
+except ImportError:
+    _safetensors_safe_open = None
 
 try:
     import torch
@@ -134,11 +140,11 @@ def _list_weight_files(model_dir: Path) -> Tuple[List[Path], bool]:
         (file list, is_safetensors)
     """
     safetensor_files = sorted(model_dir.glob("*.safetensors"))
-    bin_files = sorted(model_dir.glob("*.bin"))
-
     if safetensor_files:
         return safetensor_files, True
-    elif bin_files:
+
+    bin_files = sorted(model_dir.glob("*.bin"))
+    if bin_files:
         return bin_files, False
     return [], False
 
@@ -282,6 +288,27 @@ def _load_shard(file_path: Path, is_safetensors: bool) -> Dict[str, Any]:
             return torch.load(str(file_path), map_location="cpu", weights_only=False)
 
 
+def _load_selected_safetensors_tensors(
+    file_path: Path,
+    tensor_names: List[str],
+) -> Dict[str, Any]:
+    """Load only selected tensors from a safetensors shard when supported."""
+    if _safetensors_safe_open is None or torch is None or not tensor_names:
+        return {}
+
+    try:
+        out: Dict[str, Any] = {}
+        with _safetensors_safe_open(str(file_path), framework="pt", device="cpu") as handle:
+            available = set(handle.keys())
+            for name in tensor_names:
+                if name in available:
+                    out[name] = handle.get_tensor(name)
+        return out
+    except Exception as exc:
+        logger.debug("Selective safetensors load failed for %s: %s", file_path, exc)
+        return {}
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Stats extraction
 # ──────────────────────────────────────────────────────────────────────
@@ -361,7 +388,9 @@ def _compute_tensor_stats(
             }
 
         # Sample to avoid OOM: if numel > sample_size, sample with a fixed seed for reproducibility.
-        flat = tensor.flatten().float()
+        # Keep the source tensor in its native dtype until after sampling so we don't
+        # materialize a full float32 copy for very large tensors.
+        flat = tensor.detach().reshape(-1)
         if sample_size <= 0:
             sample_size = 1_000_000
 
@@ -370,19 +399,16 @@ def _compute_tensor_stats(
             gen = torch.Generator(device="cpu")
             gen.manual_seed(int(seed))
             indices = torch.randint(0, numel, (int(sample_size),), generator=gen)
-            sample = flat[indices].cpu().numpy()
+            sample_t = flat.index_select(0, indices.to(device=flat.device)).to(torch.float32).cpu()
         else:
-            sample = flat.cpu().numpy()
+            sample_t = flat.to(torch.float32).cpu()
 
-        import numpy as np
-        sample_np = np.asarray(sample)
-
-        mean_val = float(np.mean(sample_np))
-        std_val = float(np.std(sample_np))
-        min_val = float(np.min(sample_np))
-        max_val = float(np.max(sample_np))
-        l2_norm = float(np.linalg.norm(sample_np))
-        sparsity = float(1.0 - np.count_nonzero(sample_np) / len(sample_np))
+        mean_val = float(sample_t.mean().item())
+        std_val = float(sample_t.std(unbiased=False).item())
+        min_val = float(sample_t.min().item())
+        max_val = float(sample_t.max().item())
+        l2_norm = float(torch.linalg.vector_norm(sample_t).item())
+        sparsity = float(1.0 - (torch.count_nonzero(sample_t).item() / max(int(sample_t.numel()), 1)))
 
         # Compute the true storage footprint.
         try:
@@ -594,6 +620,7 @@ def inspect_weights(
 # Layer classification
 # ──────────────────────────────────────────────────────────────────────
 
+@lru_cache(maxsize=65536)
 def _classify_layer(name: str) -> str:
     """Infer a layer/component type from a parameter name.
 
@@ -671,6 +698,7 @@ _LAYER_INDEX_PATTERNS = (
 )
 
 
+@lru_cache(maxsize=65536)
 def _layer_index_from_name(name: str) -> Optional[int]:
     for pattern in _LAYER_INDEX_PATTERNS:
         match = pattern.search(name)
@@ -848,6 +876,7 @@ def generate_viz_data(
 
     # Resolve which shards to load
     shards_to_load: Dict[str, Path] = {}
+    target_names_by_shard: Dict[str, List[str]] = {}
     if weight_map:
         for name in target_names:
             shard_name = weight_map.get(name)
@@ -855,6 +884,17 @@ def generate_viz_data(
                 shard_path = model_path / shard_name
                 if shard_path.exists() and shard_name not in shards_to_load:
                     shards_to_load[shard_name] = shard_path
+                target_names_by_shard.setdefault(shard_name, []).append(name)
+    elif is_safetensors and tensor_metadata:
+        for name in target_names:
+            meta = tensor_metadata.get(name) or {}
+            shard_name = str(meta.get("shard_file") or "")
+            if not shard_name:
+                continue
+            shard_path = model_path / shard_name
+            if shard_path.exists() and shard_name not in shards_to_load:
+                shards_to_load[shard_name] = shard_path
+            target_names_by_shard.setdefault(shard_name, []).append(name)
     else:
         # Without an index file, load only the first two shards (best-effort).
         for wf in weight_files[:2]:
@@ -863,7 +903,15 @@ def generate_viz_data(
     # Load shards and compute stats
     for shard_name, shard_path in shards_to_load.items():
         try:
-            shard_data = _load_shard(shard_path, is_safetensors)
+            shard_data: Dict[str, Any] = {}
+            selected_tensor_names = target_names_by_shard.get(shard_name, [])
+            if is_safetensors and selected_tensor_names:
+                shard_data = _load_selected_safetensors_tensors(
+                    shard_path,
+                    sorted(set(selected_tensor_names)),
+                )
+            if not shard_data:
+                shard_data = _load_shard(shard_path, is_safetensors)
             for name, tensor in shard_data.items():
                 if name.startswith("__vitriol_pad__"):
                     continue
@@ -1030,7 +1078,11 @@ def generate_viz_data(
             "sample_size": int(sample_size),
             "seed": int(seed),
         },
-        "config_source": "meta-config.json" if (model_path / "meta-config.json").exists() else "config.json",
+        "config_source": (
+            "meta-config.json"
+            if (model_path / "meta-config.json").exists() or (model_path / "config_meta.json").exists()
+            else "config.json"
+        ),
         "weight_stats_available": bool(tensor_stats),
         "layers": layers_data,
         "raw_config": effective_config,

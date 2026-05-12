@@ -61,6 +61,15 @@ class TestWeightVisualizer:
         result = wv._flatten_weights(weights)
         assert result.size == 100  # sampled
 
+    def test_flatten_weights_multiple_tensors_preserves_per_tensor_sampling(self):
+        wv = WeightVisualizer(sample_size=5)
+        weights = {
+            "layer1": torch.randn(3, 3),
+            "layer2": torch.randn(4, 4),
+        }
+        result = wv._flatten_weights(weights)
+        assert result.size == 10
+
     def test_flatten_weights_deterministic(self):
         wv1 = WeightVisualizer(seed=42)
         wv2 = WeightVisualizer(seed=42)
@@ -68,6 +77,12 @@ class TestWeightVisualizer:
         r1 = wv1._flatten_weights(weights)
         r2 = wv2._flatten_weights(weights)
         np.testing.assert_array_equal(r1, r2)
+
+    def test_flatten_weights_requires_grad(self):
+        wv = WeightVisualizer(sample_size=32)
+        weights = {"layer1": torch.randn(500, 500, requires_grad=True)}
+        result = wv._flatten_weights(weights)
+        assert result.size == 32
 
     @patch("matplotlib.pyplot.subplots")
     @patch("seaborn.histplot")
@@ -108,6 +123,19 @@ class TestWeightVisualizer:
         assert fig is None
 
     @patch("matplotlib.pyplot.subplots")
+    @patch("seaborn.heatmap")
+    def test_visualize_weight_heatmap_detaches_grad_tensor(self, mock_heatmap, mock_subplots):
+        mock_ax = MagicMock()
+        mock_fig = MagicMock()
+        mock_subplots.return_value = (mock_fig, mock_ax)
+
+        wv = WeightVisualizer()
+        weights = {"layer1": torch.randn(20, 30, requires_grad=True)}
+        fig = wv.visualize_weight_heatmap(weights)
+        assert fig is not None
+        mock_heatmap.assert_called_once()
+
+    @patch("matplotlib.pyplot.subplots")
     def test_visualize_sparsity_pattern(self, mock_subplots):
         mock_ax = MagicMock()
         mock_fig = MagicMock()
@@ -124,6 +152,18 @@ class TestWeightVisualizer:
         weights = {"bias": torch.randn(10)}
         fig = wv.visualize_sparsity_pattern(weights)
         assert fig is None
+
+    @patch("matplotlib.pyplot.subplots")
+    def test_visualize_sparsity_pattern_detaches_grad_tensor(self, mock_subplots):
+        mock_ax = MagicMock()
+        mock_fig = MagicMock()
+        mock_subplots.return_value = (mock_fig, mock_ax)
+
+        wv = WeightVisualizer()
+        weights = {"layer1": torch.randn(20, 30, requires_grad=True)}
+        fig = wv.visualize_sparsity_pattern(weights)
+        assert fig is not None
+        mock_ax.imshow.assert_called_once()
 
     @patch("matplotlib.pyplot.subplots")
     def test_visualize_value_frequency(self, mock_subplots):
@@ -198,6 +238,17 @@ class TestWeightVisualizer:
         weights = {"bias": torch.randn(5)}
         fig = wv.visualize_3d_structure(weights)
         assert fig is None
+
+    @patch("sklearn.decomposition.PCA")
+    def test_visualize_3d_structure_detaches_grad_tensor(self, mock_pca_cls):
+        mock_pca = MagicMock()
+        mock_pca.fit_transform.return_value = np.random.randn(20, 3)
+        mock_pca_cls.return_value = mock_pca
+
+        wv = WeightVisualizer()
+        weights = {"layer1": torch.randn(20, 30, requires_grad=True)}
+        fig = wv.visualize_3d_structure(weights)
+        assert fig is not None
 
     def test_generate_comprehensive_report(self):
         wv = WeightVisualizer()

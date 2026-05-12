@@ -45,6 +45,8 @@ def test_3d_visualizer_has_token_playback_markers() -> None:
     html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
     assert "function createTokenParticle" in html
     assert "function highlightNode" in html
+    assert "lerpVectors(tokenParticleAnim.from, tokenParticleAnim.to, t)" in html
+    assert "from.clone().lerp" not in html
 
 
 def test_3d_visualizer_binds_playback_controls() -> None:
@@ -53,6 +55,22 @@ def test_3d_visualizer_binds_playback_controls() -> None:
     """
     html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
     assert "function bindPlaybackControls" in html
+
+
+def test_3d_visualizer_caches_nav_and_token_lookup_hotspots() -> None:
+    html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
+    assert "navItemsByNodeId" in html
+    assert "navTreeItems" in html
+    assert "activeNavTreeItem" in html
+    assert "tokenChipByIndex" in html
+    assert "eventByTokenGlobalIndex" in html
+    assert "moduleSelectionByMesh" in html
+    assert "moduleLayoutByName" in html
+    assert "__vitriolTabs" in html
+    assert "getElementsByClassName('vitriol-tab')" in html
+    assert "getElementsByClassName('vitriol-drawer-panel')" in html
+    assert "document.createDocumentFragment()" in html
+    assert "replaceChildren(fragment)" in html
 
 
 def test_2d_visualizer_has_playback_status_panel() -> None:

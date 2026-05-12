@@ -775,6 +775,11 @@
                     return this.modelData;
                 }
 
+                if (this.isDemoEnabled()) {
+                    this.configSource = 'demo';
+                    return this.getDemoData();
+                }
+
                 try {
                     const configUrl = path.endsWith('/') ? path + 'config.json' : path + '/config.json';
                     const metaConfigUrl = path.endsWith('/') ? path + 'meta-config.json' : path + '/meta-config.json';
@@ -1432,6 +1437,8 @@
             constructor(svgElement) {
                 this.svg = svgElement;
                 this.layerComponents = [];
+                this.layerComponentByKey = new Map();
+                this.componentElementById = new Map();
                 this._lastHighlighted = null;
                 this._selectedLayerKey = null;
                 this._selectionSource = 'none';
@@ -1440,6 +1447,8 @@
             render(modelData) {
                 this.svg.innerHTML = '';
                 this.layerComponents = [];
+                this.layerComponentByKey = new Map();
+                this.componentElementById = new Map();
                 this._selectedLayerKey = null;
                 this._selectionSource = 'none';
 
@@ -1465,7 +1474,11 @@
                     const y = startY + 50 + index * (componentHeight + gap);
                     const group = this.createLayerComponent(layer, centerX, y, width, componentHeight);
                     this.svg.appendChild(group);
-                    this.layerComponents.push({ element: group, layer, index });
+                    const component = { element: group, layer, index };
+                    const key = this._layerKey(layer);
+                    this.layerComponents.push(component);
+                    this.layerComponentByKey.set(key, component);
+                    this.componentElementById.set(key, group);
                 });
 
                 // Draw connections
@@ -1537,6 +1550,7 @@
                     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                     g.setAttribute('class', 'component');
                     g.setAttribute('data-id', subId);
+                    this.componentElementById.set(subId, g);
 
                     const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
                     r.setAttribute('x', bx);
@@ -1649,9 +1663,6 @@
             }
 
             clearSelection(resetDetails = true, source = 'none') {
-                document.querySelectorAll('.component').forEach(el => {
-                    el.style.filter = '';
-                });
                 if (this._lastHighlighted) {
                     try { this._lastHighlighted.style.filter = ''; } catch (e) {}
                     this._lastHighlighted = null;
@@ -1667,7 +1678,11 @@
                 const candidates = [id];
                 if (id.includes(':attn:')) candidates.push(id.replace(/:attn:.*$/, ':attn'));
                 if (id.includes(':ffn:')) candidates.push(id.replace(/:ffn:.*$/, ':ffn'));
-                return this.layerComponents.find(c => candidates.includes(this._layerKey(c.layer))) || null;
+                for (const candidate of candidates) {
+                    const component = this.layerComponentByKey.get(candidate);
+                    if (component) return component;
+                }
+                return null;
             }
 
             _highlightExactNode(nodeId) {
@@ -1677,7 +1692,7 @@
                 if (id.includes(':attn:')) candidates.push(id.replace(/:attn:.*$/, ':attn'));
                 if (id.includes(':ffn:')) candidates.push(id.replace(/:ffn:.*$/, ':ffn'));
                 for (const c of candidates) {
-                    const el = this.svg.querySelector(`[data-id="${c}"]`);
+                    const el = this.componentElementById.get(c);
                     if (el) {
                         el.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.55))';
                         this._lastHighlighted = el;
@@ -1690,7 +1705,7 @@
             selectComponent(layer) {
                 this.clearSelection(false, 'manual');
                 const key = this._layerKey(layer);
-                const component = this.layerComponents.find(c => this._layerKey(c.layer) === key);
+                const component = this.layerComponentByKey.get(key);
                 if (component) {
                     component.element.style.filter = 'drop-shadow(0 0 8px rgba(37,99,235,0.5))';
                     this._lastHighlighted = component.element;
@@ -1739,9 +1754,33 @@
         let visualizer;
         let currentModelData;
         let lastPlaybackNodeId = null;
+        let layerListItemsById = new Map();
+        let activeLayerListItem = null;
+        const domCache = new Map();
+
+        function byId(id) {
+            const key = String(id || '');
+            if (!key) return null;
+            if (!domCache.has(key)) {
+                domCache.set(key, document.getElementById(key));
+            }
+            return domCache.get(key) || null;
+        }
+
+        function setActiveLayerListItem(layerKey) {
+            const nextItem = layerKey ? layerListItemsById.get(String(layerKey)) || null : null;
+            if (nextItem === activeLayerListItem) return;
+            if (activeLayerListItem) {
+                activeLayerListItem.classList.remove('active');
+            }
+            activeLayerListItem = nextItem;
+            if (activeLayerListItem) {
+                activeLayerListItem.classList.add('active');
+            }
+        }
 
         function setVizModeBadge(mode, message = '') {
-            const badge = document.getElementById('vizModeBadge');
+            const badge = byId('vizModeBadge');
             if (!badge) return;
             badge.style.display = 'inline-block';
             badge.textContent = mode;
@@ -1759,7 +1798,7 @@
         }
 
         function showToast(title, message, level = 'success') {
-            const stack = document.getElementById('toastStack');
+            const stack = byId('toastStack');
             if (!stack) return;
             const toast = document.createElement('div');
             toast.className = `toast toast-${level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'success'}`;
@@ -1789,14 +1828,14 @@
 
         function showBlockedIndicator(message) {
             setVizModeBadge('⛔ BLOCKED', message);
-            const totalEl = document.getElementById('totalParams');
+            const totalEl = byId('totalParams');
             if (totalEl) totalEl.textContent = 'N/A';
-            const pBadge = document.getElementById('paramsSourceBadge');
+            const pBadge = byId('paramsSourceBadge');
             if (pBadge) {
                 pBadge.className = 'source-badge blocked';
                 pBadge.textContent = 'Blocked: missing config';
             }
-            const cBadge = document.getElementById('configSourceBadge');
+            const cBadge = byId('configSourceBadge');
             if (cBadge) {
                 cBadge.className = 'source-badge blocked';
                 cBadge.textContent = 'Config source: unknown';
@@ -1819,11 +1858,11 @@
          * - If opened standalone / not connected, shows a "not connected" state
          */
         function updatePlaybackStatus(state) {
-            const tokenEl = document.getElementById('currentTokenText');
-            const layerEl = document.getElementById('currentLayerText');
-            const connEl = document.getElementById('playbackConnectionText');
-            const pausedEl = document.getElementById('playbackPausedText');
-            const speedEl = document.getElementById('playbackSpeedText');
+            const tokenEl = byId('currentTokenText');
+            const layerEl = byId('currentLayerText');
+            const connEl = byId('playbackConnectionText');
+            const pausedEl = byId('playbackPausedText');
+            const speedEl = byId('playbackSpeedText');
 
             if (!tokenEl || !layerEl || !connEl) return;
 
@@ -1901,24 +1940,22 @@
         }
 
         function resetDetailPanel() {
-            const panel = document.getElementById('detailsPanel');
-            const title = document.getElementById('detailsTitle');
-            const content = document.getElementById('detailsContent');
-            const provenance = document.getElementById('detailsProvenance');
+            const panel = byId('detailsPanel');
+            const title = byId('detailsTitle');
+            const content = byId('detailsContent');
+            const provenance = byId('detailsProvenance');
             if (panel) panel.style.display = 'none';
             if (title) title.textContent = 'Layer Details';
             if (content) content.innerHTML = '';
             if (provenance) provenance.innerHTML = '';
-            document.querySelectorAll('.layer-item').forEach(item => {
-                item.classList.remove('active');
-            });
+            setActiveLayerListItem(null);
         }
 
         function showDetails(layer) {
-            const panel = document.getElementById('detailsPanel');
-            const title = document.getElementById('detailsTitle');
-            const content = document.getElementById('detailsContent');
-            const provenance = document.getElementById('detailsProvenance');
+            const panel = byId('detailsPanel');
+            const title = byId('detailsTitle');
+            const content = byId('detailsContent');
+            const provenance = byId('detailsProvenance');
 
             panel.style.display = 'block';
             panel.classList.add('fade-in');
@@ -1951,23 +1988,21 @@
                 </div>
             `;
 
-            document.querySelectorAll('.layer-item').forEach(item => {
-                const k = layer.parent_trace_id || layer.trace_id || layer.id;
-                item.classList.toggle('active', item.dataset.id === k);
-            });
+            const k = layer.parent_trace_id || layer.trace_id || layer.id;
+            setActiveLayerListItem(k);
         }
 
         function updateStats(modelData) {
-            document.getElementById('totalParams').textContent = formatNumber(modelData.totalParams);
-            document.getElementById('hiddenSize').textContent = modelData.hiddenSize;
-            document.getElementById('numLayers').textContent = modelData.numLayers;
-            document.getElementById('numExperts').textContent = modelData.numExperts;
-            document.getElementById('headDim').textContent = modelData.headDim;
+            byId('totalParams').textContent = formatNumber(modelData.totalParams);
+            byId('hiddenSize').textContent = modelData.hiddenSize;
+            byId('numLayers').textContent = modelData.numLayers;
+            byId('numExperts').textContent = modelData.numExperts;
+            byId('headDim').textContent = modelData.headDim;
 
             // Truthfulness / source badges
-            const paramsBadge = document.getElementById('paramsSourceBadge');
-            const configBadge = document.getElementById('configSourceBadge');
-            const statsNarrative = document.getElementById('statsNarrative');
+            const paramsBadge = byId('paramsSourceBadge');
+            const configBadge = byId('configSourceBadge');
+            const statsNarrative = byId('statsNarrative');
 
             if (paramsBadge) {
                 if (modelData.paramsSource === 'estimated_js') {
@@ -2009,7 +2044,7 @@
             }
 
             // Add extra fields (active/context/etc.) under total params when available.
-            const totalEl = document.getElementById('totalParams');
+            const totalEl = byId('totalParams');
             if (totalEl) {
                 const ctx = modelData.maxPosition || 0;
                 const act = modelData.activatedParams || 0;
@@ -2026,8 +2061,10 @@
         }
 
         function updateLayerList(modelData) {
-            const list = document.getElementById('layerList');
-            list.innerHTML = '';
+            const list = byId('layerList');
+            const fragment = document.createDocumentFragment();
+            layerListItemsById = new Map();
+            activeLayerListItem = null;
 
             modelData.layers.forEach(layer => {
                 const item = document.createElement('div');
@@ -2047,12 +2084,14 @@
                     visualizer.selectComponent(layer);
                 });
 
-                list.appendChild(item);
+                layerListItemsById.set(item.dataset.id, item);
+                fragment.appendChild(item);
             });
+            list.replaceChildren(fragment);
         }
 
         async function loadModel(announce = true) {
-            const path = document.getElementById('modelPath').value;
+            const path = byId('modelPath').value;
             parser = new UltraModelParser();
             try {
                 currentModelData = await parser.loadFromPath(path);
@@ -2065,7 +2104,7 @@
                 return;
             }
 
-            visualizer = new SVGVisualizer(document.getElementById('architectureSvg'));
+            visualizer = new SVGVisualizer(byId('architectureSvg'));
             visualizer.render(currentModelData);
 
             updateStats(currentModelData);
@@ -2086,43 +2125,67 @@
             // file:// hint (helps diagnose cross-page sync failures)
             try {
                 if (window.location && window.location.protocol === 'file:') {
-                    const hint = document.getElementById('originHint');
+                    const hint = byId('originHint');
                     if (hint) hint.style.display = 'block';
 
                     // Auto-detect the localhost port that is serving the 3D visualizer via iframe + postMessage handshake.
                     // This avoids hardcoding ports like 8765/8002.
                     const candidates = [8002, 8765, 8000, 8080, 5173];
                     const timeoutMs = 1600;
+                    const sameOriginCacheKey = '__VITRIOL_SAME_ORIGIN_HTTP__';
                     let detectedOrigin = null;
                     let probing = true;
 
-                    const openBtn = document.getElementById('openSameOriginBtn');
-                    const copyBtn = document.getElementById('copySameOriginUrlBtn');
-                    if (openBtn) openBtn.textContent = 'Probing ports…';
+                    const openBtn = byId('openSameOriginBtn');
+                    const copyBtn = byId('copySameOriginUrlBtn');
+
+                    function readCachedOrigin() {
+                        try {
+                            const cached = window.sessionStorage.getItem(sameOriginCacheKey) || window.localStorage.getItem(sameOriginCacheKey);
+                            if (cached && String(cached).startsWith('http://localhost:')) return cached;
+                        } catch (e) {}
+                        return null;
+                    }
+
+                    function persistOrigin(origin) {
+                        try { window.sessionStorage.setItem(sameOriginCacheKey, origin); } catch (e) {}
+                        try { window.localStorage.setItem(sameOriginCacheKey, origin); } catch (e) {}
+                    }
 
                     function makeUrl(origin) {
                         const base = `${origin}/src/vitriol/viz/model_visualizer.html`;
                         return base + '#?demo=1';
                     }
 
-                    function setReady(origin) {
-                        detectedOrigin = origin;
-                        probing = false;
+                    function configureOriginActions(origin, mode = 'detected') {
                         const url = makeUrl(origin);
-                        if (openBtn) openBtn.textContent = `Open with ${origin} (demo)`;
                         if (openBtn) {
+                            openBtn.textContent = mode === 'cached' ? `Use cached ${origin}` : `Open with ${origin} (demo)`;
                             openBtn.onclick = () => {
-                                showToast('Opening HTTP demo', `Opening ${url} in a new tab under the detected same-origin server.`, 'success');
+                                const title = mode === 'cached' ? 'Opening cached HTTP demo' : 'Opening HTTP demo';
+                                const body = mode === 'cached'
+                                    ? `Using cached same-origin endpoint ${origin}. If this server moved, rerun the probe or open a known localhost URL manually.`
+                                    : `Opening ${url} in a new tab under the detected same-origin server.`;
+                                showToast(title, body, mode === 'cached' ? 'warn' : 'success');
                                 window.open(url, '_blank', 'noopener,noreferrer');
                             };
                         }
                         if (copyBtn) {
                             copyBtn.onclick = () => copyTextWithFeedback(
                                 url,
-                                'HTTP link copied',
-                                `Detected same-origin endpoint: ${origin}. Open this link over HTTP to restore 2D⇄3D sync.`
+                                mode === 'cached' ? 'Cached HTTP link copied' : 'HTTP link copied',
+                                mode === 'cached'
+                                    ? `Copied cached same-origin endpoint: ${origin}.`
+                                    : `Detected same-origin endpoint: ${origin}. Open this link over HTTP to restore 2D⇄3D sync.`
                             );
                         }
+                    }
+
+                    function setReady(origin) {
+                        detectedOrigin = origin;
+                        probing = false;
+                        persistOrigin(origin);
+                        configureOriginActions(origin, 'detected');
                     }
 
                     function setFallback() {
@@ -2143,6 +2206,14 @@
                                 'No handshake response was detected; copied the default localhost fallback for manual retry.'
                             );
                         }
+                    }
+
+                    const cachedOrigin = readCachedOrigin();
+                    if (cachedOrigin) {
+                        detectedOrigin = cachedOrigin;
+                        configureOriginActions(cachedOrigin, 'cached');
+                    } else if (openBtn) {
+                        openBtn.textContent = 'Probing ports…';
                     }
 
                     function probePort(port) {
@@ -2177,16 +2248,20 @@
                     window.addEventListener('message', onMessage);
                     candidates.forEach(probePort);
                     window.setTimeout(() => {
-                        if (!detectedOrigin) {
+                        if (probing) {
                             window.removeEventListener('message', onMessage);
+                        }
+                        if (!detectedOrigin) {
                             setFallback();
+                        } else {
+                            probing = false;
                         }
                     }, timeoutMs);
 
                 }
             } catch (e) {}
 
-            const clearDetailsBtn = document.getElementById('clearDetailsBtn');
+            const clearDetailsBtn = byId('clearDetailsBtn');
             if (clearDetailsBtn) {
                 clearDetailsBtn.addEventListener('click', () => {
                     if (visualizer && typeof visualizer.clearSelection === 'function') {

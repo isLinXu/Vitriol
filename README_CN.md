@@ -144,6 +144,11 @@ python -m vitriol.cli.main evolve simulate Qwen/Qwen2.5-72B --gpu H100
 python -m vitriol.cli.main webui
 ```
 
+## 可视化性能说明
+
+- `viz` / `model_visualizer.html`：2D 查看器会缓存重复的 DOM 查询；当通过 `file://` 打开时，还会把最近一次成功的 `http://localhost:*` 同源端口缓存到 `sessionStorage` / `localStorage`，减少反复探测开销。
+- `weight-viz`：`weight_inspector.generate_viz_data()` 会在可行时优先利用 safetensors 头部元数据，只加载可视化真正需要的张量与分片，从而减少大模型 I/O。
+
 ## CLI 命令参考
 
 Vitriol 提供 **18 个命令**，统一入口：

@@ -6,6 +6,7 @@ import threading
 import json
 import re
 import logging
+import copy
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
@@ -19,14 +20,14 @@ def build_inline_config_model(model_path):
     if model_index_path.exists():
         # Handle Diffusers format (Stable Diffusion, etc.)
         try:
-            model_index = json.loads(model_index_path.read_text())
+            model_index = json.loads(model_index_path.read_text(encoding="utf-8"))
             unet_config_path = model_path / 'unet' / 'config.json'
             vae_config_path = model_path / 'vae' / 'config.json'
             text_encoder_config_path = model_path / 'text_encoder' / 'config.json'
             
-            unet_config = json.loads(unet_config_path.read_text()) if unet_config_path.exists() else {}
-            vae_config = json.loads(vae_config_path.read_text()) if vae_config_path.exists() else {}
-            text_encoder_config = json.loads(text_encoder_config_path.read_text()) if text_encoder_config_path.exists() else {}
+            unet_config = json.loads(unet_config_path.read_text(encoding="utf-8")) if unet_config_path.exists() else {}
+            vae_config = json.loads(vae_config_path.read_text(encoding="utf-8")) if vae_config_path.exists() else {}
+            text_encoder_config = json.loads(text_encoder_config_path.read_text(encoding="utf-8")) if text_encoder_config_path.exists() else {}
             
             # Extract architecture specifics
             unet_config.get('in_channels', 4)
@@ -55,7 +56,7 @@ def build_inline_config_model(model_path):
         return None
 
     try:
-        config = json.loads(config_path.read_text())
+        config = json.loads(config_path.read_text(encoding="utf-8"))
     except Exception as e:
         click.echo(f"Warning: Failed to read config.json: {e}", err=True)
         return None
@@ -66,7 +67,7 @@ def build_inline_config_model(model_path):
         meta_path = model_path / meta_name
         if meta_path.exists():
             try:
-                meta_config = json.loads(meta_path.read_text())
+                meta_config = json.loads(meta_path.read_text(encoding="utf-8"))
                 break
             except Exception as e:
                 click.echo(f"Warning: Failed to read {meta_name}: {e}", err=True)
@@ -74,7 +75,7 @@ def build_inline_config_model(model_path):
     # If meta-config.json exists, use it as the authoritative config for visualization
     # while preserving the raw payload for truthfulness/debugging surfaces.
     raw_config = meta_config if meta_config else config
-    effective_config = json.loads(json.dumps(raw_config))
+    effective_config = copy.deepcopy(raw_config)
 
     # Build model config structure matching what JavaScript expects
     model_name = effective_config.get('model_name', model_path.name)
@@ -362,7 +363,7 @@ def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_pat
                 temp_dir = Path(tempfile.mkdtemp(prefix="vitriol_viz_"))
                 temp_html = temp_dir / f'model_visualizer_{port}.html'
 
-                html_content = html_path.read_text()
+                html_content = html_path.read_text(encoding="utf-8")
 
                 # Replace the built-in demo model path with the requested model.
                 html_content = re.sub(
@@ -450,7 +451,7 @@ def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_pat
                         f"window.__VITRIOL_TRACE__ = {trace_json};",
                     )
 
-                temp_html.write_text(html_content)
+                temp_html.write_text(html_content, encoding="utf-8")
                 html_file_to_serve = temp_html
             else:
                 click.echo(f"Warning: No config.json found in {model_path}, using demo data", err=True)

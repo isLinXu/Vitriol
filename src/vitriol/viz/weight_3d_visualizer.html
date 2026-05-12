@@ -255,32 +255,54 @@
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
         let hoveredInstanceId = -1;
+        const domCache = Object.create(null);
+        let layerListItemsByIndex = new Map();
+        let activeLayerListItem = null;
         
         const SAMPLE_SIZE = 64; // Max grid size to display (64x64 = 4096 cubes)
+
+        function byId(id) {
+            if (!domCache[id]) {
+                domCache[id] = document.getElementById(id);
+            }
+            return domCache[id];
+        }
+
+        function disposeInstancedMesh(mesh) {
+            if (!mesh) return;
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material) {
+                if (Array.isArray(mesh.material)) {
+                    mesh.material.forEach(material => material?.dispose?.());
+                } else if (typeof mesh.material.dispose === 'function') {
+                    mesh.material.dispose();
+                }
+            }
+        }
 
         async function loadData() {
             try {
                 const response = await fetch('/weight_data.json?t=' + new Date().getTime());
                 modelData = await response.json();
                 
-                document.getElementById('model-name-display').textContent = modelData.model_name;
+                byId('model-name-display').textContent = modelData.model_name;
 
                 // Show stats mode badge
-                const badge = document.getElementById('stats-mode-badge');
+                const badge = byId('stats-mode-badge');
                 if (modelData.weight_stats_available) {
                     badge.textContent = 'REAL STATS';
                     badge.className = 'stats-badge real';
                     badge.style.display = 'inline';
-                    document.getElementById('toolbar-note').textContent = 'Displays sampled real-weight statistics; colors are distribution-guided, not raw tensor dumps.';
+                    byId('toolbar-note').textContent = 'Displays sampled real-weight statistics; colors are distribution-guided, not raw tensor dumps.';
                 } else {
                     badge.textContent = 'SYNTHETIC';
                     badge.className = 'stats-badge synthetic';
                     badge.style.display = 'inline';
-                    document.getElementById('toolbar-note').textContent = 'Displays structurally-derived synthetic values for exploration only.';
+                    byId('toolbar-note').textContent = 'Displays structurally-derived synthetic values for exploration only.';
                 }
 
                 // Show config/provenance info
-                const sourceInfo = document.getElementById('config-source-info');
+                const sourceInfo = byId('config-source-info');
                 if (sourceInfo) {
                     const paramsSource = modelData.params_source || 'unknown';
                     const sampling = modelData.sampling || {};
@@ -304,16 +326,20 @@
                     selectLayer(modelData.layers[0]);
                 }
                 
-                document.getElementById('loading').style.opacity = '0';
-                setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
+                const loading = byId('loading');
+                loading.style.opacity = '0';
+                setTimeout(() => { loading.style.display = 'none'; }, 500);
             } catch (e) {
-                document.getElementById('loadingText').textContent = 'Error loading data: ' + e.message;
+                byId('loadingText').textContent = 'Error loading data: ' + e.message;
                 console.error(e);
             }
         }
 
         function buildLayerList() {
-            const container = document.getElementById('layer-list');
+            const container = byId('layer-list');
+            layerListItemsByIndex = new Map();
+            activeLayerListItem = null;
+            const fragment = document.createDocumentFragment();
             
             // Group layers
             let currentGroup = '';
@@ -333,13 +359,14 @@
                     header.style.fontSize = '0.9rem';
                     header.style.fontWeight = 'bold';
                     header.textContent = group.toUpperCase();
-                    container.appendChild(header);
+                    fragment.appendChild(header);
                     currentGroup = group;
                 }
                 
                 const div = document.createElement('div');
                 div.className = 'layer-item';
                 div.id = 'layer-' + idx;
+                layerListItemsByIndex.set(idx, div);
                 
                 const nameSpan = document.createElement('span');
                 nameSpan.textContent = layer.name.replace(currentGroup + '.', '');
@@ -366,27 +393,34 @@
                 div.appendChild(shapeSpan);
                 
                 div.onclick = () => selectLayer(layer, idx);
-                container.appendChild(div);
+                fragment.appendChild(div);
             });
+            container.replaceChildren(fragment);
         }
 
         function selectLayer(layer, idx) {
-            document.querySelectorAll('.layer-item').forEach(el => el.classList.remove('active'));
-            if (idx !== undefined) {
-                document.getElementById('layer-' + idx).classList.add('active');
+            if (activeLayerListItem) {
+                activeLayerListItem.classList.remove('active');
+            }
+            const nextActiveItem = idx !== undefined
+                ? layerListItemsByIndex.get(idx)
+                : layerListItemsByIndex.values().next().value;
+            if (nextActiveItem) {
+                nextActiveItem.classList.add('active');
+                activeLayerListItem = nextActiveItem;
             } else {
-                document.querySelector('.layer-item').classList.add('active');
+                activeLayerListItem = null;
             }
             
             currentLayer = layer;
             
             // Update UI
-            document.getElementById('stat-layer').textContent = layer.name;
-            document.getElementById('stat-shape').textContent = `[${layer.shape.join(', ')}]`;
+            byId('stat-layer').textContent = layer.name;
+            byId('stat-shape').textContent = `[${layer.shape.join(', ')}]`;
             const params = layer.shape.reduce((a, b) => a * b, 1);
             const paramsSource = modelData?.params_source || 'unknown';
-            document.getElementById('stat-params').textContent = `${params.toLocaleString()} (${paramsSource})`;
-            const flagsEl = document.getElementById('layer-flags');
+            byId('stat-params').textContent = `${params.toLocaleString()} (${paramsSource})`;
+            const flagsEl = byId('layer-flags');
             if (flagsEl) {
                 const pills = [];
                 if (layer.stats?.metadata_only) pills.push('<span class="mini-pill">Header-only metadata</span>');
@@ -397,33 +431,33 @@
             }
 
             // Show weight stats if available
-            const statsSection = document.getElementById('weight-stats-section');
+            const statsSection = byId('weight-stats-section');
             if (layer.stats) {
                 statsSection.style.display = 'block';
-                document.getElementById('stat-mean').textContent = layer.stats.mean.toFixed(6);
-                document.getElementById('stat-std').textContent = layer.stats.std.toFixed(6);
+                byId('stat-mean').textContent = layer.stats.mean.toFixed(6);
+                byId('stat-std').textContent = layer.stats.std.toFixed(6);
                 
                 const sparsity = layer.stats.sparsity;
-                const sparsityEl = document.getElementById('stat-sparsity');
+                const sparsityEl = byId('stat-sparsity');
                 sparsityEl.textContent = (sparsity * 100).toFixed(1) + '%';
                 sparsityEl.className = sparsity > 0.5 ? 'stat-value highlight' : 'stat-value good';
 
-                document.getElementById('stat-l2').textContent = layer.stats.l2_norm.toFixed(2);
+                byId('stat-l2').textContent = layer.stats.l2_norm.toFixed(2);
 
                 // Compression ratio
-                const compRow = document.getElementById('stat-compression-row');
+                const compRow = byId('stat-compression-row');
                 if (layer.stats.compression_ratio && layer.stats.compression_ratio > 1.1) {
                     compRow.style.display = 'flex';
-                    document.getElementById('stat-compression').textContent = layer.stats.compression_ratio.toFixed(1) + '×';
+                    byId('stat-compression').textContent = layer.stats.compression_ratio.toFixed(1) + '×';
                 } else {
                     compRow.style.display = 'none';
                 }
 
                 // Strided info
-                const stridedRow = document.getElementById('stat-strided-row');
+                const stridedRow = byId('stat-strided-row');
                 if (layer.stats.is_strided) {
                     stridedRow.style.display = 'flex';
-                    document.getElementById('stat-strided').textContent = 'Ultra stride=0 (broadcast)';
+                    byId('stat-strided').textContent = 'Ultra stride=0 (broadcast)';
                 } else {
                     stridedRow.style.display = 'none';
                 }
@@ -456,7 +490,8 @@
         function buildMatrixVisualization(layer) {
             if (instancedMesh) {
                 scene.remove(instancedMesh);
-                instancedMesh.dispose();
+                disposeInstancedMesh(instancedMesh);
+                instancedMesh = null;
             }
             
             // Determine grid dimensions based on tensor shape
@@ -466,7 +501,7 @@
             const visRows = Math.min(rows, SAMPLE_SIZE);
             const visCols = Math.min(cols, SAMPLE_SIZE);
             
-            document.getElementById('stat-sample').textContent = `${visRows} × ${visCols}`;
+            byId('stat-sample').textContent = `${visRows} × ${visCols}`;
             
             const count = visRows * visCols;
             
@@ -701,7 +736,7 @@
             abortController = new AbortController();
 
             if (instancedMesh) {
-                instancedMesh.dispose();
+                disposeInstancedMesh(instancedMesh);
                 instancedMesh = null;
             }
             if (rainParticles) {
