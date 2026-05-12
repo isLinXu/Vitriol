@@ -43,5 +43,4 @@ class ResolveShardMapStep:
             norm_table[filename] = f"{prefix}-{seq_idx:05d}-of-{total_shards:05d}.{ext}"
 
         ctx.original_shard_map = {p: norm_table.get(f, f) for p, f in original_map.items()}
-        ctx.expected_shards = sorted(set(ctx.original_shard_map.values()))
-
+        ctx.expected_shards = list(norm_table.values())

@@ -156,6 +156,24 @@ class TestExportStructure:
             with pytest.raises(Exception, match="Load error"):
                 exporter.export_structure(str(output_file))
 
+    @patch("vitriol.core.exporter.ModelExporter._load_best_config")
+    def test_export_structure_creates_parent_directories(self, mock_load):
+        exporter = ModelExporter("/tmp/model")
+        mock_config = MagicMock()
+        mock_config.model_type = "llama"
+        mock_config.architectures = []
+        mock_config.hidden_size = 4096
+        mock_config.num_hidden_layers = 32
+        mock_config.num_attention_heads = 32
+        mock_config.vocab_size = 32000
+        mock_config.to_dict.return_value = {"model_type": "llama"}
+        mock_load.return_value = mock_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = Path(tmpdir) / "nested" / "export" / "structure.json"
+            exporter.export_structure(str(output_file))
+            assert output_file.exists()
+
 
 class TestExportGgufPrep:
     """Tests for export_gguf_prep method."""
@@ -177,3 +195,13 @@ class TestExportGgufPrep:
             # Should not raise, just log warning
             exporter.export_gguf_prep(tmpdir)
             mock_run.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_export_gguf_uses_explicit_output_file_path(self, mock_run):
+        exporter = ModelExporter("/tmp/model")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_file = Path(tmpdir) / "exports" / "custom-name.gguf"
+            exporter.export_gguf_prep(str(output_file))
+            cmd = mock_run.call_args[0][0]
+            assert cmd[-1] == str(output_file)
+            assert output_file.parent.exists()

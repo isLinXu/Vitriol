@@ -603,12 +603,15 @@ class MinimalWeightGenerator:
         original_shard_map: Dict[str, str],
         current_target: Optional[str],
         param_seq_idx: int = 0,          # [F-3] sequential index for even distribution
+        available_shards: Optional[List[str]] = None,
     ) -> Optional[str]:
         if not original_shard_map:
             return None
 
-        available = sorted(set(original_shard_map.values()))
+        available = available_shards if available_shards is not None else sorted(set(original_shard_map.values()))
         n_shards  = len(available)
+        if n_shards == 0:
+            return None
 
         # 1. Exact match
         if name in original_shard_map:
@@ -680,6 +683,24 @@ class MinimalWeightGenerator:
             getattr(hf_config, "_attn_implementation", "N/A"),
             getattr(hf_config, "use_flash_attention_2", "N/A"),
         )
+
+    @staticmethod
+    def _snapshot_export_tensors(model) -> List[Tuple[str, Any]]:
+        """Collect exportable parameters and persistent buffers in a reusable snapshot."""
+        non_persistent_buffers: Set[str] = set()
+        for module_prefix, module in model.named_modules():
+            local_names: Set[str] = getattr(module, "_non_persistent_buffers_set", set())
+            for local_name in local_names:
+                qualified = f"{module_prefix}.{local_name}" if module_prefix else local_name
+                non_persistent_buffers.add(qualified)
+
+        export_items: List[Tuple[str, Any]] = list(model.named_parameters())
+        for name, buf in model.named_buffers():
+            if name in non_persistent_buffers:
+                logger.debug("Skipping non-persistent buffer during export: %s", name)
+                continue
+            export_items.append((name, buf))
+        return export_items
 
     # ──────────────────────────────────────────────────────────────────────
     # Remote-class patching (Kimi, DeepSeek, MoonViT …)
@@ -1057,30 +1078,16 @@ class MinimalWeightGenerator:
 
         shard_buffers: Dict[str, Dict[str, Any]] = {f: {} for f in expected_shards}
 
-        non_persistent_buffers: Set[str] = set()
-        for module_prefix, module in model.named_modules():
-            local_names: Set[str] = getattr(module, "_non_persistent_buffers_set", set())
-            for local_name in local_names:
-                qualified = f"{module_prefix}.{local_name}" if module_prefix else local_name
-                non_persistent_buffers.add(qualified)
-
-        def _iter_export_tensors():
-            for item in model.named_parameters():
-                yield item
-            for name, buf in model.named_buffers():
-                if name in non_persistent_buffers:
-                    logger.debug("Skipping non-persistent buffer during export: %s", name)
-                    continue
-                yield name, buf
+        export_items = self._snapshot_export_tensors(model)
 
         # Snapshot names for progress bar (without materialising tensors)
-        all_names = [n for n, _ in _iter_export_tensors()]
+        all_names = [n for n, _ in export_items]
         total_params = len(all_names)
 
         current_target: Optional[str] = None
         if all_names and original_shard_map:
             current_target = self._resolve_target_shard(
-                all_names[0], original_shard_map, None, param_seq_idx=0)
+                all_names[0], original_shard_map, None, param_seq_idx=0, available_shards=expected_shards)
 
         pbar = tqdm(total=total_params, desc="Generating tensors")
         pbar.update(len(generated_names))
@@ -1093,7 +1100,7 @@ class MinimalWeightGenerator:
             param_seq_idx = 0   # monotonically increments; used for even fallback distribution
 
             # ── 4. Generation loop ──────────────────────────────────────────
-            for name, param in _iter_export_tensors():  # [A7] iterator, no full list
+            for name, param in export_items:  # [A7] reusable snapshot, no repeated traversal
                 if name in generated_names:  # [B3 fix] stable name key
                     param_seq_idx += 1
                     pbar.update(1)
@@ -1103,6 +1110,7 @@ class MinimalWeightGenerator:
                 target = self._resolve_target_shard(
                     name, original_shard_map, current_target,
                     param_seq_idx=param_seq_idx,
+                    available_shards=expected_shards,
                 )
                 if original_shard_map and not target:
                     # Still no target? Use round-robin on expected_shards

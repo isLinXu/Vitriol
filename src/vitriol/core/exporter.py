@@ -49,6 +49,25 @@ class ModelExporter:
                 "local_files_only": True,
             },
         )
+
+    @staticmethod
+    def _resolve_gguf_output_path(output_target: str) -> Path:
+        """Resolve GGUF output target.
+
+        The CLI exposes ``--output`` as a file path, but older internal callers may
+        still pass a directory. We support both:
+        - explicit file path (has a suffix like ``.gguf``) -> use as-is
+        - directory path (existing dir or suffix-less path) -> write ``model.gguf`` inside
+        """
+        target = Path(output_target)
+        if target.exists() and target.is_dir():
+            gguf_path = target / "model.gguf"
+        elif target.suffix:
+            gguf_path = target
+        else:
+            gguf_path = target / "model.gguf"
+        gguf_path.parent.mkdir(parents=True, exist_ok=True)
+        return gguf_path
         
     def export_structure(self, output_file: str):
         """Export architecture details to JSON"""
@@ -64,9 +83,10 @@ class ModelExporter:
                 'vocab_size': getattr(config, 'vocab_size', None),
                 'config': config.to_dict()
             }
-            
-            with open(output_file, 'w') as f:
-                json.dump(structure, f, indent=2)
+
+            output_path = Path(output_file)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(structure, indent=2), encoding="utf-8")
                 
             logger.info(f"Exported structure to {output_file}")
             
@@ -74,13 +94,15 @@ class ModelExporter:
             logger.error(f"Failed to export structure: {e}")
             raise e
 
-    def export_gguf_prep(self, output_dir: str):
-        """Run GGUF conversion using llama.cpp if available."""
+    def export_gguf_prep(self, output_target: str):
+        """Run GGUF conversion using llama.cpp if available.
+
+        ``output_target`` may be either a final ``.gguf`` file path or a directory.
+        """
         import subprocess
         import sys
-        
-        output_path = Path(output_dir)
-        gguf_path = output_path / "model.gguf"
+
+        gguf_path = self._resolve_gguf_output_path(output_target)
         
         logger.info(f"Attempting GGUF export to {gguf_path}...")
         

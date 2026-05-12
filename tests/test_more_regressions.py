@@ -41,6 +41,31 @@ def test_get_original_shard_map_prefers_local_index_without_network(tmp_path: Pa
     assert m.get("model.embed_tokens.weight") == "pytorch_model-00001-of-00001.bin"
 
 
+def test_resolve_target_shard_reuses_precomputed_shard_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    from vitriol.core import generator as gen_mod
+
+    generator = MinimalWeightGenerator.__new__(MinimalWeightGenerator)
+    original_map = {
+        "w1": "pytorch_model-00001-of-00002.bin",
+        "w2": "pytorch_model-00002-of-00002.bin",
+    }
+    available = ["pytorch_model-00001-of-00002.bin", "pytorch_model-00002-of-00002.bin"]
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("sorted() should not be called when available_shards is provided")
+
+    monkeypatch.setattr(gen_mod, "sorted", _boom, raising=False)
+
+    shard = generator._resolve_target_shard(
+        "missing.weight",
+        original_map,
+        None,
+        param_seq_idx=1,
+        available_shards=available,
+    )
+    assert shard == available[1]
+
+
 def test_copy_custom_code_files_respects_security_offline_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     model_dir = tmp_path / "model"
     out_dir = tmp_path / "out"
@@ -214,6 +239,35 @@ def test_generator_skips_non_persistent_buffers_during_export(tmp_path: Path) ->
     assert "temp_buf" not in names
     assert "inner.inner_persist" in names
     assert "inner.inner_temp" not in names
+
+
+def test_generator_snapshot_export_tensors_reuses_single_parameter_and_buffer_walk() -> None:
+    generator = MinimalWeightGenerator.__new__(MinimalWeightGenerator)
+
+    class DummyModel(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.param_walks = 0
+            self.buffer_walks = 0
+            self.param = torch.nn.Parameter(torch.zeros(1))
+            self.register_buffer("persist_buf", torch.ones(1), persistent=True)
+            self.register_buffer("temp_buf", torch.ones(1), persistent=False)
+
+        def named_parameters(self, *args, **kwargs):
+            self.param_walks += 1
+            return super().named_parameters(*args, **kwargs)
+
+        def named_buffers(self, *args, **kwargs):
+            self.buffer_walks += 1
+            return super().named_buffers(*args, **kwargs)
+
+    model = DummyModel()
+    export_items = generator._snapshot_export_tensors(model)
+    names = [name for name, _ in export_items]
+
+    assert model.param_walks == 1
+    assert model.buffer_walks == 1
+    assert names == ["param", "persist_buf"]
 
 
 def test_hy3_architecture_analyzer_exposes_moe_gqa_and_mtp_metadata(tmp_path: Path) -> None:
