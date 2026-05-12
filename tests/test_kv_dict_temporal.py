@@ -70,6 +70,15 @@ class TestOrthogonalMatchingPursuit:
         # With enough atoms, reconstruction should be reasonable
         assert mse < x.pow(2).mean().item()
 
+    def test_omp_does_not_track_gradients(self):
+        dictionary = torch.randn(8, 16, requires_grad=True)
+        x = torch.randn(2, 16, requires_grad=True)
+
+        coeffs, indices = orthogonal_matching_pursuit(x, dictionary, sparsity=2)
+
+        assert not coeffs.requires_grad
+        assert not indices.requires_grad
+
 
 # ─────────────────────────────────────────────────────────────
 # Dictionary Learning
@@ -108,6 +117,17 @@ class TestDictionaryLearning:
         dictionary = learn_dictionary_online(data, n_atoms=10, n_iterations=2, sparsity=1)
 
         assert dictionary.shape == (10, 8)
+
+    def test_online_sampling_avoids_full_randperm_for_large_batches(self, monkeypatch):
+        data = torch.randn(2048, 8)
+
+        def _boom(*_args, **_kwargs):
+            raise AssertionError("randperm should not be used for large online mini-batches")
+
+        monkeypatch.setattr(torch, "randperm", _boom)
+
+        dictionary = learn_dictionary_online(data, n_atoms=16, n_iterations=2, sparsity=2)
+        assert dictionary.shape == (16, 8)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -213,6 +233,21 @@ class TestDictKVCodec:
         assert report["is_key"] is True
         assert "compression_ratio" in report
 
+    def test_compress_uses_sparse_only_storage(self):
+        torch.manual_seed(42)
+        cfg = DictKVConfig(n_atoms=16, sparsity=2, quantize_residual=False)
+        codec = DictKVCodec(cfg)
+        x = torch.randn(1, 2, 4, 8, requires_grad=True)
+
+        compressed, _ = codec.compress(x, is_key=True)
+
+        assert not compressed.indices.requires_grad
+        assert not compressed.values.requires_grad
+        assert compressed.coefficients is None
+        assert compressed.values.dtype == torch.float16
+        assert compressed.indices.dtype in (torch.int16, torch.int32)
+        assert compressed.storage_nbytes() < x.numel() * x.element_size()
+
     def test_compress_key_vs_value_sparsity(self):
         torch.manual_seed(42)
         cfg = DictKVConfig(n_atoms=16, sparsity=2, k_sparsity_boost=1, v_sparsity_penalty=0)
@@ -262,6 +297,9 @@ class TestDictKVCodec:
         compressed, _ = codec.compress(x, is_key=True)
         assert compressed.q_residual is not None
         assert compressed.residual_scales is not None
+        assert compressed.q_residual.dtype == torch.uint8
+        assert compressed.residual_scales.dtype == torch.float16
+        assert compressed.residual_mins.dtype == torch.float16
 
         reconstructed = codec.decompress(compressed)
         assert reconstructed.shape == x.shape

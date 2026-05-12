@@ -231,14 +231,12 @@ def pack_blockwise_tensor(
 
     values_per_byte = max(1, 8 // bit_width)
     packed_width = (block_size + values_per_byte - 1) // values_per_byte
-    packed = torch.zeros(
-        q.shape[0], q.shape[1], packed_width, dtype=torch.uint8, device=q.device
-    )
-
-    for idx in range(block_size):
-        byte_idx = idx // values_per_byte
-        shift = (idx % values_per_byte) * bit_width
-        packed[:, :, byte_idx] |= (q[:, :, idx].to(torch.uint8) << shift)
+    padded_block = packed_width * values_per_byte
+    if q.shape[-1] < padded_block:
+        q = F.pad(q, (0, padded_block - q.shape[-1]))
+    q = q.reshape(*q.shape[:-1], packed_width, values_per_byte)
+    shifts = torch.arange(values_per_byte, device=q.device, dtype=torch.int32) * int(bit_width)
+    packed = torch.sum(q << shifts, dim=-1).to(torch.uint8)
 
     return PackedKVTensor(
         q_data=packed,
@@ -257,15 +255,11 @@ def _unpack_blockwise_q_values(packed: PackedKVTensor) -> torch.Tensor:
     mask = (1 << packed.bit_width) - 1
     rows = packed.q_data.shape[0]
     blocks = packed.q_data.shape[1]
-    q = torch.zeros(
-        rows, blocks, packed.block_size, dtype=torch.float32, device=packed.q_data.device
-    )
-    for idx in range(packed.block_size):
-        byte_idx = idx // values_per_byte
-        shift = (idx % values_per_byte) * packed.bit_width
-        q[:, :, idx] = (
-            (packed.q_data[:, :, byte_idx].to(torch.int32) >> shift) & mask
-        ).to(torch.float32)
+    shifts = torch.arange(values_per_byte, device=packed.q_data.device, dtype=torch.int32) * int(packed.bit_width)
+    q = ((packed.q_data.to(torch.int32).unsqueeze(-1) >> shifts) & mask).to(torch.float32)
+    q = q.reshape(rows, blocks, -1)
+    if q.shape[-1] > packed.block_size:
+        q = q[..., : packed.block_size]
     return q
 
 
@@ -322,8 +316,6 @@ def _rademacher_projection(
     ).to(device=device)
 
     # Convert ±1 pattern: int8(0) -> -1.0, int8(1) -> +1.0
-    proj = proj_int.to(dtype) * 2.0 + (-1.0 if dtype == torch.float16 else -1.0)
-    # Actually simpler: cast to float then scale
     proj_f = proj_int.to(torch.float32) * 2.0 - 1.0
     proj = proj_f.to(dtype) / math.sqrt(float(sketch_dim))
 
@@ -345,20 +337,20 @@ def _pack_sign_tensor(signs: torch.Tensor) -> torch.Tensor:
     bits = (signs > 0).to(torch.uint8)
     logical_dim = int(bits.shape[-1])
     packed_width = (logical_dim + 7) // 8
-    packed = torch.zeros(*bits.shape[:-1], packed_width, dtype=torch.uint8, device=bits.device)
-    for idx in range(logical_dim):
-        packed[..., idx // 8] |= bits[..., idx] << (idx % 8)
-    return packed
+    padded_dim = packed_width * 8
+    if bits.shape[-1] < padded_dim:
+        bits = F.pad(bits, (0, padded_dim - bits.shape[-1]))
+    bits = bits.reshape(*bits.shape[:-1], packed_width, 8).to(torch.int32)
+    shifts = torch.arange(8, device=bits.device, dtype=torch.int32)
+    return torch.sum(bits << shifts, dim=-1).to(torch.uint8)
 
 
 def _unpack_sign_tensor(packed: torch.Tensor, logical_dim: int) -> torch.Tensor:
-    signs = torch.empty(*packed.shape[:-1], logical_dim, dtype=torch.int8, device=packed.device)
-    pos = torch.ones(*packed.shape[:-1], dtype=torch.int8, device=packed.device)
-    neg = -torch.ones(*packed.shape[:-1], dtype=torch.int8, device=packed.device)
-    for idx in range(int(logical_dim)):
-        bit = (packed[..., idx // 8] >> (idx % 8)) & 1
-        signs[..., idx] = torch.where(bit > 0, pos, neg)
-    return signs
+    shifts = torch.arange(8, device=packed.device, dtype=torch.int32)
+    bits = ((packed.to(torch.int32).unsqueeze(-1) >> shifts) & 1).reshape(*packed.shape[:-1], -1)
+    if bits.shape[-1] > logical_dim:
+        bits = bits[..., :logical_dim]
+    return bits.to(torch.int8).mul_(2).sub_(1)
 
 
 def pack_blockwise_tensor_with_qjl_residual(

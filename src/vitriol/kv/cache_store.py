@@ -558,39 +558,98 @@ class KVCacheStore:
                 return torch.cat([existing, new_packed], dim=-2)
             return existing  # Can't handle mixed types, fallback
 
-        # Decode existing to get base representation, then re-encode combined
-        # This is still cheaper than rebuilding because we only decode once
-        if isinstance(existing, (PackedKVTensor, ResidualQJLPackedTensor)):
-            decoded_existing = unpack_blockwise_tensor(existing.base) if isinstance(existing, ResidualQJLPackedTensor) else unpack_blockwise_tensor(existing)
+        def _concat_base(left: PackedKVTensor, right: PackedKVTensor) -> PackedKVTensor:
+            if (
+                left.block_size != right.block_size
+                or left.levels != right.levels
+                or left.bit_width != right.bit_width
+                or left.padded_last_dim != right.padded_last_dim
+                or left.orig_shape[:-2] != right.orig_shape[:-2]
+                or left.orig_shape[-1] != right.orig_shape[-1]
+            ):
+                raise ValueError("Packed tensor layouts do not match")
+
+            prefix_shape = tuple(int(x) for x in left.orig_shape[:-2])
+            left_seq = int(left.orig_shape[-2])
+            right_seq = int(right.orig_shape[-2])
+            q_blocks = int(left.q_data.shape[1])
+            q_width = int(left.q_data.shape[2])
+            scale_blocks = int(left.scales.shape[1])
+
+            left_q = left.q_data.reshape(*prefix_shape, left_seq, q_blocks, q_width)
+            right_q = right.q_data.reshape(*prefix_shape, right_seq, q_blocks, q_width)
+            left_scales = left.scales.reshape(*prefix_shape, left_seq, scale_blocks, 1)
+            right_scales = right.scales.reshape(*prefix_shape, right_seq, scale_blocks, 1)
+            left_mins = left.mins.reshape(*prefix_shape, left_seq, scale_blocks, 1)
+            right_mins = right.mins.reshape(*prefix_shape, right_seq, scale_blocks, 1)
+
+            combined_shape = (
+                *prefix_shape,
+                left_seq + right_seq,
+                int(left.orig_shape[-1]),
+            )
+            return PackedKVTensor(
+                q_data=torch.cat([left_q, right_q], dim=-3).reshape(-1, q_blocks, q_width),
+                scales=torch.cat([left_scales, right_scales], dim=-3).reshape(-1, scale_blocks, 1),
+                mins=torch.cat([left_mins, right_mins], dim=-3).reshape(-1, scale_blocks, 1),
+                orig_shape=combined_shape,
+                padded_last_dim=left.padded_last_dim,
+                block_size=left.block_size,
+                levels=left.levels,
+                bit_width=left.bit_width,
+            )
+
+        def _concat_residual(left: ResidualQJLPackedTensor, right: ResidualQJLPackedTensor) -> ResidualQJLPackedTensor:
+            if (
+                left.sketch_dim != right.sketch_dim
+                or left.seed != right.seed
+                or left.projection.shape != right.projection.shape
+                or left.projection.dtype != right.projection.dtype
+                or left.projection.device != right.projection.device
+                or not torch.equal(left.projection, right.projection)
+            ):
+                raise ValueError("Residual QJL projections do not match")
+
+            base = _concat_base(left.base, right.base)
+            return ResidualQJLPackedTensor(
+                base=base,
+                projection=left.projection,
+                residual_sign_bits=torch.cat([left.residual_sign_bits, right.residual_sign_bits], dim=-2),
+                residual_scale=torch.cat([left.residual_scale, right.residual_scale], dim=-2),
+                residual_norms=torch.cat([left.residual_norms, right.residual_norms], dim=-2),
+                sketch_dim=left.sketch_dim,
+                seed=left.seed,
+            )
+
+        if isinstance(existing, ResidualQJLPackedTensor) and isinstance(new_packed, ResidualQJLPackedTensor):
+            try:
+                return _concat_residual(existing, new_packed)
+            except ValueError:
+                pass
+
+        if isinstance(existing, PackedKVTensor) and isinstance(new_packed, PackedKVTensor):
+            try:
+                return _concat_base(existing, new_packed)
+            except ValueError:
+                pass
+
+        # Decode in full fidelity so QJL residual information is preserved in fallback paths.
+        if isinstance(existing, ResidualQJLPackedTensor):
+            decoded_existing = unpack_qjl_residual_tensor(existing)
+        elif isinstance(existing, PackedKVTensor):
+            decoded_existing = unpack_blockwise_tensor(existing)
         else:
             decoded_existing = existing
 
-        if isinstance(new_packed, (PackedKVTensor, ResidualQJLPackedTensor)):
-            decoded_new = unpack_blockwise_tensor(new_packed.base) if isinstance(new_packed, ResidualQJLPackedTensor) else unpack_blockwise_tensor(new_packed)
+        if isinstance(new_packed, ResidualQJLPackedTensor):
+            decoded_new = unpack_qjl_residual_tensor(new_packed)
+        elif isinstance(new_packed, PackedKVTensor):
+            decoded_new = unpack_blockwise_tensor(new_packed)
         else:
             decoded_new = new_packed
 
-        # Concat in decoded space
         combined = torch.cat([decoded_existing, decoded_new], dim=-2)
 
-        # Re-encode the combined tensor
-        # Determine encoding parameters from the existing packed format
-        if isinstance(existing, PackedKVTensor):
-            return pack_blockwise_tensor(
-                combined,
-                levels=existing.levels,
-                block_size=existing.block_size,
-                bit_width=existing.bit_width,
-            )
-        elif isinstance(new_packed, PackedKVTensor):
-            return pack_blockwise_tensor(
-                combined,
-                levels=new_packed.levels,
-                block_size=new_packed.block_size,
-                bit_width=new_packed.bit_width,
-            )
-
-        # Fallback for QJL residual type
         if isinstance(existing, ResidualQJLPackedTensor):
             return pack_blockwise_tensor_with_qjl_residual(
                 combined,
@@ -600,7 +659,14 @@ class KVCacheStore:
                 sketch_dim=existing.sketch_dim,
                 seed=existing.seed,
             )
-        elif isinstance(new_packed, ResidualQJLPackedTensor):
+        if isinstance(existing, PackedKVTensor):
+            return pack_blockwise_tensor(
+                combined,
+                levels=existing.levels,
+                block_size=existing.block_size,
+                bit_width=existing.bit_width,
+            )
+        if isinstance(new_packed, ResidualQJLPackedTensor):
             return pack_blockwise_tensor_with_qjl_residual(
                 combined,
                 levels=new_packed.base.levels,
@@ -608,6 +674,13 @@ class KVCacheStore:
                 bit_width=new_packed.base.bit_width,
                 sketch_dim=new_packed.sketch_dim,
                 seed=new_packed.seed,
+            )
+        if isinstance(new_packed, PackedKVTensor):
+            return pack_blockwise_tensor(
+                combined,
+                levels=new_packed.levels,
+                block_size=new_packed.block_size,
+                bit_width=new_packed.bit_width,
             )
 
         # Ultimate fallback: return as-is

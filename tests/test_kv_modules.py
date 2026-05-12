@@ -4,13 +4,19 @@ import torch
 from unittest.mock import MagicMock
 
 from vitriol.kv.layer_adaptive import (
-    _layer_depth_weight, LayerAdaptiveConfig, LayerAdaptiveBitAllocator
+    _layer_depth_weight, _compute_head_entropy, LayerAdaptiveConfig, LayerAdaptiveBitAllocator
 )
 from vitriol.kv.temporal_pooling import (
     TemporalPoolingConfig, temporal_importance_attention
 )
 from vitriol.kv.backend import KVMeta, KVStoreBackend
-from vitriol.kv.codec import PackedKVTensor, ResidualQJLPackedTensor, kv_bytes_per_value
+from vitriol.kv.codec import (
+    PackedKVTensor,
+    ResidualQJLPackedTensor,
+    _rademacher_projection,
+    clear_projection_cache,
+    kv_bytes_per_value,
+)
 from vitriol.kv.cache_store import KVCacheStoreConfig
 
 
@@ -80,6 +86,18 @@ class TestLayerAdaptiveBitAllocator:
         assert v_bits.shape == (b, h)
         assert all(k_bits.flatten() > 0)
         assert all(v_bits.flatten() > 0)
+
+    def test_entropy_subsampling_avoids_full_randperm(self, monkeypatch):
+        query = torch.randn(1, 2, 512, 32)
+        key = torch.randn(1, 2, 512, 32)
+
+        def _boom(*_args, **_kwargs):
+            raise AssertionError("randperm should not be used for entropy subsampling")
+
+        monkeypatch.setattr(torch, "randperm", _boom)
+
+        entropy = _compute_head_entropy(query, key, num_sample_positions=64)
+        assert entropy.shape == (1, 2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -203,6 +221,14 @@ class TestResidualQJLPackedTensor:
         nbytes = residual.storage_nbytes()
         assert nbytes > base.storage_nbytes()
 
+    def test_rademacher_projection_cache_reuses_projection_matrix(self):
+        clear_projection_cache()
+        p1 = _rademacher_projection(32, 8, seed=7, device=torch.device("cpu"), use_cache=True, dtype=torch.float32)
+        p2 = _rademacher_projection(32, 8, seed=7, device=torch.device("cpu"), use_cache=True, dtype=torch.float32)
+
+        assert p1 is p2
+        assert clear_projection_cache() >= 1
+
 
 class TestKVBytesPerValue:
     def test_none(self):
@@ -259,5 +285,3 @@ class TestKVCacheStoreConfig:
         )
         assert cfg.enable_turbo_quant is True
         assert cfg.turbo_bits == 4.0
-
-

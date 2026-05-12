@@ -129,18 +129,12 @@ def _torch_pack_bits(
     """
     values_per_byte = max(1, 8 // bit_width)
     packed_width = (block_size + values_per_byte - 1) // values_per_byte
-    (1 << bit_width) - 1
-
-    # Initialize output
-    packed = torch.zeros(q.shape[0], q.shape[1], packed_width, dtype=torch.uint8, device=q.device)
-
-    # Vectorized packing: use shift-and-accumulate
-    for idx in range(block_size):
-        byte_idx = idx // values_per_byte
-        shift = (idx % values_per_byte) * bit_width
-        packed[:, :, byte_idx] |= (q[:, :, idx].to(torch.uint8) << shift).to(torch.uint8)
-
-    return packed
+    padded_block = packed_width * values_per_byte
+    if q.shape[-1] < padded_block:
+        q = F.pad(q, (0, padded_block - q.shape[-1]))
+    q = q.reshape(*q.shape[:-1], packed_width, values_per_byte).to(torch.int32)
+    shifts = torch.arange(values_per_byte, device=q.device, dtype=torch.int32) * int(bit_width)
+    return torch.sum(q << shifts, dim=-1).to(torch.uint8)
 
 
 def _torch_unpack_bits(
@@ -151,15 +145,11 @@ def _torch_unpack_bits(
     """Vectorized bit-unpacking."""
     values_per_byte = max(1, 8 // bit_width)
     mask = (1 << bit_width) - 1
-    rows, blocks = packed.shape[0], packed.shape[1]
-
-    q = torch.zeros(rows, blocks, block_size, dtype=torch.float32, device=packed.device)
-
-    for idx in range(block_size):
-        byte_idx = idx // values_per_byte
-        shift = (idx % values_per_byte) * bit_width
-        q[:, :, idx] = ((packed[:, :, byte_idx].to(torch.int32) >> shift) & mask).float()
-
+    shifts = torch.arange(values_per_byte, device=packed.device, dtype=torch.int32) * int(bit_width)
+    q = ((packed.to(torch.int32).unsqueeze(-1) >> shifts) & mask).to(torch.float32)
+    q = q.reshape(*packed.shape[:-1], -1)
+    if q.shape[-1] > block_size:
+        q = q[..., :block_size]
     return q
 
 

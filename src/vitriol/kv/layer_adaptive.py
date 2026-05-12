@@ -112,7 +112,12 @@ def _compute_head_entropy(
 
     # Optional subsampling for long sequences
     if num_sample_positions > 0 and query.shape[-2] > num_sample_positions:
-        indices = torch.randperm(query.shape[-2], device=query.device)[:num_sample_positions]
+        indices = torch.randint(
+            0,
+            query.shape[-2],
+            (num_sample_positions,),
+            device=query.device,
+        )
         q_sample = query[:, :, indices, :]
     else:
         q_sample = query

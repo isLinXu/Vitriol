@@ -102,6 +102,7 @@ import torch.nn.functional as F
 # Orthogonal Matching Pursuit (OMP)
 # ─────────────────────────────────────────────────────────────
 
+@torch.no_grad()
 def orthogonal_matching_pursuit(
     x: torch.Tensor,
     dictionary: torch.Tensor,
@@ -124,6 +125,7 @@ def orthogonal_matching_pursuit(
     dim = x.shape[-1]
     n_atoms = dictionary.shape[0]
     batch_shape = x.shape[:-1]
+    sparsity = min(sparsity, n_atoms)
 
     # Flatten batch dimensions
     x_flat = x.reshape(-1, dim)  # [N, dim]
@@ -134,6 +136,7 @@ def orthogonal_matching_pursuit(
     coefficients = torch.zeros(N, n_atoms, device=x.device, dtype=x.dtype)
     residual = x_flat.clone()
     selected_indices = torch.zeros(N, sparsity, device=x.device, dtype=torch.long)
+    selected_mask = torch.zeros(N, n_atoms, device=x.device, dtype=torch.bool)
 
     # Precompute D^T for correlation
     Dt = D.t()  # [dim, K]
@@ -141,10 +144,12 @@ def orthogonal_matching_pursuit(
     for step in range(sparsity):
         # Compute correlations: D^T · residual
         corr = residual @ Dt  # [N, K]
+        corr = corr.abs().masked_fill(selected_mask, float("-inf"))
 
         # Select atom with maximum correlation
-        best_idx = corr.abs().argmax(dim=-1)  # [N]
+        best_idx = corr.argmax(dim=-1)  # [N]
         selected_indices[:, step] = best_idx
+        selected_mask.scatter_(1, best_idx.unsqueeze(-1), True)
 
         # Extract selected atoms
         D_selected = D[best_idx]  # [N, dim]
@@ -155,7 +160,7 @@ def orthogonal_matching_pursuit(
             # Simple case: single atom
             coeff = (residual * D_selected).sum(dim=-1, keepdim=True) / \
                     (D_selected.pow(2).sum(dim=-1, keepdim=True) + 1e-12)
-            coefficients[torch.arange(N), best_idx] = coeff.squeeze(-1)
+            coefficients.scatter_add_(1, best_idx.unsqueeze(-1), coeff)
             residual = residual - coeff * D_selected
         else:
             # Re-solve with all selected atoms using batched least squares
@@ -180,9 +185,7 @@ def orthogonal_matching_pursuit(
 
             # Update coefficients
             coefficients.zero_()
-            for i in range(step + 1):
-                atom_idx = all_indices[:, i]
-                coefficients[torch.arange(N), atom_idx] = alpha[:, i, 0]
+            coefficients.scatter_add_(1, all_indices, alpha.squeeze(-1))
 
             # Update residual
             reconstruction = torch.bmm(D_all.transpose(1, 2), alpha).squeeze(-1)  # [N, dim]
@@ -191,10 +194,53 @@ def orthogonal_matching_pursuit(
     return coefficients.reshape(*batch_shape, n_atoms), selected_indices.reshape(*batch_shape, sparsity)
 
 
+def _sample_index_subset(
+    num_items: int,
+    sample_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Sample indices without paying the cost of a full permutation when possible."""
+    if num_items <= 0 or sample_size <= 0:
+        return torch.empty(0, device=device, dtype=torch.long)
+
+    sample_size = min(sample_size, num_items)
+    if sample_size == num_items:
+        return torch.randperm(num_items, device=device)
+
+    # Full permutations are only worth it when the requested subset is close
+    # to the full population; otherwise a lighter-weight sampled batch is fine.
+    if sample_size * 2 > num_items:
+        return torch.randperm(num_items, device=device)[:sample_size]
+
+    return torch.randint(0, num_items, (sample_size,), device=device)
+
+
+def _sparse_index_storage_dtype(n_atoms: int) -> torch.dtype:
+    """Pick a compact integer dtype for sparse atom indices."""
+    return torch.int16 if n_atoms <= torch.iinfo(torch.int16).max else torch.int32
+
+
+def _build_dense_coefficients(
+    indices: torch.Tensor,
+    values: torch.Tensor,
+    n_atoms: int,
+    batch_shape: Tuple[int, ...],
+    device: torch.device,
+    dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """Materialize a dense coefficient matrix from sparse indices/values."""
+    flat_indices = indices.reshape(-1, indices.shape[-1]).to(device=device, dtype=torch.long)
+    flat_values = values.reshape(-1, values.shape[-1]).to(device=device, dtype=dtype)
+    dense = torch.zeros(flat_indices.shape[0], n_atoms, device=device, dtype=dtype)
+    dense.scatter_add_(1, flat_indices, flat_values)
+    return dense.reshape(*batch_shape, n_atoms)
+
+
 # ─────────────────────────────────────────────────────────────
 # Dictionary Learning (K-SVD style)
 # ─────────────────────────────────────────────────────────────
 
+@torch.no_grad()
 def learn_dictionary_ksvd(
     data: torch.Tensor,
     n_atoms: int = 1024,
@@ -217,7 +263,7 @@ def learn_dictionary_ksvd(
     device = data.device
 
     # Initialize dictionary with random subset of data
-    indices = torch.randperm(N, device=device)[:min(n_atoms, N)]
+    indices = _sample_index_subset(N, min(n_atoms, N), device)
     dictionary = data[indices].clone()
 
     # Pad if not enough data points
@@ -267,6 +313,7 @@ def learn_dictionary_ksvd(
     return dictionary
 
 
+@torch.no_grad()
 def learn_dictionary_online(
     data: torch.Tensor,
     n_atoms: int = 1024,
@@ -293,7 +340,7 @@ def learn_dictionary_online(
     device = data.device
 
     # Initialize with random subset
-    indices = torch.randperm(N, device=device)[:min(n_atoms, N)]
+    indices = _sample_index_subset(N, min(n_atoms, N), device)
     dictionary = data[indices].clone()
     if N < n_atoms:
         extra = torch.randn(n_atoms - N, dim, device=device, dtype=data.dtype)
@@ -304,7 +351,7 @@ def learn_dictionary_online(
 
     for iteration in range(n_iterations):
         # Sample mini-batch
-        idx = torch.randperm(N, device=device)[:batch_size]
+        idx = _sample_index_subset(N, batch_size, device)
         batch = data[idx]
 
         # Sparse encode
@@ -334,20 +381,16 @@ def learn_dictionary_online(
 class DictKVCompressed:
     """Compressed KV tensor using dictionary sparse coding."""
 
-    # Sparse coefficients [batch, heads, seq_len, n_atoms]
-    coefficients: torch.Tensor
-
-    # Selected atom indices [batch, heads, seq_len, sparsity]
-    indices: torch.Tensor
-
-    # Coefficient values for selected atoms [batch, heads, seq_len, sparsity]
-    values: torch.Tensor
-
     # Metadata (required fields first)
     orig_shape: Tuple[int, ...]
     n_atoms: int
     sparsity: int
     is_key: bool
+
+    # Sparse representation
+    indices: torch.Tensor
+    values: torch.Tensor
+    coefficients: Optional[torch.Tensor] = None
 
     # Residual after sparse coding (quantized)
     q_residual: Optional[torch.Tensor] = None
@@ -360,20 +403,16 @@ class DictKVCompressed:
 
     def storage_nbytes(self) -> int:
         """Estimate storage in bytes."""
-        # Sparse representation: indices + values
-        # indices: sparsity × ceil(log2(n_atoms)) bits per position
-        bits_per_index = math.ceil(math.log2(max(2, self.n_atoms)))
-        index_bytes = self.indices.numel() * bits_per_index // 8
+        def _tensor_bytes(t: Optional[torch.Tensor]) -> int:
+            return int(t.numel() * t.element_size()) if t is not None else 0
 
-        # values: 16-bit float per coefficient
-        value_bytes = self.values.numel() * 2  # float16
-
-        # Residual (if stored)
-        residual_bytes = 0
-        if self.q_residual is not None:
-            residual_bytes = self.q_residual.numel() * 2  # Approximate
-
-        return index_bytes + value_bytes + residual_bytes
+        total = _tensor_bytes(self.coefficients)
+        total += _tensor_bytes(self.indices)
+        total += _tensor_bytes(self.values)
+        total += _tensor_bytes(self.q_residual)
+        total += _tensor_bytes(self.residual_scales)
+        total += _tensor_bytes(self.residual_mins)
+        return total
 
 
 # ─────────────────────────────────────────────────────────────
@@ -446,6 +485,7 @@ class DictKVCodec:
         """Get the current dictionary (K dictionary if both exist)."""
         return self._dictionary_k
 
+    @torch.no_grad()
     def learn_dictionary(
         self,
         kv_tensors: List[torch.Tensor],
@@ -471,13 +511,14 @@ class DictKVCodec:
                 vectors = kv.reshape(-1, kv.shape[-1])
             all_vectors.append(vectors)
 
-        data = torch.cat(all_vectors, dim=0).float()
+        data = torch.cat(all_vectors, dim=0)
 
         # Subsample if too many vectors
         max_samples = 10000
         if data.shape[0] > max_samples:
-            idx = torch.randperm(data.shape[0], device=data.device)[:max_samples]
+            idx = _sample_index_subset(data.shape[0], max_samples, data.device)
             data = data[idx]
+        data = data.float()
 
         # Learn dictionary
         if cfg.learning_method == 'ksvd':
@@ -496,6 +537,7 @@ class DictKVCodec:
 
         self._dictionary_learned = True
 
+    @torch.no_grad()
     def _ensure_dictionary(self, dim: int, device: torch.device, is_key: bool) -> torch.Tensor:
         """Ensure dictionary exists, creating a random one if needed."""
         dictionary = self._dictionary_k if is_key else self._dictionary_v
@@ -523,6 +565,7 @@ class DictKVCodec:
 
         return dictionary
 
+    @torch.no_grad()
     def compress(
         self,
         x: torch.Tensor,
@@ -558,14 +601,17 @@ class DictKVCodec:
         flat = x_float.reshape(-1, dim)
 
         # Sparse encode using OMP
-        coefficients, indices = orthogonal_matching_pursuit(
+        coefficients, _selected_indices = orthogonal_matching_pursuit(
             flat, dictionary, sparsity
         )
 
-        # Extract sparse values (only non-zero coefficients)
-        values = coefficients.gather(1, indices.reshape(-1, sparsity))
-        values = values.reshape(*orig_shape[:-1], sparsity)
-        indices = indices.reshape(*orig_shape[:-1], sparsity)
+        # Extract a unique sparse representation from the final dense coefficients.
+        sparse_indices = coefficients.abs().topk(sparsity, dim=1, sorted=False).indices
+        values = coefficients.gather(1, sparse_indices)
+        values = values.reshape(*orig_shape[:-1], sparsity).to(torch.float16)
+        indices = sparse_indices.reshape(*orig_shape[:-1], sparsity).to(
+            _sparse_index_storage_dtype(cfg.n_atoms)
+        )
 
         # Compute sparse reconstruction
         sparse_recon = coefficients @ dictionary  # [N, dim]
@@ -598,20 +644,22 @@ class DictKVCodec:
             res_scales = (res_maxs - res_mins) / (cfg.residual_levels - 1 + 1e-8)
             q_r = torch.round((r_flat - res_mins) / (res_scales + 1e-8))
             q_r = torch.clamp(q_r, 0, cfg.residual_levels - 1)
-            q_residual = q_r
+            q_residual = q_r.to(torch.uint8 if cfg.residual_levels <= 256 else torch.int16)
+            res_scales = res_scales.to(torch.float16)
+            res_mins = res_mins.to(torch.float16)
 
         # Build compressed representation
         compressed = DictKVCompressed(
-            coefficients=coefficients.reshape(*orig_shape[:-1], cfg.n_atoms),
-            indices=indices,
-            values=values,
-            q_residual=q_residual,
-            residual_scales=res_scales,
-            residual_mins=res_mins,
             orig_shape=orig_shape,
             n_atoms=cfg.n_atoms,
             sparsity=sparsity,
             is_key=is_key,
+            indices=indices,
+            values=values,
+            coefficients=None,
+            q_residual=q_residual,
+            residual_scales=res_scales,
+            residual_mins=res_mins,
             sparse_ratio=sparse_ratio,
             reconstruction_mse=total_mse,
         )
@@ -634,6 +682,7 @@ class DictKVCodec:
 
         return compressed, report
 
+    @torch.no_grad()
     def decompress(
         self,
         compressed: DictKVCompressed,
@@ -654,7 +703,16 @@ class DictKVCodec:
         )
 
         # Reconstruct from sparse coefficients
-        coefficients = compressed.coefficients.float()
+        if compressed.coefficients is not None:
+            coefficients = compressed.coefficients.to(device=dictionary.device, dtype=torch.float32)
+        else:
+            coefficients = _build_dense_coefficients(
+                compressed.indices,
+                compressed.values,
+                compressed.n_atoms,
+                compressed.orig_shape[:-1],
+                dictionary.device,
+            )
         flat = coefficients.reshape(-1, coefficients.shape[-1])
         reconstruction = flat @ dictionary
 
@@ -674,6 +732,7 @@ class DictKVCodec:
 
         return reconstruction.reshape(compressed.orig_shape)
 
+    @torch.no_grad()
     def compress_kv(
         self,
         key: torch.Tensor,
@@ -719,6 +778,7 @@ class DictKVCodec:
 # Quick Quantize-Dequantize (for benchmarking)
 # ─────────────────────────────────────────────────────────────
 
+@torch.no_grad()
 def dict_kv_qdq(
     x: torch.Tensor,
     n_atoms: int = 1024,

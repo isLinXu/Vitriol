@@ -3,7 +3,12 @@ import torch
 import torch.nn.functional as F
 
 from vitriol.kv.cache_store import KVCacheStore, KVCacheStoreConfig
-from vitriol.kv.codec import PackedKVTensor, ResidualQJLPackedTensor, approx_inner_product_with_qjl_residual
+from vitriol.kv.codec import (
+    PackedKVTensor,
+    ResidualQJLPackedTensor,
+    approx_inner_product_with_qjl_residual,
+    unpack_qjl_residual_tensor,
+)
 from vitriol.kv.policy import (
     KVLayerType,
     KVPolicyPreset,
@@ -231,6 +236,45 @@ def test_kv_cache_store_uses_residual_qjl_packed_tensors_when_enabled() -> None:
 
     assert isinstance(store._k_enc, ResidualQJLPackedTensor)
     assert isinstance(store._v_enc, ResidualQJLPackedTensor)
+
+
+def test_kv_cache_store_append_preserves_existing_residual_qjl_prefix() -> None:
+    torch.manual_seed(12)
+    cfg = KVCacheStoreConfig(
+        enable_turbo_quant=True,
+        turbo_bits=3.5,
+        quantized_kv_start=0,
+        keep_raw_cache=False,
+        enable_turbo_residual_qjl=True,
+    )
+    store = KVCacheStore(cfg)
+
+    key = torch.randn(1, 2, 8, 32)
+    value = torch.randn(1, 2, 8, 32)
+    store.set_prefill(key, value)
+
+    k_before = unpack_qjl_residual_tensor(store._k_enc).clone()
+    v_before = unpack_qjl_residual_tensor(store._v_enc).clone()
+    k_q_before = store._k_enc.base.q_data.reshape(1, 2, 8, *store._k_enc.base.q_data.shape[1:]).clone()
+    v_q_before = store._v_enc.base.q_data.reshape(1, 2, 8, *store._v_enc.base.q_data.shape[1:]).clone()
+
+    key_new = torch.randn(1, 2, 4, 32)
+    value_new = torch.randn(1, 2, 4, 32)
+    store.append(key_new, value_new)
+
+    assert store.seq_len == 12
+    assert isinstance(store._k_enc, ResidualQJLPackedTensor)
+    assert isinstance(store._v_enc, ResidualQJLPackedTensor)
+    assert torch.allclose(unpack_qjl_residual_tensor(store._k_enc)[..., :8, :], k_before)
+    assert torch.allclose(unpack_qjl_residual_tensor(store._v_enc)[..., :8, :], v_before)
+    assert torch.equal(
+        store._k_enc.base.q_data.reshape(1, 2, 12, *store._k_enc.base.q_data.shape[1:])[..., :8, :, :],
+        k_q_before,
+    )
+    assert torch.equal(
+        store._v_enc.base.q_data.reshape(1, 2, 12, *store._v_enc.base.q_data.shape[1:])[..., :8, :, :],
+        v_q_before,
+    )
 
 
 def test_kv_cache_store_uses_base_packed_tensors_when_residual_qjl_disabled() -> None:
