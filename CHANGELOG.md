@@ -100,12 +100,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Runtime dependency constraints now pin NumPy to `>=1.21,<2` and PyTorch to `>=2.0.0,<3.0.0` to reduce accidental major-version breakage.
+- **Internal module decomposition** (no public API/import-path changes; behavior preserved):
+  - `arch_viz`: split the 2.7k-line `_analyzers_legacy.py` into 14 focused analyzer modules under `arch_viz/analyzers/`.
+  - `kv/exobrain`: split the two ExoBrain megaliths (`exobrain.py`, `exobrain_inference.py`) into the acyclic `kv/exobrain/` package; legacy import paths preserved via re-exports/shims.
+  - `arch_viz/renderers`: split the 3.3k-line `HTMLRenderer` god-class into four presentation mixins (`_html_styles/_html_columns/_html_scripts/_html_sections`); rendered HTML is byte-for-byte identical.
+  - `cli/commands/bench.py` (2088→757 lines): extracted result/markdown/summary formatting helpers into `bench_format.py`.
+  - `bench/runner.py` (1736→~1330 lines): extracted the policy-planning leaf cluster into `bench/_planning.py`; all `vitriol.bench.runner.*` paths re-exported.
+- `GenerationConfig` now validates `dtype`, `max_shard_size`, `rank`, and the numeric types of `n_bits`/`sparsity` (existing `ValueError` messages preserved); `build_generation_config` rejects unknown config keys with an actionable error instead of a cryptic `TypeError`.
+- The REST API server now guards its `fastapi`/`uvicorn`/`pydantic` imports, raising an actionable install hint (`pip install 'vitriol[api]'`) when the `[api]` extra is missing.
 
 ### Added
 - GitHub Pages deployment with automated CI/CD pipeline
 - `CONTRIBUTING.md` contribution guidelines
 - `CHANGELOG.md` version history tracking
 - Issue and Pull Request templates
+- `@experimental` decorator (`vitriol.utils.experimental`) marking functions/classes experimental at runtime via a one-shot `ExperimentalWarning` (silenceable with `VITRIOL_SILENCE_EXPERIMENTAL=1`); applied to the RL searcher and the REST API server.
+- Optional-dependency helpers (`vitriol.utils.optional`): `require()`, `has()`, and `MissingDependencyStub`, plus a `MissingOptionalDependencyError` that subclasses `ImportError` and carries pip / `vitriol[extra]` install hints.
+- JSON Schema contract for the generation config: `generation_config_schema()` (draft-07) and `validate_generation_dict()`, which performs full structural validation when the optional `jsonschema` package is installed.
 
 ---
 
