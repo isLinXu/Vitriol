@@ -22,6 +22,30 @@ class VitriolError(Exception):
         super().__init__(message)
 
 
+class MissingOptionalDependencyError(VitriolError, ImportError):
+    """An optional third-party dependency required for a feature is not installed.
+
+    Subclasses both :class:`VitriolError` and :class:`ImportError` so existing
+    ``except ImportError`` handlers keep working while callers get an actionable,
+    install-oriented message instead of a bare ``ModuleNotFoundError``.
+    """
+
+    def __init__(self, package: str, *, feature: str = None, extra: str = None):
+        target = f"feature '{feature}'" if feature else f"'{package}'"
+        message = (
+            f"The optional dependency '{package}' is required to use {target}, "
+            "but it is not installed."
+        )
+        hints = [f"pip install {package}"]
+        if extra:
+            hints.append(f"pip install 'vitriol[{extra}]'")
+        message += "\n\nInstall it via:\n" + "\n".join(f"  • {h}" for h in hints)
+        super().__init__(message, recoverable=True)
+        self.package = package
+        self.feature = feature
+        self.extra = extra
+
+
 class ConfigError(VitriolError):
     """Base class for configuration-related errors."""
     pass

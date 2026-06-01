@@ -24,11 +24,21 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from ..utils.exceptions import MissingOptionalDependencyError
+from ..utils.experimental import experimental
+
+try:
+    import uvicorn
+    from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import StreamingResponse
+    from pydantic import BaseModel, ConfigDict, Field
+except ImportError as exc:  # pragma: no cover - exercised only without [api] extra
+    raise MissingOptionalDependencyError(
+        getattr(exc, "name", None) or "fastapi",
+        feature="the Vitriol REST API server",
+        extra="api",
+    ) from exc
 
 from ..config.manager import build_generation_config
 from ..config.settings import get_config
@@ -964,6 +974,7 @@ async def process_nas_job(job_id: str):
 
 # CLI entry point
 
+@experimental("the Vitriol REST API server", detail="Install with `pip install 'vitriol[api]'`.")
 def main():
     """Run API server."""
     config = get_config()

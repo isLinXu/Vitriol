@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 
+from ..utils.experimental import experimental
 from .search_space import ArchitectureGene, LLMSearchSpace
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,7 @@ class ValueNetwork(nn.Module):
         return self.network(state)
 
 
+@experimental("RL-based architecture search (RLSearcher)", detail="See `vitriol nas --algorithm rl`.")
 class RLSearcher:
     """
     Reinforcement Learning-based Neural Architecture Search.
