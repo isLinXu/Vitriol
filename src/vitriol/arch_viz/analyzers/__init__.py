@@ -5,46 +5,44 @@ Legacy single-file had 32 analyzer classes tightly coupled.
 New sub-package structure: one class per file (or related group).
 """
 
-# New sub-package analyzers
-# Re-export legacy analyzers and registry for backward compatibility
-from .._analyzers_legacy import (  # noqa: F401
-    AnalyzerRegistry,
+# Model-family analyzers + registry, organised by family module.
+from .base import ModelAnalyzer, TransformerAnalyzer  # noqa: F401
+from .deepseek import DeepSeekAnalyzer, KimiAnalyzer  # noqa: F401
+from .dense import (  # noqa: F401
     BaichuanAnalyzer,
-    BertAnalyzer,
-    BloomAnalyzer,
     CohereAnalyzer,
-    DeepSeekAnalyzer,
-    ErnieAnalyzer,
-    FalconAnalyzer,
     GemmaAnalyzer,
-    GLMAnalyzer,
-    GPT2Analyzer,
-    GPTNeoXAnalyzer,
-    Hy3Analyzer,
     InternLMAnalyzer,
-    InternS1Analyzer,
-    KimiAnalyzer,
     LlamaAnalyzer,
-    MiniMaxAnalyzer,
     MistralAnalyzer,
-    ModelAnalyzer,
-    OPTAnalyzer,
     PhiAnalyzer,
     Qwen2MoeAnalyzer,
-    Qwen35Analyzer,
     QwenAnalyzer,
-    SequenceMixerAnalyzer,
     StableLMAnalyzer,
-    StarCoder2Analyzer,
-    StarCoderAnalyzer,
-    T5Analyzer,
-    TransformerAnalyzer,
     YiAnalyzer,
 )
+from .encoder import BertAnalyzer, T5Analyzer  # noqa: F401
+from .ernie import ErnieAnalyzer  # noqa: F401
+from .glm import GLMAnalyzer  # noqa: F401
+from .gpt import (  # noqa: F401
+    BloomAnalyzer,
+    FalconAnalyzer,
+    GPT2Analyzer,
+    GPTNeoXAnalyzer,
+    OPTAnalyzer,
+    StarCoder2Analyzer,
+    StarCoderAnalyzer,
+)
 from .gqa import GQAAnalyzer
+from .hy3 import Hy3Analyzer  # noqa: F401
+from .intern_s1 import InternS1Analyzer  # noqa: F401
 from .mamba import MambaAnalyzer
+from .minimax import MiniMaxAnalyzer  # noqa: F401
 from .mla import MLAAnalyzer
 from .moe import MoEAnalyzer
+from .qwen35 import Qwen35Analyzer  # noqa: F401
+from .registry import AnalyzerRegistry  # noqa: F401
+from .sequence_mixer import SequenceMixerAnalyzer  # noqa: F401
 from .swa import SWAAnalyzer
 
 __all__ = [
