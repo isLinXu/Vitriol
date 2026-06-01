@@ -1,10 +1,11 @@
 import logging
 import random
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from tqdm import tqdm
 
-from .search_space import SearchSpace, ArchitectureGene, LLMSearchSpace
 from .evaluator import HybridEvaluator
+from .search_space import ArchitectureGene, LLMSearchSpace, SearchSpace
 
 logger = logging.getLogger(__name__)
 

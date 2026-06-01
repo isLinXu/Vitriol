@@ -746,7 +746,7 @@ class EvolutionTree:
         tree.visualize("output/evolution_tree.html")
     """
 
-    def __init__(self, custom_families: Optional[Dict] = None, trust_remote_code: bool = True):
+    def __init__(self, custom_families: Optional[Dict] = None, trust_remote_code: bool = False):
         """
         Initialize the evolution tree builder.
 
@@ -855,8 +855,8 @@ class EvolutionTree:
         model_name = model_id.split("/")[-1] if "/" in model_id else model_id
 
         # Check against known families
-        for family_name, family_data in self.families.items():
-            for known_model, info in family_data.get("members", {}).items():
+        for _family_name, family_data in self.families.items():
+            for known_model, _info in family_data.get("members", {}).items():
                 if known_model.lower() in name or known_model.split("/")[-1].lower() in name:
                     return known_model
 
@@ -892,7 +892,7 @@ class EvolutionTree:
 
     def build(self) -> None:
         """Build the tree by establishing all parent-child relationships."""
-        for family_name, family_data in self.families.items():
+        for _family_name, family_data in self.families.items():
             root = family_data.get("root")
             if root:
                 # Ensure root node exists
@@ -1083,7 +1083,7 @@ class EvolutionTree:
             data = json.load(f)
 
         self.nodes = {}
-        for model_id, node_data in data.get("nodes", {}).items():
+        for _model_id, node_data in data.get("nodes", {}).items():
             innovations = [
                 ArchInnovation(
                     name=i["name"],

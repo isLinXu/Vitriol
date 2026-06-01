@@ -14,10 +14,12 @@ Example:
     >>> # Effective rank ≈ 16
 """
 
-import torch
 from typing import Dict
-from .base import WeightGenerationStrategy, StrategyCapabilities
+
+import torch
 from safetensors.torch import save_file
+
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 _LOWRANK_DEFAULT_SCALE: float = 0.1
 _LOWRANK_FALLBACK_SCALE: float = 0.01

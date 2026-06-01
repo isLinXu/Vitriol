@@ -8,9 +8,9 @@ Visualizes architecture innovations over time.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-from collections import defaultdict
 
 from .tree_builder import EvolutionTree
 
@@ -44,7 +44,7 @@ class InnovationTimeline:
         """Extract all innovation events from the evolution tree."""
         self.events = []
 
-        for node_id, node in self.tree.nodes.items():
+        for _node_id, node in self.tree.nodes.items():
             for innovation in node.innovations:
                 event = TimelineEvent(
                     year=innovation.year,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Final
 
-
 FAMILY_MATRIX: Final[list[dict[str, object]]] = [
     {
         "family": "llama",

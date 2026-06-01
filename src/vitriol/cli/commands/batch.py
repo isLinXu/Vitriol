@@ -1,6 +1,8 @@
 
-import click
 import sys
+
+import click
+
 
 @click.command()
 @click.argument('config_file', type=click.Path(exists=True))

@@ -1,11 +1,13 @@
 
-import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+
 from ..core import Architecture
+
 
 class BlockRenderer:
     """Renders a high-level block diagram of the architecture."""
-    
+
     def __init__(self, style: str = 'default'):
         self.style = style
         # Professional color palette (Academic/Modern)
@@ -35,23 +37,23 @@ class BlockRenderer:
     def render(self, architecture: Architecture, output_path: str):
         fig, ax = plt.subplots(figsize=(10, 16))
         ax.set_axis_off()
-        
+
         # Drawing constants
         box_width = 1.2
         box_height = 0.6
         gap = 0.4
         x_center = 0.5
         y_pos = 14.0
-        
+
         # Title
         title_color = '#1A1A1A'
-        ax.text(x_center, y_pos, f"{architecture.model_type.upper()}", 
+        ax.text(x_center, y_pos, f"{architecture.model_type.upper()}",
                 ha='center', fontsize=24, weight='bold', color=title_color, family='sans-serif')
         ax.text(x_center, y_pos - 0.6, f"{architecture.total_params/1e9:.2f}B Parameters | {architecture.total_layers} Layers",
                 ha='center', fontsize=14, color='#666666', family='sans-serif')
         self._draw_feature_badges(ax, architecture, x_center, y_pos - 1.15)
         y_pos -= 2.0
-        
+
         # Helper to decide text color based on background
         def get_text_color(bg_color):
             return self.text_color
@@ -59,80 +61,80 @@ class BlockRenderer:
         # Draw Input
         self._draw_box(ax, x_center, y_pos, box_width, box_height, "Input Tokens", "#FFFFFF", '#000000', '#E0E0E0')
         y_pos -= (box_height + gap)
-        
+
         # Draw Embedding
         emb_layer = next((layer for layer in architecture.layers if layer.type == 'embedding'), None)
         if emb_layer:
-            self._draw_box(ax, x_center, y_pos, box_width, box_height, 
-                           f"Token Embedding\n{emb_layer.shape}", self.colors['embedding'], 
+            self._draw_box(ax, x_center, y_pos, box_width, box_height,
+                           f"Token Embedding\n{emb_layer.shape}", self.colors['embedding'],
                            self.text_color, self.edge_color)
             y_pos -= (box_height + gap)
-            
+
         # Draw Transformer Block Container
-        y_pos -= 0.5 
+        y_pos -= 0.5
         block_top = y_pos + 0.5
-        
+
         # Norm 1
-        self._draw_box(ax, x_center, y_pos, box_width*0.8, box_height, "RMSNorm", 
+        self._draw_box(ax, x_center, y_pos, box_width*0.8, box_height, "RMSNorm",
                        self.colors['normalization'], self.text_color, self.edge_color)
-        
+
         # Residual connection 1 (curve around Norm + Attn)
         # Start: above Norm 1, End: below Attn
         res_start_y = y_pos + box_height/2 + gap/2
-        
+
         y_pos -= (box_height + gap)
-        
+
         # Attention
         attn_info = next((layer.description for layer in architecture.layers if layer.type == 'attention'), "")
         # GQA Visualization text
         if "GQA" in architecture.special_features:
              attn_info = f"GQA Attention\n{attn_info}"
-        
-        self._draw_box(ax, x_center, y_pos, box_width, box_height, f"{attn_info}", 
+
+        self._draw_box(ax, x_center, y_pos, box_width, box_height, f"{attn_info}",
                        self.colors['attention'], self.text_color, self.edge_color)
-        
+
         res_end_y = y_pos - box_height/2 - gap/2
         self._draw_residual(ax, res_start_y, res_end_y, box_width)
-        
+
         y_pos -= (box_height + gap)
-        
+
         # Norm 2
         res_start_y_2 = y_pos + box_height/2 + gap/2
-        self._draw_box(ax, x_center, y_pos, box_width*0.8, box_height, "RMSNorm", 
+        self._draw_box(ax, x_center, y_pos, box_width*0.8, box_height, "RMSNorm",
                        self.colors['normalization'], self.text_color, self.edge_color)
         y_pos -= (box_height + gap)
-        
+
         # FFN
         # Shape as width metaphor (trapezoid?) - stick to box for simplicity but wider
         ffn_info = next((layer.description for layer in architecture.layers if layer.type == 'feedforward'), "")
         ffn_color = self._feedforward_color(architecture)
-        self._draw_box(ax, x_center, y_pos, box_width*1.1, box_height, f"Feed Forward (SwiGLU)\n{ffn_info}", 
+        self._draw_box(ax, x_center, y_pos, box_width*1.1, box_height, f"Feed Forward (SwiGLU)\n{ffn_info}",
                        ffn_color, self.text_color, self.edge_color)
-                       
+
         res_end_y_2 = y_pos - box_height/2 - gap/2
         self._draw_residual(ax, res_start_y_2, res_end_y_2, box_width*1.1)
-        
+
         y_pos -= (box_height + gap)
-        
+
         block_bottom = y_pos + 0.3
-        
+
         # Draw surrounding box for block
-        rect = patches.FancyBboxPatch((x_center - box_width/2 - 0.4, block_bottom), 
+        rect = patches.FancyBboxPatch((x_center - box_width/2 - 0.4, block_bottom),
                                  box_width + 0.8, block_top - block_bottom,
                                  boxstyle="round,pad=0.1",
                                  linewidth=1.5, edgecolor='#999999', facecolor='none', linestyle='--', zorder=0)
         ax.add_patch(rect)
-        
+
         # Label for block repetition
-        ax.text(x_center + box_width/2 + 0.5, (block_top + block_bottom)/2, 
-                f"× {architecture.parameters.get('num_layers', 'N')}", 
+        ax.text(x_center + box_width/2 + 0.5, (block_top + block_bottom)/2,
+                f"× {architecture.parameters.get('num_layers', 'N')}",
                 ha='left', va='center', fontsize=18, weight='bold', color='#333333')
         self._draw_hy3_legend(ax, architecture, x_center + box_width/2 + 0.7, block_top - 0.1)
-                
+
         y_pos -= 0.8
-        
+
         # Final Norm
-        self._draw_box(ax, x_center, y_pos, box_width*0.8, box_height, "Final RMSNorm", 
+        self._draw_box(ax, x_center, y_pos, box_width*0.8, box_height, "Final RMSNorm",
                        self.colors['normalization'], self.text_color, self.edge_color)
         y_pos -= (box_height + gap)
 
@@ -150,15 +152,15 @@ class BlockRenderer:
                 self.edge_color,
             )
             y_pos -= (box_height + gap)
-        
+
         # Output Head
-        self._draw_box(ax, x_center, y_pos, box_width, box_height, "LM Head", 
+        self._draw_box(ax, x_center, y_pos, box_width, box_height, "LM Head",
                        self.colors['output'], self.text_color, self.edge_color)
-        
+
         # Adjust limits
         ax.set_xlim(-0.5, 2.0)
         ax.set_ylim(y_pos - 1, 15)
-        
+
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -247,12 +249,12 @@ class BlockRenderer:
                                    facecolor=color,
                                    zorder=1)
         ax.add_patch(box)
-        
+
         # Split text for better formatting
         lines = text.split('\n')
         main_text = lines[0]
         sub_text = '\n'.join(lines[1:]) if len(lines) > 1 else ""
-        
+
         ax.text(x, y + (0.05 if sub_text else 0), main_text, ha='center', va='center', fontsize=12, color=text_color, zorder=2, weight='bold', family='sans-serif')
         if sub_text:
             ax.text(x, y - 0.15, sub_text, ha='center', va='center', fontsize=10, color='#666666', zorder=2, family='monospace')
@@ -261,22 +263,22 @@ class BlockRenderer:
         # Draw curved line from start_y to end_y around the right side
         # Control points for curve
         x_offset = width/2 + 0.1
-        
+
         [0.5, 0.5 + x_offset, 0.5 + x_offset, 0.5]
-        
+
         # Using Bezier curve via PathPatch is complex, let's use simple plot with smoothing
         # Or just rect connection for now to be clean
-        
+
         # Line out
         ax.plot([0.5, 0.5 + x_offset], [start_y, start_y], color='#999999', linewidth=1.5, zorder=0)
         # Vertical line
         ax.plot([0.5 + x_offset, 0.5 + x_offset], [start_y, end_y], color='#999999', linewidth=1.5, zorder=0)
         # Line in
         ax.plot([0.5 + x_offset, 0.5], [end_y, end_y], color='#999999', linewidth=1.5, zorder=0)
-        
+
         # Add label
         ax.text(0.5 + x_offset + 0.05, (start_y + end_y)/2, "Residual", ha='left', va='center', fontsize=9, color='#999999', rotation=90)
-        
+
         # Add "+" circle at merge point
         circle = patches.Circle((0.5, end_y), 0.08, facecolor='#FFFFFF', edgecolor='#999999', linewidth=1.5, zorder=2)
         ax.add_patch(circle)

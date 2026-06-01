@@ -1,13 +1,15 @@
 import logging
 from typing import Optional, Type
-from transformers import PretrainedConfig, AutoConfig, AutoModelForCausalLM, AutoModel
+
+from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, PretrainedConfig
+
 from .registry import ModelAdapter, ModelRegistry
 
 logger = logging.getLogger(__name__)
 
 class QwenMoeAdapter(ModelAdapter):
     """Adapter for Qwen1.5-MoE and Qwen2-MoE models."""
-    
+
     @classmethod
     def match(cls, model_id: str, config: PretrainedConfig) -> bool:
         # Check by architecture or model_type
@@ -31,9 +33,9 @@ class QwenMoeAdapter(ModelAdapter):
     def register_classes(self):
         # Ensure Qwen2Moe classes are registered if transformers version is old
         try:
-            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
             from transformers import CONFIG_MAPPING
-            
+            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
+
             if "qwen2_moe" not in CONFIG_MAPPING:
                 try:
                     AutoConfig.register("qwen2_moe", Qwen2MoeConfig)
@@ -47,35 +49,35 @@ class QwenMoeAdapter(ModelAdapter):
 
 class Qwen35MoeAdapter(ModelAdapter):
     """Adapter for Qwen3.5-MoE models (often misidentified as qwen3_5_moe type)."""
-    
+
     @classmethod
     def match(cls, model_id: str, config: PretrainedConfig) -> bool:
         # Check specifically for Qwen3.5 identifier or failed qwen3_5_moe type
         # Or if config loading failed previously due to unknown type (handled in core logic via try-except)
         # Here we assume config is loaded but might be generic PretrainedConfig
         # Or if we manually check raw config dict before instantiation.
-        
+
         # If config is already a Qwen2MoeConfig instance but architectures implies Qwen3.5
         if getattr(config, "architectures", []) and "Qwen3_5MoeForConditionalGeneration" in config.architectures:
             return True
-        
+
         # If model_type is explicitly qwen3_5_moe (which transformers might not know)
         if getattr(config, "model_type", "") == "qwen3_5_moe":
             return True
-            
+
         return False
 
     def register_classes(self):
         try:
-            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
             from transformers import CONFIG_MAPPING
-            
+            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
+
             # Create a subclass to handle model_type mismatch if needed
             # But usually registering Qwen2Moe classes for "qwen3_5_moe" key is enough
             if "qwen3_5_moe" not in CONFIG_MAPPING:
                 class Qwen3_5MoeConfig(Qwen2MoeConfig):
                     model_type = "qwen3_5_moe"
-                
+
                 try:
                     AutoConfig.register("qwen3_5_moe", Qwen3_5MoeConfig)
                     AutoModelForCausalLM.register(Qwen3_5MoeConfig, Qwen2MoeForCausalLM)

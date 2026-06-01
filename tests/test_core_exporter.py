@@ -16,7 +16,7 @@ class TestModelExporterInit:
     def test_init(self):
         exporter = ModelExporter("/tmp/model")
         assert str(exporter.input_dir) == "/tmp/model"
-        assert exporter.trust_remote_code is True
+        assert exporter.trust_remote_code is False
 
     def test_init_custom_trust(self):
         exporter = ModelExporter("/tmp/model", trust_remote_code=False)
@@ -71,7 +71,7 @@ class TestLoadBestConfig:
             mock_load_config.assert_called_once_with(
                 str(tmpdir),
                 security={
-                    "trust_remote_code": True,
+                    "trust_remote_code": False,
                     "allow_network": False,
                     "local_files_only": True,
                 },

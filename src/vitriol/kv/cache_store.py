@@ -1033,7 +1033,10 @@ class KVCacheStore:
 
         # ── New: Temporal Importance Pooling (soft-gate replacement for Sparse V) ──
         if self.cfg.enable_temporal_pooling and self._tip_config is not None:
-            from .temporal_pooling import temporal_importance_attention, temporal_importance_attention_with_residual_proxy
+            from .temporal_pooling import (
+                temporal_importance_attention,
+                temporal_importance_attention_with_residual_proxy,
+            )
             if residual_proxy_eligible:
                 output, _ = temporal_importance_attention_with_residual_proxy(
                     query,

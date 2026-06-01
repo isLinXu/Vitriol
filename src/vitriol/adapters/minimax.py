@@ -7,7 +7,9 @@ configs that require triton. This adapter:
 """
 
 import logging
+
 from transformers import PretrainedConfig
+
 from .base import ModelAdapter
 from .registry import AdapterRegistry
 

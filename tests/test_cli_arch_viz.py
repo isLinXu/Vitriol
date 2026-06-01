@@ -1,9 +1,6 @@
 """Tests for vitriol.cli.commands.arch_viz module."""
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
 
 from vitriol.cli.main import cli
@@ -109,7 +106,7 @@ class TestArchVizCommandMocked:
         mock_viz = MagicMock()
         mock_viz_cls.return_value = mock_viz
 
-        result = runner.invoke(cli, ["arch-viz", "test/model", "--style", "dark"])
+        result = runner.invoke(cli, ["--trust-remote-code", "arch-viz", "test/model", "--style", "dark"])
         assert result.exit_code == 0
         mock_viz_cls.assert_called_once_with("test/model", style="dark", trust_remote_code=True)
 
@@ -121,7 +118,22 @@ class TestArchVizCommandMocked:
 
         result = runner.invoke(cli, ["arch-viz", "test/model"])
         assert result.exit_code == 0
-        mock_viz_cls.assert_called_once_with("test/model", style="default", trust_remote_code=True)
+        mock_viz_cls.assert_called_once_with("test/model", style="default", trust_remote_code=False)
+
+    @patch("vitriol.arch_viz.visualizer.ArchitectureVisualizer")
+    def test_arch_viz_offline_forwards_local_files_only(self, mock_viz_cls):
+        runner = CliRunner()
+        mock_viz = MagicMock()
+        mock_viz_cls.return_value = mock_viz
+
+        result = runner.invoke(cli, ["--offline", "arch-viz", "test/model"])
+        assert result.exit_code == 0
+        mock_viz_cls.assert_called_once_with(
+            "test/model",
+            style="default",
+            trust_remote_code=False,
+            local_files_only=True,
+        )
 
 
 class TestArchVizCommandErrors:

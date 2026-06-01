@@ -4,7 +4,6 @@ import sys
 
 import pytest
 
-
 fastapi = pytest.importorskip("fastapi")
 pytest.importorskip("pydantic")
 pytest.importorskip("uvicorn")
@@ -83,6 +82,88 @@ def test_generate_rejects_missing_api_key_when_auth_enabled():
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid API key"
+
+
+def test_public_root_and_health_stay_open_when_auth_enabled():
+    cfg = init_config()
+    cfg.set("security.api_key_required", True)
+    cfg.set("security.api_keys", ["secret-key"])
+    client = TestClient(server.app)
+
+    assert client.get("/").status_code == 200
+    assert client.get("/health").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/status",
+        "/jobs",
+        "/jobs/missing",
+        "/batch/missing",
+        "/models",
+        "/models/families",
+        "/models/adapters",
+        "/strategies",
+        "/stream/logs",
+    ],
+)
+def test_sensitive_get_endpoints_require_api_key_when_auth_enabled(path):
+    cfg = init_config()
+    cfg.set("security.api_key_required", True)
+    cfg.set("security.api_keys", ["secret-key"])
+    client = TestClient(server.app)
+
+    response = client.get(path)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid API key"
+
+
+def test_generate_accepts_x_api_key_header_when_auth_enabled(monkeypatch):
+    cfg = init_config()
+    cfg.set("security.api_key_required", True)
+    cfg.set("security.api_keys", ["secret-key"])
+    monkeypatch.setattr(server, "process_generation_job", _noop_background_job)
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/generate",
+        headers={"X-API-Key": "secret-key"},
+        json={"model_id": "demo/model", "strategy": "compact", "dtype": "bfloat16"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+
+
+def test_status_accepts_x_api_key_header_when_auth_enabled():
+    cfg = init_config()
+    cfg.set("security.api_key_required", True)
+    cfg.set("security.api_keys", ["secret-key"])
+    client = TestClient(server.app)
+
+    response = client.get("/status", headers={"X-API-Key": "secret-key"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+
+
+def test_generate_accepts_bearer_token_when_auth_enabled(monkeypatch):
+    cfg = init_config()
+    cfg.set("security.api_key_required", True)
+    cfg.set("security.api_keys", ["secret-key"])
+    monkeypatch.setattr(server, "process_generation_job", _noop_background_job)
+    client = TestClient(server.app)
+
+    response = client.post(
+        "/generate",
+        headers={"Authorization": "Bearer secret-key"},
+        json={"model_id": "demo/model", "strategy": "compact", "dtype": "bfloat16"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
 
 
 def test_process_generation_job_persists_generation_result(monkeypatch):

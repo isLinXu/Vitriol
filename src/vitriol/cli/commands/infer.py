@@ -8,7 +8,6 @@ from click.core import ParameterSource
 
 from ...utils.hf_loading import load_tokenizer as hf_load_tokenizer
 
-
 _PRESET_CHOICES = ["safe", "balanced", "fast-balanced", "aggressive", "ultra-long", "deepseek-v4", "hy3", "qwen-chat"]
 _QWEN_CHAT_SYSTEM_PROMPT = (
     "You are a concise Chinese assistant. Output exactly one Chinese sentence as the conclusion. "
@@ -116,7 +115,7 @@ def _apply_infer_preset_overrides(
 def _summary_text(result: dict[str, object]) -> str:
     if not result.get("ok", True):
         return f"Error running inference for {result.get('model_id', '-')}:\n{result.get('error', 'Unknown error')}"
-    
+
     preset = (result.get("preset") or {}) if isinstance(result.get("preset"), dict) else {}
     lines = [
         f"model: {result.get('model_id', '-')}",
@@ -179,7 +178,7 @@ def _stats_text(result: dict[str, object]) -> str:
 def _smoke_summary_text(result: dict[str, object]) -> str:
     if not result.get("ok", True):
         return f"Error running smoke test for {result.get('model_id', '-')}:\n{result.get('error', 'Unknown error')}"
-        
+
     prefix_match = result.get("prefix_match", result.get("tuned_prefix_match"))
     lines = [
         f"model: {result.get('model_id', '-')}",
@@ -232,7 +231,7 @@ def infer(
     fmt: str,
 ) -> None:
     """Run single-prompt inference with Vitriol TurboQuant presets."""
-    trust_remote_code = bool(ctx.obj.get("trust_remote_code", True)) if getattr(ctx, "obj", None) else True
+    trust_remote_code = bool(ctx.obj.get("trust_remote_code", False)) if getattr(ctx, "obj", None) else False
     parsed_preset_params = _parse_preset_params(preset_params)
     effective_preset, parsed_preset_params, effective_qwen_chat = _apply_infer_preset_overrides(
         preset=preset,
@@ -293,11 +292,11 @@ def infer(
             text = f"{text}\n\n{_stats_text(result)}"
         click.echo(text)
         return
-        
+
     if not result.get("ok", True):
         click.echo(f"Error running inference for {result.get('model_id', '-')}:\n{result.get('error', 'Unknown error')}")
         return
-        
+
     text = _smoke_summary_text(result) if smoke else str(result.get("generated_text", ""))
     if effective_strip_think and not smoke:
         text = _strip_think_blocks(text)

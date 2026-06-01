@@ -8,11 +8,11 @@ and user-friendly error messages.
 
 class VitriolError(Exception):
     """Base exception for all Vitriol errors."""
-    
+
     def __init__(self, message: str, recoverable: bool = False):
         """
         Initialize Vitriol error.
-        
+
         Args:
             message: Error message
             recoverable: Whether the error is potentially recoverable
@@ -29,7 +29,7 @@ class ConfigError(VitriolError):
 
 class ConfigLoadError(ConfigError):
     """Failed to load model configuration."""
-    
+
     def __init__(self, model_id: str, reason: str = ""):
         message = f"Failed to load configuration for '{model_id}'"
         if reason:
@@ -43,7 +43,7 @@ class ConfigLoadError(ConfigError):
 
 class ConfigValidationError(ConfigError):
     """Configuration validation failed."""
-    
+
     def __init__(self, config_attr: str, reason: str):
         message = f"Invalid configuration attribute '{config_attr}': {reason}"
         super().__init__(message, recoverable=False)
@@ -56,7 +56,7 @@ class ModelError(VitriolError):
 
 class ModelBuildError(ModelError):
     """Failed to build model from configuration."""
-    
+
     def __init__(self, model_id: str, reason: str = ""):
         message = f"Failed to build model from '{model_id}'"
         if reason:
@@ -70,7 +70,7 @@ class ModelBuildError(ModelError):
 
 class WeightGenerationError(VitriolError):
     """Failed to generate weights."""
-    
+
     def __init__(self, param_name: str, reason: str = ""):
         message = f"Failed to generate weight for '{param_name}'"
         if reason:
@@ -84,7 +84,7 @@ GenerationError = WeightGenerationError
 
 class ShardSaveError(VitriolError):
     """Failed to save weight shard."""
-    
+
     def __init__(self, shard_path: str, reason: str = ""):
         message = f"Failed to save shard to '{shard_path}'"
         if reason:
@@ -103,7 +103,7 @@ class StrategyError(VitriolError):
 
 class IncompatibleStrategyError(StrategyError):
     """Strategy incompatible with requested format or model."""
-    
+
     def __init__(
         self,
         strategy: str,
@@ -111,28 +111,28 @@ class IncompatibleStrategyError(StrategyError):
         reason: str = None
     ):
         message = f"Strategy '{strategy}' is incompatible"
-        
+
         if format:
             message += f" with format '{format}'"
-        
+
         if reason:
             message += f": {reason}"
-        
+
         message += "\n\nSuggested alternatives:\n"
-        
+
         if format == "safetensors" and strategy == "ultra":
             message += "  • Use '--format pytorch' instead\n"
             message += "  • Use '--strategy compact' for Safetensors format"
         else:
             message += "  • Try a different strategy (random, compact, sparse)\n"
             message += "  • Check the strategy documentation"
-        
+
         super().__init__(message, recoverable=True)
 
 
 class StrategyNotFoundError(StrategyError, KeyError):
     """Requested strategy does not exist."""
-    
+
     def __init__(self, strategy: str, available_strategies: list):
         message = f"Strategy '{strategy}' not found.\n"
         message += f"Available strategies: {', '.join(available_strategies)}"
@@ -146,7 +146,7 @@ class AdapterError(VitriolError):
 
 class AdapterNotFoundError(AdapterError):
     """No suitable adapter found for model."""
-    
+
     def __init__(self, model_id: str):
         message = f"No adapter found for model '{model_id}'.\n"
         message += "The model will use default processing.\n\n"
@@ -158,7 +158,7 @@ class AdapterNotFoundError(AdapterError):
 
 class ModelNotSupportedError(AdapterError):
     """Model architecture is not supported."""
-    
+
     def __init__(self, model_id: str, reason: str = ""):
         message = f"Model '{model_id}' is not supported"
         if reason:
@@ -177,7 +177,7 @@ class NASError(VitriolError):
 
 class DatasetLoadError(NASError):
     """Failed to load dataset for NAS evaluation."""
-    
+
     def __init__(self, dataset_name: str, reason: str = ""):
         message = f"Failed to load dataset '{dataset_name}'"
         if reason:
@@ -196,7 +196,7 @@ class CheckpointError(VitriolError):
 
 class CheckpointCorruptedError(CheckpointError):
     """Checkpoint file is corrupted."""
-    
+
     def __init__(self, checkpoint_path: str, reason: str = ""):
         message = f"Checkpoint corrupted: {checkpoint_path}"
         if reason:
@@ -207,7 +207,7 @@ class CheckpointCorruptedError(CheckpointError):
 
 class CheckpointSaveError(CheckpointError):
     """Failed to save checkpoint."""
-    
+
     def __init__(self, checkpoint_path: str, reason: str = ""):
         message = f"Failed to save checkpoint to '{checkpoint_path}'"
         if reason:
@@ -217,7 +217,7 @@ class CheckpointSaveError(CheckpointError):
 
 class ValidationError(VitriolError):
     """Model validation failed."""
-    
+
     def __init__(self, model_path: str, reason: str = ""):
         message = f"Validation failed for model at '{model_path}'"
         if reason:

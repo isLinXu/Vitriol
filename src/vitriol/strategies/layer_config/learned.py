@@ -26,15 +26,15 @@ Reference: Similar to HyperNetwork (Ha et al., 2016), Weight Generation (Mallya 
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple, List, Any, Callable
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
-from vitriol.strategies.base import WeightGenerationStrategy, StrategyCapabilities
+from vitriol.strategies.base import StrategyCapabilities, WeightGenerationStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -111,10 +111,12 @@ class WeightGeneratorNetwork(nn.Module):
         self,
         latent_dim: int = 64,
         config_dim: int = 10,
-        hidden_dims: List[int] = [256, 512, 256],
+        hidden_dims: Optional[List[int]] = None,
         output_scale: float = 1.0,
     ):
         super().__init__()
+        if hidden_dims is None:
+            hidden_dims = [256, 512, 256]
         self.output_scale = output_scale
         self.latent_dim = latent_dim
 
@@ -582,7 +584,7 @@ class LearnedWeightStrategy(WeightGenerationStrategy):
 
         # Estimate depth from name
         depth = 0
-        for i, c in enumerate(name):
+        for _i, c in enumerate(name):
             if c.isdigit():
                 depth = depth * 10 + int(c)
 
@@ -659,7 +661,7 @@ class LearnedWeightStrategy(WeightGenerationStrategy):
     def _load_generator(self, path: str):
         """Load pretrained generator."""
         try:
-            state_dict = torch.load(path, map_location=self.device)
+            state_dict = torch.load(path, map_location=self.device, weights_only=True)
             self.generator.load_state_dict(state_dict)
             logger.info("Loaded pretrained generator from %s", path)
         except Exception as e:

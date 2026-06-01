@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+
 import click
 
 
@@ -78,7 +79,7 @@ def infer_cmd(
     }
     torch_dtype = dtype_map[dtype]
 
-    trust_remote_code = bool(ctx.obj.get("trust_remote_code", True)) if ctx.obj else True
+    trust_remote_code = bool(ctx.obj.get("trust_remote_code", False)) if ctx.obj else False
 
     pipeline = ExoBrainInferencePipeline(
         shell_model_path=shell_model_path,
@@ -198,7 +199,7 @@ def distill_cmd(
     }
     torch_dtype = dtype_map[dtype]
 
-    trust_remote_code = bool(ctx.obj.get("trust_remote_code", True)) if ctx.obj else True
+    trust_remote_code = bool(ctx.obj.get("trust_remote_code", False)) if ctx.obj else False
 
     # Create pipeline
     pipeline = ExoBrainInferencePipeline(

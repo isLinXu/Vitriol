@@ -6,7 +6,9 @@ rope/qk dimensions that need careful handling during shrink.
 
 import logging
 from typing import Optional, Type
+
 from transformers import PretrainedConfig
+
 from .base import ModelAdapter
 from .registry import AdapterRegistry
 

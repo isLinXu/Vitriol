@@ -93,7 +93,7 @@ class TestModelExporter:
     def test_init(self):
         exporter = ModelExporter("/tmp/test_model")
         assert exporter.input_dir == Path("/tmp/test_model")
-        assert exporter.trust_remote_code is True
+        assert exporter.trust_remote_code is False
 
     def test_init_false_trust(self):
         exporter = ModelExporter("/tmp/test_model", trust_remote_code=False)
@@ -215,4 +215,3 @@ class TestVitriolVisualizer:
             # ImportError path
             result = VitriolVisualizer.generate_diagram(model, str(output))
             assert result is False
-

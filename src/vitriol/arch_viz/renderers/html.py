@@ -14,107 +14,13 @@ html_renderer.py - Optimized HTMLRenderer with multi-theme support and PNG/SVG e
 import json
 import os
 import tempfile
+
 from html import escape
 from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import unquote
 
-# from ..core import Architecture  # uncomment in real project
-# Stub for standalone testing
-from dataclasses import dataclass, field
-from typing import List
-
-@dataclass
-class Architecture:
-    """
-    Unified architecture descriptor.
-
-    arch_type:
-        "decoder-only"    – GPT/LLaMA/Qwen/Mistral/Mixtral style
-        "encoder-only"    – BERT/RoBERTa style
-        "encoder-decoder" – T5/BART style
-
-    features: list of feature tags that drive badge rendering, e.g.:
-        "GQA", "MQA", "MHA", "RoPE", "ALiBi", "SWA", "MoE",
-        "RMSNorm", "LayerNorm", "SwiGLU", "GELU", "GeGLU",
-        "Causal", "Bidirectional", "CrossAttn", "RelPos"
-    """
-    model_type:     str  = "Qwen2-7B"
-    arch_type:      str  = "decoder-only"   # decoder-only | encoder-only | encoder-decoder
-    parameters:     Dict = field(default_factory=lambda: {
-        "hidden_size": 4096, "num_heads": 32, "num_kv_heads": 8,
-        "intermediate_size": 11008, "vocab_size": 152064,
-        "max_position": 32768,
-    })
-    features:       List[str] = field(default_factory=lambda: [
-        "GQA", "RoPE", "RMSNorm", "SwiGLU", "Causal"
-    ])
-    special_features: List[str] = field(default_factory=list)  # kept for back-compat
-    total_params:   float = 7_000_000_000
-    memory_fp16_gb: float = 13.0
-    total_layers:   int   = 32
-    # encoder-decoder only
-    encoder_layers: int   = 0
-    decoder_layers: int   = 0
-
-
-# ---------------------------------------------------------------------------
-# Pre-built model registry  (use as Architecture(**MODEL_REGISTRY["llama3-8b"]))
-# ---------------------------------------------------------------------------
-MODEL_REGISTRY: Dict[str, dict] = {
-    "qwen2-7b": dict(
-        model_type="Qwen2-7B", arch_type="decoder-only",
-        parameters={"hidden_size":4096,"num_heads":32,"num_kv_heads":8,
-                    "intermediate_size":11008,"vocab_size":152064,"max_position":32768},
-        features=["GQA","RoPE","RMSNorm","SwiGLU","Causal"],
-        total_params=7_000_000_000, memory_fp16_gb=13.0, total_layers=32,
-    ),
-    "llama3-8b": dict(
-        model_type="LLaMA-3 8B", arch_type="decoder-only",
-        parameters={"hidden_size":4096,"num_heads":32,"num_kv_heads":8,
-                    "intermediate_size":14336,"vocab_size":128256,"max_position":8192},
-        features=["GQA","RoPE","RMSNorm","SwiGLU","Causal"],
-        total_params=8_030_000_000, memory_fp16_gb=15.0, total_layers=32,
-    ),
-    "mistral-7b": dict(
-        model_type="Mistral-7B", arch_type="decoder-only",
-        parameters={"hidden_size":4096,"num_heads":32,"num_kv_heads":8,
-                    "intermediate_size":14336,"vocab_size":32000,"max_position":32768,
-                    "sliding_window":4096},
-        features=["GQA","RoPE","RMSNorm","SwiGLU","Causal","SWA"],
-        total_params=7_240_000_000, memory_fp16_gb=13.5, total_layers=32,
-    ),
-    "mixtral-8x7b": dict(
-        model_type="Mixtral 8×7B", arch_type="decoder-only",
-        parameters={"hidden_size":4096,"num_heads":32,"num_kv_heads":8,
-                    "intermediate_size":14336,"vocab_size":32000,"max_position":32768,
-                    "num_experts":8,"top_k_experts":2},
-        features=["GQA","RoPE","RMSNorm","SwiGLU","Causal","MoE"],
-        total_params=46_700_000_000, memory_fp16_gb=87.0, total_layers=32,
-    ),
-    "gpt2-xl": dict(
-        model_type="GPT-2 XL", arch_type="decoder-only",
-        parameters={"hidden_size":1600,"num_heads":25,"num_kv_heads":25,
-                    "intermediate_size":6400,"vocab_size":50257,"max_position":1024},
-        features=["MHA","LearnedPos","LayerNorm","GELU","Causal"],
-        total_params=1_558_000_000, memory_fp16_gb=3.0, total_layers=48,
-    ),
-    "bert-large": dict(
-        model_type="BERT-Large", arch_type="encoder-only",
-        parameters={"hidden_size":1024,"num_heads":16,"num_kv_heads":16,
-                    "intermediate_size":4096,"vocab_size":30522,"max_position":512},
-        features=["MHA","AbsPos","LayerNorm","GELU","Bidirectional"],
-        total_params=340_000_000, memory_fp16_gb=0.65, total_layers=24,
-    ),
-    "t5-large": dict(
-        model_type="T5-Large", arch_type="encoder-decoder",
-        parameters={"hidden_size":1024,"num_heads":16,"num_kv_heads":16,
-                    "intermediate_size":2816,"vocab_size":32128,"max_position":512},
-        features=["MHA","RelPos","LayerNorm","GELU","CrossAttn"],
-        total_params=770_000_000, memory_fp16_gb=1.5, total_layers=24,
-        encoder_layers=24, decoder_layers=24,
-    ),
-}
+from ..core import Architecture
 
 
 class HTMLRenderer:
@@ -523,7 +429,7 @@ class HTMLRenderer:
                 {'from': 'enc-attn', 'to': 'enc-attn-detail', 'curve': 0.5, 'type': 'expansion'}
             ]
             graph['layers-container']['down'].append('encoder-layer-detail')
-            
+
             graph.update({
                 'encoder-layer-detail': {'up': ['layers-container'], 'down': ['enc-input'], 'label': 'Encoder Block', 'desc': 'Bidirectional Transformer Layer'},
                 'enc-input':            {'up': ['encoder-layer-detail'], 'down': ['enc-norm-attn'], 'label': 'Input', 'desc': 'Layer Input'},
@@ -548,7 +454,7 @@ class HTMLRenderer:
                 {'from': 'decoder-layer-detail', 'to': 'cross-attn-detail', 'curve': 0.4, 'type': 'flow'} # Dec layer -> Cross Attn
             ]
             graph['layers-container']['down'].append('encoder-layer-detail')
-            
+
             # Encoder nodes (reuse logic roughly)
             graph.update({
                 'encoder-layer-detail': {'up': ['layers-container'], 'down': ['enc-input'], 'label': 'Encoder Stack', 'desc': 'Full Encoder'},
@@ -574,7 +480,7 @@ class HTMLRenderer:
                 {'from': 'mlp-module', 'to': 'mlp-detail', 'curve': 0.5, 'type': 'expansion'}
             ]
             graph['layers-container']['down'].append('decoder-layer-detail')
-            
+
             graph.update({
                 'decoder-layer-detail': {'up': ['layers-container'], 'down': ['decoder-input'], 'label': 'Transformer Block', 'desc': 'Zoomed-in layer view'},
                 'decoder-input':        {'up': ['decoder-layer-detail'], 'down': ['node-rms-attn'], 'label': 'Hidden States (in)', 'desc': 'Layer input [B, L, D]'},
@@ -1924,7 +1830,7 @@ class HTMLRenderer:
 
     def _render_hy3_layer_groups(self, arch: Architecture) -> str:
         if not self._is_hy3(arch):
-            return """
+            return f"""
                     <div class="box box-layer interactive" id="layer-first">
                         <span class="box-label">Layer 1</span>
                     </div>
@@ -1932,8 +1838,8 @@ class HTMLRenderer:
                         <span class="box-label">⋮</span>
                     </div>
                     <div class="box box-layer interactive" id="layer-last">
-                        <span class="box-label">Layer {}</span>
-                    </div>""".format(arch.total_layers)
+                        <span class="box-label">Layer {arch.total_layers}</span>
+                    </div>"""
 
         dense_prefix = int(arch.parameters.get("dense_prefix_layers", 0) or 0)
         mtp_layers = int(arch.parameters.get("mtp_layers", 0) or 0)
@@ -2941,15 +2847,15 @@ class HTMLRenderer:
             // End at left center (usually)
             const x2 = tr.left   - cr.left;
             let y2 = tr.top    + tr.height / 2 - cr.top;
-            
+
             // For expansion arrows, point slightly higher to "open up" the block
             if (type === 'expansion') {{
-                y2 = tr.top + 40 - cr.top; 
+                y2 = tr.top + 40 - cr.top;
             }}
 
             const dx = x2 - x1;
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            
+
             // Set class based on type
             if (type === 'expansion') {{
                 path.setAttribute('class', 'svg-connector svg-connector-expansion');
@@ -3352,20 +3258,27 @@ if __name__ == "__main__":
     OUT = "/mnt/user-data/outputs"
     os.makedirs(OUT, exist_ok=True)
 
-    # 1. Render all themes for default model (Qwen2-7B / decoder-only)
+    arch = Architecture(
+        model_type="Qwen2-7B",
+        arch_type="decoder-only",
+        total_layers=32,
+        total_params=7_000_000_000,
+        memory_fp16_gb=13.0,
+        parameters={
+            "hidden_size": 4096,
+            "num_heads": 32,
+            "num_kv_heads": 8,
+            "intermediate_size": 11008,
+            "vocab_size": 152064,
+            "max_position": 32768,
+        },
+        features=["GQA", "RoPE", "RMSNorm", "SwiGLU", "Causal"],
+    )
+
+    # Render all themes for a representative decoder-only architecture.
     for theme in HTMLRenderer.THEMES:
-        arch = Architecture(**MODEL_REGISTRY["qwen2-7b"])
         r = HTMLRenderer(theme=theme)
         r.render(arch, f"{OUT}/vitriol_{theme}.html")
         print(f"[✓] theme={theme:12s}  {arch.model_type}")
-
-    # 2. Render each model type in dark theme for structural comparison
-    for key, cfg in MODEL_REGISTRY.items():
-        arch = Architecture(**cfg)
-        r    = HTMLRenderer(theme="dark")
-        fname = f"{OUT}/vitriol_model_{key}.html"
-        r.render(arch, fname)
-        sz = os.path.getsize(fname) // 1024
-        print(f"[✓] model={key:14s}  arch={arch.arch_type:16s}  {sz}KB")
 
     print("\nAll done. Open any vitriol_*.html in a browser.")

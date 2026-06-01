@@ -1,11 +1,11 @@
 """Weight Generator Network."""
 
 from dataclasses import dataclass
-from typing import Tuple, List, Optional
+from typing import Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 
 
 @dataclass
@@ -47,11 +47,13 @@ class WeightGeneratorNetwork(nn.Module):
     def __init__(
         self,
         latent_dim: int = 64,
-        config_dim: int = 10,
-        hidden_dims: list[int] = [256, 512, 256],
+        config_dim: int = 7,
+        hidden_dims: Optional[list[int]] = None,
         output_scale: float = 1.0,
     ):
         super().__init__()
+        if hidden_dims is None:
+            hidden_dims = [256, 512, 256]
         self.output_scale = output_scale
         self.latent_dim = latent_dim
 
@@ -70,11 +72,18 @@ class WeightGeneratorNetwork(nn.Module):
 
         # Combined processing
         combined_dim = hidden_dims[0] + hidden_dims[0] // 2
-        self.combined_net = nn.Sequential(
-            nn.Linear(combined_dim, hidden_dims[1]),
-            nn.LayerNorm(hidden_dims[1]),
-            nn.ReLU(),
-        )
+        combined_layers = []
+        prev_dim = combined_dim
+        for width in hidden_dims[1:]:
+            combined_layers.extend(
+                [
+                    nn.Linear(prev_dim, width),
+                    nn.LayerNorm(width),
+                    nn.ReLU(),
+                ]
+            )
+            prev_dim = width
+        self.combined_net = nn.Sequential(*combined_layers)
 
         # Output heads
         self.scale_head = nn.Sequential(
@@ -95,8 +104,14 @@ class WeightGeneratorNetwork(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, z: torch.Tensor, layer_config: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        z: torch.Tensor,
+        layer_config: torch.Tensor,
+        target_shape: Optional[Tuple[int, ...]] = None,
+    ) -> torch.Tensor:
         batch_size = z.shape[0]
+        target_shape = tuple(target_shape or (1,))
         z_features = self.latent_net(z)
         config_features = self.config_net(layer_config)
 
@@ -108,7 +123,13 @@ class WeightGeneratorNetwork(nn.Module):
         bias = self.bias_head(features)
         gate = self.gate_head(features)
 
-        # Compose output
+        base = torch.randn((batch_size, *target_shape), device=z.device, dtype=features.dtype)
+        head_shape = (batch_size,) + (1,) * len(target_shape)
+        scale = scale.view(head_shape)
+        bias = bias.view(head_shape)
+        gate = gate.view(head_shape)
+
+        # Compose output with broadcast-safe scaling across the target tensor.
         output = gate * (base * scale * self.output_scale) + bias * 0.01
 
         return output

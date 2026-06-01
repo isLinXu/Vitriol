@@ -13,11 +13,12 @@ Configuration sources (in priority order):
 4. Default values
 """
 
-from pathlib import Path
-import yaml
-from typing import Any, Dict, Optional
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import yaml
 
 
 def _coerce_bool(value: Any) -> bool:
@@ -29,11 +30,11 @@ def _coerce_bool(value: Any) -> bool:
 @dataclass
 class SecurityOptions:
     """Security-related options for model loading.
-    
+
     Controls how Vitriol handles remote code from HuggingFace models.
     Setting trust_remote_code=False is safer but limits model compatibility.
     """
-    trust_remote_code: bool = True
+    trust_remote_code: bool = False
     allow_network: bool = True
     local_files_only: bool = False
 
@@ -44,17 +45,17 @@ class GenerationConfig:
     dtype: str = "bfloat16"
     strategy: str = "random"
     auto_validate: bool = True
-    
+
     # Strategy specific params
     n_bits: int = 8
     rank: int = 16
     sparsity: float = 0.5
-    
+
     # Security
     security: SecurityOptions = None
     # P4: audit/provenance (SSoT output)
     security_context: Dict[str, Any] = field(default_factory=dict)
-    
+
     def __post_init__(self):
         if self.security is None:
             self.security = SecurityOptions()
@@ -67,11 +68,11 @@ class GenerationConfig:
             raise ValueError("Sparsity must be in [0,1]")
         if not (1 <= self.n_bits <= 32):
             raise ValueError("n_bits must be in [1,32]")
-    
+
     @classmethod
     def from_yaml(cls, path: Path) -> 'GenerationConfig':
         return build_generation_config(config_path=path)
-    
+
     @classmethod
     def from_env(cls) -> 'GenerationConfig':
         """Load from environment variables."""

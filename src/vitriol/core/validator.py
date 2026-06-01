@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
 import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 from ..utils.hf_loading import load_causallm as hf_load_causallm
 from ..utils.hf_loading import load_model as hf_load_model
@@ -23,7 +23,7 @@ class ValidationReport:
     memory_usage_gb: Optional[float] = None
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'success': self.success,
@@ -37,8 +37,8 @@ class ValidationReport:
 
 class ModelValidator:
     """Validate generated models"""
-    
-    def __init__(self, output_dir: str, trust_remote_code: bool = True):
+
+    def __init__(self, output_dir: str, trust_remote_code: bool = False):
         self.output_dir = output_dir
         self.trust_remote_code = bool(trust_remote_code)
         self.report = ValidationReport(
@@ -47,35 +47,35 @@ class ModelValidator:
             tokenizer_loadable=False,
             inference_test=False
         )
-    
+
     def validate(self, run_inference: bool = True, task_type: str = "causal_lm") -> ValidationReport:
         """Run validation"""
         logger.info(f"Validating model in {self.output_dir}...")
         try:
             # 1. Validate Model Loading
             model = self._validate_model_loading(task_type=task_type)
-            
+
             # 2. Validate Tokenizer Loading
             tokenizer = None
             if run_inference:
                 tokenizer = self._validate_tokenizer_loading()
             else:
                 self.report.warnings.append("Tokenizer validation skipped because inference is disabled")
-            
+
             # 3. Inference Test
             if run_inference and model and tokenizer:
                 self._validate_inference(model, tokenizer)
-            
+
             # 4. Check Memory
             self._check_memory_usage(model)
-            
+
         except Exception as e:
             self.report.success = False
             self.report.errors.append(f"Validation critical failure: {str(e)}")
             logger.error(f"Validation failed: {e}")
-        
+
         return self.report
-    
+
     def _load_model_for_task(self, task_type: str):
         # Validation should default to local loading to avoid accidental network access.
         security = {
@@ -197,7 +197,7 @@ class ModelValidator:
                 self.report.errors.append(f"Model loading failed: {e}")
                 logger.error(f"Model loading failed: {e}")
                 return None
-    
+
     def _validate_tokenizer_loading(self):
         try:
             logger.info("Attempting to load tokenizer...")
@@ -217,7 +217,7 @@ class ModelValidator:
             self.report.errors.append(f"Tokenizer loading failed: {e}")
             logger.error(f"Tokenizer loading failed: {e}")
             return None
-    
+
     def _validate_inference(self, model, tokenizer):
         try:
             import torch
@@ -225,10 +225,10 @@ class ModelValidator:
             logger.info("Running inference test...")
             input_text = "Hello, world!"
             inputs = tokenizer(input_text, return_tensors="pt")
-            
+
             # Move inputs to model device
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
-            
+
             with torch.no_grad():
                 # Generate a few tokens
                 if hasattr(model, "generate"):
@@ -237,14 +237,14 @@ class ModelValidator:
                 else:
                     # For non-generative models, just run forward pass
                     model(**inputs)
-            
+
             self.report.inference_test = True
             logger.info("Inference test passed.")
         except Exception as e:
             self.report.success = False
             self.report.errors.append(f"Inference test failed: {e}")
             logger.error(f"Inference test failed: {e}")
-    
+
     def _check_memory_usage(self, model):
         if model:
             try:

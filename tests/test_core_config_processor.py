@@ -52,7 +52,7 @@ class TestConfigProcessor:
         mock_hf_load.assert_called_once()
         _, kwargs = mock_hf_load.call_args
         assert kwargs["security"]["local_files_only"] is False
-        assert kwargs["security"]["trust_remote_code"] is True
+        assert kwargs["security"]["trust_remote_code"] is False
 
     @patch("vitriol.core.config_processor.Path.exists")
     @patch("vitriol.core.config_processor.hf_load_config")

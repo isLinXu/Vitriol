@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
-from pathlib import Path
 import json
 import logging
 import tempfile
+from pathlib import Path
+from typing import Any
 
 from ..utils.hf_loading import build_config_object, load_config_or_raw
 
@@ -12,14 +12,14 @@ logger = logging.getLogger(__name__)
 
 class ConfigParser:
     """Parses model configuration from HuggingFace ID or local path.
-    
+
     When loading from a local directory, prioritizes meta-config.json
     (the original unmodified HF config) over config.json (which may
     be shrunk or modified by the generation process).
     """
-    
+
     @staticmethod
-    def load_config(model_id_or_path: str, trust_remote_code: bool = True, local_files_only: bool = False) -> Any:
+    def load_config(model_id_or_path: str, trust_remote_code: bool = False, local_files_only: bool = False) -> Any:
         path = Path(model_id_or_path)
 
         try:
@@ -32,7 +32,7 @@ class ConfigParser:
                     logger.debug("Failed to register adapter classes")
         except Exception:
             logger.debug("Failed to load builtin adapters")
-        
+
         # For local directories: prefer meta-config.json → config_meta.json → config.json
         if path.is_dir():
             for meta_name in ('meta-config.json', 'config_meta.json'):
@@ -59,7 +59,7 @@ class ConfigParser:
                                 return build_config_object(meta_dict)
                     except Exception as e:
                         logger.warning(f"Failed to load {meta_name}, falling back: {e}")
-        
+
         # Default path: load from model_id or local config.json
         try:
             return load_config_or_raw(

@@ -33,23 +33,23 @@ Method
 
 1. **Attention Importance Score**: For each KV position, compute
    an importance score based on the attention pattern:
-   
+
      importance[t] = max_q(attention_weight[q, t])
-   
+
    This uses the most recent query to determine which KV positions
    matter most.
 
 2. **Precision Mapping**: Map importance to bit-width:
-   
+
      bits[t] = bits_min + (bits_max - bits_min) · importance[t]^γ
-   
+
    where γ controls the sharpness of the allocation curve.
    γ < 1: more uniform allocation
    γ > 1: more aggressive concentration on high-importance positions
 
 3. **Grouped Quantization**: For efficiency, group positions into
    precision tiers (rather than per-position quantization):
-   
+
      Tier 1 (top 20% importance): 6-8 bit → near-lossless
      Tier 2 (next 30%): 3-4 bit → standard quality
      Tier 3 (remaining 50%): 1-2 bit → coarse approximation
@@ -112,7 +112,6 @@ import torch
 import torch.nn.functional as F
 
 from .codec import walsh_hadamard_rotate
-
 
 # ─────────────────────────────────────────────────────────────
 # Attention Importance Computation

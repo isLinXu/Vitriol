@@ -1,7 +1,8 @@
 
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Tuple, Any
 import json
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Tuple
+
 
 @dataclass
 class Layer:
@@ -11,7 +12,7 @@ class Layer:
     params: int
     shape: Tuple[Any, ...]
     description: str = ""
-    
+
     def __repr__(self) -> str:
         return f"Layer({self.name}, {self.params:,} params, {self.type})"
 
@@ -42,10 +43,10 @@ class Architecture:
             self.parameters["encoder_layers"] = self.encoder_layers
         if self.decoder_layers and "decoder_layers" not in self.parameters:
             self.parameters["decoder_layers"] = self.decoder_layers
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
-        
+
     def to_json(self, path: str):
         with open(path, 'w') as f:
             json.dump(self.to_dict(), f, indent=2, default=str)

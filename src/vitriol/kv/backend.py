@@ -41,7 +41,7 @@ class KVStoreBackend:
         stores = getattr(handle, "_vitriol_kv_stores", None)
         if stores is None:
             stores = {}
-            setattr(handle, "_vitriol_kv_stores", stores)
+            handle._vitriol_kv_stores = stores
         store = stores.get(int(layer_idx))
         if store is None:
             cfg = self.store_cfg_factory(handle, int(layer_idx)) if self.store_cfg_factory is not None else self.store_cfg

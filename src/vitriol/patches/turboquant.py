@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from functools import lru_cache
+from functools import cache
 from typing import Callable, Optional, Union
 
 import torch
@@ -46,9 +46,13 @@ import torch.nn.functional as F
 _TRITON_AVAILABLE = False
 try:
     from ..kv.triton_kernels import (
-        triton_fwht as triton_fwht,  # noqa: F401
-        triton_blockwise_quantize_dequant as triton_blockwise_quantize_dequant,  # noqa: F401
         get_backend_name as _get_kv_backend_name,
+    )
+    from ..kv.triton_kernels import (
+        triton_blockwise_quantize_dequant as triton_blockwise_quantize_dequant,  # noqa: F401
+    )
+    from ..kv.triton_kernels import (
+        triton_fwht as triton_fwht,  # noqa: F401
     )
     _TRITON_AVAILABLE = True
 except ImportError:
@@ -199,7 +203,7 @@ def resolve_turbo_kv_formats(
     return turbo_k_format, turbo_v_format
 
 
-@lru_cache(maxsize=None)
+@cache
 def _rademacher_signs(padded_dim: int, seed: int = _TURBO_ROTATION_SEED) -> torch.Tensor:
     gen = torch.Generator(device="cpu")
     gen.manual_seed(int(seed) + int(padded_dim) * 17)
@@ -274,7 +278,7 @@ def get_turboquant_stats() -> dict[str, float]:
     }
 
 
-@lru_cache(maxsize=None)
+@cache
 def _gaussian_lloyd_max_codebook(levels: int) -> tuple[torch.Tensor, torch.Tensor]:
     if int(levels) < 2:
         raise ValueError(f"levels must be >= 2, got {levels}")

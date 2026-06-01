@@ -15,10 +15,12 @@ Example:
     >>> (tensor == 0).float().mean()  # ~90% zeros
 """
 
-import torch
 from typing import Dict
-from .base import WeightGenerationStrategy, StrategyCapabilities
+
+import torch
 from safetensors.torch import save_file
+
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 _STRUCTURED_SPARSE_SCALE: float = 0.01
 

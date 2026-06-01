@@ -3,20 +3,20 @@ CLI commands for Evolution features (Architecture Tree, Compare, Simulate)
 """
 
 import logging
+
 import click
 
-from vitriol.utils.hf_loading import load_config as hf_load_config
-
 from vitriol.evolution import (
-    EvolutionTree,
-    TreeVisualizer,
     ArchComparator,
-    ComparisonReport,
-    ArchSimulator,
-    InnovationTimeline,
     ArchitectureRecommender,
+    ArchSimulator,
+    ComparisonReport,
+    EvolutionTree,
+    InnovationTimeline,
+    TreeVisualizer,
     UseCase,
 )
+from vitriol.utils.hf_loading import load_config as hf_load_config
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def build_tree(models, output_path, title, build):
 
     # Add custom models if provided
     ctx = click.get_current_context(silent=True)
-    trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", True)) if ctx else True
+    trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", False)) if ctx else False
     allow_network = bool((ctx.obj or {}).get("allow_network", True)) if ctx else True
     local_files_only = bool((ctx.obj or {}).get("local_files_only", False)) if ctx else False
     for model_id in models:
@@ -102,7 +102,7 @@ def compare_models(model1, model2, output_path, output_format):
     # Load configs
     try:
         ctx = click.get_current_context(silent=True)
-        trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", True)) if ctx else True
+        trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", False)) if ctx else False
         allow_network = bool((ctx.obj or {}).get("allow_network", True)) if ctx else True
         local_files_only = bool((ctx.obj or {}).get("local_files_only", False)) if ctx else False
         config1 = hf_load_config(
@@ -169,7 +169,7 @@ def simulate_model(model, config_path, batch_size, seq_length, dtype, gpu, outpu
     if model:
         try:
             ctx = click.get_current_context(silent=True)
-            trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", True)) if ctx else True
+            trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", False)) if ctx else False
             allow_network = bool((ctx.obj or {}).get("allow_network", True)) if ctx else True
             local_files_only = bool((ctx.obj or {}).get("local_files_only", False)) if ctx else False
             config = hf_load_config(

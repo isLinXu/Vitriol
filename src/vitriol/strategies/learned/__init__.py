@@ -7,7 +7,7 @@ transforming compression from engineering to learning.
 Primary innovation: compression as a learning problem.
 """
 
-from ..layer_config.learned import LearnedWeightStrategy, HybridLearnedStrategy
+from ..layer_config.learned import HybridLearnedStrategy, LearnedWeightStrategy
 
 __all__ = [
     "LearnedWeightStrategy",

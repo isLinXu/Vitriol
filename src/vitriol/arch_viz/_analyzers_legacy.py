@@ -1,6 +1,7 @@
-from typing import Any, Optional
-from .core import Architecture, Layer
 import logging
+from typing import Any, Optional
+
+from .core import Architecture, Layer
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ class TransformerAnalyzer(ModelAnalyzer):
                 rope_theta = _safe_float(rope_parameters.get('rope_theta', 0.0), 0.0)
         num_experts = _num_experts(config)
         top_k_experts = _safe_int(_cfg_get(config, 'num_experts_per_tok', 0), 0)
-        
+
         # Determine Architecture Type
         arch_type = "decoder-only"
         model_type = str(getattr(config, 'model_type', '') or '').lower()
@@ -225,19 +226,19 @@ class TransformerAnalyzer(ModelAnalyzer):
             _append_feature(features, "CrossAttn")
         else:
             _append_feature(features, "Causal")
-        
+
         layers = []
         total_params = 0
-        
+
         # 1. Embedding
         emb_params = vocab_size * hidden_size
         layers.append(Layer("Token Embedding", "embedding", emb_params, (vocab_size, hidden_size), f"Vocab: {vocab_size}, Dim: {hidden_size}"))
         total_params += emb_params
-        
+
         # 2. Layers
         for i in range(num_layers):
             layers.append(Layer(f"Block {i}", "block_start", 0, (), ""))
-            
+
             # LayerNorm 1
             ln_params = hidden_size # approx
             layers.append(Layer(f"Block {i} - Norm 1", "normalization", ln_params, (hidden_size,)))
@@ -249,26 +250,26 @@ class TransformerAnalyzer(ModelAnalyzer):
             v_params = hidden_size * (num_kv_heads * head_dim)
             o_params = hidden_size * hidden_size
             attn_params = q_params + k_params + v_params + o_params
-            
-            layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size), 
+
+            layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size),
                                 f"Heads: {num_heads}, KV Heads: {num_kv_heads}"))
             total_params += attn_params
-            
+
             # LayerNorm 2
             layers.append(Layer(f"Block {i} - Norm 2", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # FFN / MoE
             block_ffn_params, desc = self._calculate_ffn_params(config, hidden_size, intermediate_size, features)
             layers.append(Layer(f"Block {i} - FFN", "feedforward", block_ffn_params, (hidden_size, intermediate_size), desc))
             total_params += block_ffn_params
-            
+
             layers.append(Layer(f"Block {i}", "block_end", 0, (), ""))
 
         # 3. Final Norm
         layers.append(Layer("Final Norm", "normalization", hidden_size, (hidden_size,)))
         total_params += hidden_size
-        
+
         # 4. Output Head
         if getattr(config, 'tie_word_embeddings', True):
              head_params = 0
@@ -278,7 +279,7 @@ class TransformerAnalyzer(ModelAnalyzer):
              desc = "Untied"
         layers.append(Layer("LM Head", "output", head_params, (hidden_size, vocab_size), desc))
         total_params += head_params
-        
+
         return _finalize_architecture(
             Architecture(
                 model_type=getattr(config, 'model_type', 'unknown'),
@@ -1252,13 +1253,13 @@ class GLMAnalyzer(TransformerAnalyzer):
     def analyze(self, config: Any) -> Architecture:
         # GLM-5 has hybrid layers (dense + sparse MoE) defined by mlp_layer_types
         # We need to iterate carefully
-        
+
         vocab_size = getattr(config, 'vocab_size', 0)
         hidden_size = getattr(config, 'hidden_size', 0)
         num_layers = getattr(config, 'num_hidden_layers', 0)
         num_heads = getattr(config, 'num_attention_heads', 0)
         num_kv_heads = getattr(config, 'num_key_value_heads', num_heads)
-        
+
         # GLM specific fields
         mlp_layer_types = getattr(config, 'mlp_layer_types', [])
         moe_intermediate_size = getattr(config, 'moe_intermediate_size', 0)
@@ -1266,28 +1267,28 @@ class GLMAnalyzer(TransformerAnalyzer):
         num_experts = getattr(config, 'n_routed_experts', 0)
         active_experts = getattr(config, 'num_experts_per_tok', 0)
         shared_experts = getattr(config, 'n_shared_experts', 0)
-        
+
         features = ["GLM-5", "DSA"]
         if "sparse" in mlp_layer_types:
             features.append("MoE")
-            
+
         layers = []
         total_params = 0
-        
+
         # 1. Embedding
         emb_params = vocab_size * hidden_size
         layers.append(Layer("Token Embedding", "embedding", emb_params, (vocab_size, hidden_size), f"Vocab: {vocab_size}"))
         total_params += emb_params
-        
+
         # 2. Layers
         for i in range(num_layers):
             layers.append(Layer(f"Block {i}", "block_start", 0, (), ""))
-            
+
             # Norm 1
             ln_params = hidden_size
             layers.append(Layer(f"Block {i} - Norm 1", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # Attention (DSA?)
             # Simplified calculation for standard attention, adjust for DSA/MLA if needed
             # GLM-5 uses standard GQA + RoPE usually, DSA is sparsity pattern
@@ -1300,17 +1301,17 @@ class GLMAnalyzer(TransformerAnalyzer):
             v_params = hidden_size * (num_kv_heads * head_dim)
             o_params = hidden_size * hidden_size
             attn_params = q_params + k_params + v_params + o_params
-            
+
             layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size), "DSA"))
             total_params += attn_params
-            
+
             # Norm 2
             layers.append(Layer(f"Block {i} - Norm 2", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # FFN / MoE
             layer_type = mlp_layer_types[i] if i < len(mlp_layer_types) else "dense"
-            
+
             if layer_type == "sparse":
                 # MoE Layer
                 # Gate
@@ -1320,7 +1321,7 @@ class GLMAnalyzer(TransformerAnalyzer):
                 routed_params = num_experts * (3 * hidden_size * moe_intermediate_size)
                 # Shared Experts
                 shared_params = shared_experts * (3 * hidden_size * moe_intermediate_size)
-                
+
                 ffn_params = gate_params + routed_params + shared_params
                 desc = f"MoE (Routed: {num_experts}, Active: {active_experts}, Shared: {shared_experts})"
             else:
@@ -1328,16 +1329,16 @@ class GLMAnalyzer(TransformerAnalyzer):
                 # SwiGLU
                 ffn_params = 3 * hidden_size * intermediate_size
                 desc = f"Dense (Inter: {intermediate_size})"
-                
+
             layers.append(Layer(f"Block {i} - FFN", "feedforward", ffn_params, (hidden_size, intermediate_size), desc))
             total_params += ffn_params
-            
+
             layers.append(Layer(f"Block {i}", "block_end", 0, (), ""))
-            
+
         # 3. Final Norm
         layers.append(Layer("Final Norm", "normalization", hidden_size, (hidden_size,)))
         total_params += hidden_size
-        
+
         # 4. Head
         if getattr(config, 'tie_word_embeddings', False):
             head_params = 0
@@ -1369,17 +1370,17 @@ class GLMAnalyzer(TransformerAnalyzer):
 
 class ErnieAnalyzer(TransformerAnalyzer):
     """ERNIE 4.5 VL (MoE + Vision) Analyzer."""
-    
+
     def analyze(self, config: Any) -> Architecture:
         # Check for vision config
         vision_config = getattr(config, 'vision_config', None)
-        
+
         # Base Transformer Analysis (Language Part)
         vocab_size = getattr(config, 'vocab_size', 0)
         hidden_size = getattr(config, 'hidden_size', 0)
         num_layers = getattr(config, 'num_hidden_layers', 0)
         num_heads = getattr(config, 'num_attention_heads', 0)
-        
+
         # MoE Config
         moe_num_experts = getattr(config, 'moe_num_experts', [0])
         # config.moe_num_experts is list [64, 64] ? Or maybe different per layer?
@@ -1388,42 +1389,42 @@ class ErnieAnalyzer(TransformerAnalyzer):
         n_routed = moe_num_experts[0] if isinstance(moe_num_experts, list) else moe_num_experts
         n_shared = getattr(config, 'moe_num_shared_experts', 0)
         active_experts = getattr(config, 'moe_k', 0)
-        
+
         moe_intermediate_list = getattr(config, 'moe_intermediate_size', [0, 0])
-        # [1536, 512] ? 
+        # [1536, 512] ?
         # Usually [routed_inter, shared_inter] or similar
         routed_inter = moe_intermediate_list[0] if isinstance(moe_intermediate_list, list) else moe_intermediate_list
         shared_inter = moe_intermediate_list[1] if isinstance(moe_intermediate_list, list) and len(moe_intermediate_list) > 1 else routed_inter
-        
+
         features = ["ERNIE-4.5", "MoE", "Vision-Language"]
         if getattr(config, 'rope_3d', False):
             features.append("3D-RoPE")
-        
+
         layers = []
         total_params = 0
-        
+
         # --- Vision Encoder ---
         if vision_config:
             v_hidden = getattr(vision_config, 'hidden_size', 0)
             v_layers = getattr(vision_config, 'depth', getattr(vision_config, 'num_hidden_layers', 0))
             v_patch = getattr(vision_config, 'patch_size', 14)
-            
+
             # Simple Vision Encoder Estimate
             # ViT-like: PatchEmbed + Layers * (Attn + MLP)
             v_params = 0
             # Patch Embed: (3, hidden, patch, patch)
             v_params += 3 * v_hidden * v_patch * v_patch
-            
+
             # Transformer Layers
             # Attn: 4 * hidden^2 (Q,K,V,O)
             # MLP: 2 * hidden * (4*hidden) = 8 * hidden^2
             # Norms: 2 * hidden
             layer_p = 12 * v_hidden * v_hidden
             v_params += v_layers * layer_p
-            
+
             layers.append(Layer("Vision Encoder", "encoder", v_params, (v_layers, v_hidden), f"ViT-L/{v_layers}"))
             total_params += v_params
-            
+
             # Projector (if any)
             mm_hidden = getattr(vision_config, 'mm_hidden_size', v_hidden)
             proj_params = v_hidden * mm_hidden # Linear
@@ -1431,30 +1432,30 @@ class ErnieAnalyzer(TransformerAnalyzer):
             total_params += proj_params
 
         # --- Language Model ---
-        
+
         # 1. Embedding
         emb_params = vocab_size * hidden_size
         layers.append(Layer("Token Embedding", "embedding", emb_params, (vocab_size, hidden_size), f"Vocab: {vocab_size}"))
         total_params += emb_params
-        
+
         # 2. Layers
         for i in range(num_layers):
             layers.append(Layer(f"Block {i}", "block_start", 0, (), ""))
-            
+
             # Norm 1
             ln_params = hidden_size
             layers.append(Layer(f"Block {i} - Norm 1", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # Attention
             attn_params = 4 * hidden_size * hidden_size # Standard Approx
             layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size), "FlashAttn"))
             total_params += attn_params
-            
+
             # Norm 2
             layers.append(Layer(f"Block {i} - Norm 2", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # MoE FFN
             # Gate
             gate_params = hidden_size * n_routed
@@ -1462,19 +1463,19 @@ class ErnieAnalyzer(TransformerAnalyzer):
             routed_params = n_routed * (3 * hidden_size * routed_inter)
             # Shared Experts (SwiGLU 3 matrices)
             shared_params = n_shared * (3 * hidden_size * shared_inter)
-            
+
             ffn_params = gate_params + routed_params + shared_params
             desc = f"MoE (Routed: {n_routed}, Active: {active_experts}, Shared: {n_shared})"
-            
+
             layers.append(Layer(f"Block {i} - FFN", "feedforward", ffn_params, (hidden_size, routed_inter), desc))
             total_params += ffn_params
-            
+
             layers.append(Layer(f"Block {i}", "block_end", 0, (), ""))
-            
+
         # 3. Final Norm
         layers.append(Layer("Final Norm", "normalization", hidden_size, (hidden_size,)))
         total_params += hidden_size
-        
+
         # 4. Head
         if getattr(config, 'tie_word_embeddings', False):
             head_params = 0
@@ -1507,7 +1508,7 @@ class ErnieAnalyzer(TransformerAnalyzer):
 
 class GPT2Analyzer(TransformerAnalyzer):
     """GPT-2 Specific Analyzer."""
-    
+
     def analyze(self, config: Any) -> Architecture:
         # GPT-2 uses different config names
         vocab_size = getattr(config, 'vocab_size', 0)
@@ -1515,35 +1516,35 @@ class GPT2Analyzer(TransformerAnalyzer):
         num_layers = getattr(config, 'n_layer', 12)
         num_heads = getattr(config, 'n_head', 12)
         max_pos = getattr(config, 'n_ctx', 1024)
-        
+
         # Intermediate size in GPT-2 is typically 4 * hidden
         intermediate_size = getattr(config, 'n_inner', None)
         if intermediate_size is None:
             intermediate_size = 4 * hidden_size
-            
+
         features = ["GPT-2", "Absolute Positional Embedding"]
-        
+
         layers = []
         total_params = 0
-        
+
         # 1. Embedding (Word + Position)
         wte_params = vocab_size * hidden_size
         wpe_params = max_pos * hidden_size
         emb_params = wte_params + wpe_params
-        
+
         layers.append(Layer("Token Embedding", "embedding", wte_params, (vocab_size, hidden_size), f"Vocab: {vocab_size}"))
         layers.append(Layer("Position Embedding", "embedding", wpe_params, (max_pos, hidden_size), f"Ctx: {max_pos}"))
         total_params += emb_params
-        
+
         # 2. Layers
         for i in range(num_layers):
             layers.append(Layer(f"Block {i}", "block_start", 0, (), ""))
-            
+
             # LN 1
             ln_params = 2 * hidden_size # weight + bias
             layers.append(Layer(f"Block {i} - Norm 1", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # Attention (Conv1D implementation in HF, but logic same)
             # c_attn: 3 * hidden (Q,K,V) -> hidden * (3*hidden) + bias
             # c_proj: hidden -> hidden
@@ -1551,15 +1552,15 @@ class GPT2Analyzer(TransformerAnalyzer):
             attn_bias = 3 * hidden_size
             proj_weight = hidden_size * hidden_size
             proj_bias = hidden_size
-            
+
             attn_params = attn_weight + attn_bias + proj_weight + proj_bias
             layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size), "MHA"))
             total_params += attn_params
-            
+
             # LN 2
             layers.append(Layer(f"Block {i} - Norm 2", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # MLP
             # c_fc: hidden -> inner
             # c_proj: inner -> hidden
@@ -1567,18 +1568,18 @@ class GPT2Analyzer(TransformerAnalyzer):
             fc_bias = intermediate_size
             proj_weight = intermediate_size * hidden_size
             proj_bias = hidden_size
-            
+
             mlp_params = fc_weight + fc_bias + proj_weight + proj_bias
             layers.append(Layer(f"Block {i} - MLP", "feedforward", mlp_params, (hidden_size, intermediate_size), "GELU"))
             total_params += mlp_params
-            
+
             layers.append(Layer(f"Block {i}", "block_end", 0, (), ""))
-            
+
         # 3. Final Norm
         ln_params = 2 * hidden_size
         layers.append(Layer("Final Norm", "normalization", ln_params, (hidden_size,)))
         total_params += ln_params
-        
+
         # 4. Head
         # GPT-2 ties weights
         if getattr(config, 'tie_word_embeddings', True):
@@ -1589,7 +1590,7 @@ class GPT2Analyzer(TransformerAnalyzer):
             desc = "Untied"
         layers.append(Layer("LM Head", "output", head_params, (hidden_size, vocab_size), desc))
         total_params += head_params
-        
+
         return _finalize_architecture(
             Architecture(
                 model_type=getattr(config, 'model_type', 'gpt2'),
@@ -1894,48 +1895,48 @@ class OPTAnalyzer(ModelAnalyzer):
 
 class MiniMaxAnalyzer(TransformerAnalyzer):
     """MiniMax-M2.5 Analyzer."""
-    
+
     def analyze(self, config: Any) -> Architecture:
         # MiniMax M2.5 has MTP modules (Multi-Token Prediction?) or similar auxiliary heads
         # config.use_mtp = True, config.num_mtp_modules = 3
         # It is an MoE model
-        
+
         vocab_size = getattr(config, 'vocab_size', 0)
         hidden_size = getattr(config, 'hidden_size', 0)
         num_layers = getattr(config, 'num_hidden_layers', 0)
         num_heads = getattr(config, 'num_attention_heads', 0)
         num_kv_heads = getattr(config, 'num_key_value_heads', num_heads)
-        
+
         # MoE Params
         n_local_experts = getattr(config, 'num_local_experts', 0)
         active_experts = getattr(config, 'num_experts_per_tok', 0)
-        
+
         features = ["MiniMax-M2.5", "MoE"]
         if getattr(config, 'use_mtp', False):
             features.append(f"MTP (Modules: {getattr(config, 'num_mtp_modules', 0)})")
         if getattr(config, 'attn_type_list', None):
             features.append("Hybrid Attention")
-            
+
         layers = []
         total_params = 0
-        
+
         # 1. Embedding
         emb_params = vocab_size * hidden_size
         layers.append(Layer("Token Embedding", "embedding", emb_params, (vocab_size, hidden_size), f"Vocab: {vocab_size}"))
         total_params += emb_params
-        
+
         # 2. Layers
         # MiniMax uses attn_type_list to switch between different attention types?
         # Based on config: "attn_type_list": [1, 1, ..., 1] (all 1s)
-        
+
         for i in range(num_layers):
             layers.append(Layer(f"Block {i}", "block_start", 0, (), ""))
-            
+
             # Norm 1
             ln_params = hidden_size
             layers.append(Layer(f"Block {i} - Norm 1", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # Attention
             head_dim = getattr(config, 'head_dim', hidden_size // num_heads)
             # Standard GQA
@@ -1943,34 +1944,34 @@ class MiniMaxAnalyzer(TransformerAnalyzer):
             k_params = hidden_size * (num_kv_heads * head_dim)
             v_params = hidden_size * (num_kv_heads * head_dim)
             o_params = (num_heads * head_dim) * hidden_size
-            
+
             attn_params = q_params + k_params + v_params + o_params
             layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size), "GQA"))
             total_params += attn_params
-            
+
             # Norm 2
             layers.append(Layer(f"Block {i} - Norm 2", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # MoE FFN
             # Gate
             gate_params = hidden_size * n_local_experts
             # Experts (SwiGLU)
             intermediate_size = getattr(config, 'intermediate_size', 0)
             expert_params = n_local_experts * (3 * hidden_size * intermediate_size)
-            
+
             ffn_params = gate_params + expert_params
             desc = f"MoE (Experts: {n_local_experts}, Active: {active_experts})"
-            
+
             layers.append(Layer(f"Block {i} - FFN", "feedforward", ffn_params, (hidden_size, intermediate_size), desc))
             total_params += ffn_params
-            
+
             layers.append(Layer(f"Block {i}", "block_end", 0, (), ""))
-            
+
         # 3. Final Norm
         layers.append(Layer("Final Norm", "normalization", hidden_size, (hidden_size,)))
         total_params += hidden_size
-        
+
         # 4. Head
         if getattr(config, 'tie_word_embeddings', False):
             head_params = 0
@@ -1980,17 +1981,17 @@ class MiniMaxAnalyzer(TransformerAnalyzer):
             desc = "Untied"
         layers.append(Layer("LM Head", "output", head_params, (hidden_size, vocab_size), desc))
         total_params += head_params
-        
+
         # 5. MTP Modules (Multi-Token Prediction)
         # Assuming MTP modules are extra small decoder blocks or heads
         if getattr(config, 'use_mtp', False):
             num_mtp = getattr(config, 'num_mtp_modules', 0)
-            
+
             # MTP usually shares embedding/head but has own transformer layers?
-            # Or just extra heads? 
+            # Or just extra heads?
             # MiniMax M2 paper/docs might specify. Usually it's like speculative decoding heads.
             # Let's approximate as extra lightweight blocks.
-            
+
             # For visualization, we list them as special layers
             for m in range(num_mtp):
                  # MTP Block
@@ -2019,30 +2020,30 @@ class MiniMaxAnalyzer(TransformerAnalyzer):
 
 class InternS1Analyzer(TransformerAnalyzer):
     """Intern-S1-Pro Analyzer (Multimodal: Text + Vision + TimeSeries)."""
-    
+
     def analyze(self, config: Any) -> Architecture:
         # Intern-S1-Pro is a composite model
         # Main config has "vision_config", "ts_config", "text_config"
-        
+
         # We need to extract the "text_config" (LLM) as the base
         # And attach Vision/TS encoders
-        
+
         text_config = getattr(config, 'text_config', config) # Fallback if direct
         vision_config = getattr(config, 'vision_config', None)
         ts_config = getattr(config, 'ts_config', None)
-        
+
         # Base LLM Analysis (using text_config)
         vocab_size = getattr(text_config, 'vocab_size', 0)
         hidden_size = getattr(text_config, 'hidden_size', 0)
         num_layers = getattr(text_config, 'num_hidden_layers', 0)
         num_heads = getattr(text_config, 'num_attention_heads', 0)
         num_kv_heads = getattr(text_config, 'num_key_value_heads', num_heads)
-        
+
         # MoE?
         # "num_experts": 512, "num_experts_per_tok": 8
         n_experts = getattr(text_config, 'num_experts', 0)
         active_experts = getattr(text_config, 'num_experts_per_tok', 0)
-        
+
         features = ["Intern-S1-Pro"]
         if n_experts > 0:
             features.append("MoE")
@@ -2050,10 +2051,10 @@ class InternS1Analyzer(TransformerAnalyzer):
             features.append("Vision")
         if ts_config:
             features.append("TimeSeries")
-        
+
         layers = []
         total_params = 0
-        
+
         # --- Vision Encoder ---
         if vision_config:
             v_hidden = getattr(vision_config, 'hidden_size', 1024)
@@ -2062,13 +2063,13 @@ class InternS1Analyzer(TransformerAnalyzer):
             v_params = 12 * v_layers * v_hidden * v_hidden
             layers.append(Layer("Vision Encoder", "encoder", v_params, (v_layers, v_hidden), f"ViT-L/{v_layers}"))
             total_params += v_params
-            
+
             # Projector? Usually a linear or MLP
             mm_hidden = getattr(vision_config, 'out_hidden_size', v_hidden)
             proj_params = v_hidden * mm_hidden
             layers.append(Layer("Vision Projector", "adapter", proj_params, (v_hidden, mm_hidden), "Projection"))
             total_params += proj_params
-            
+
         # --- Time Series Encoder ---
         if ts_config:
             ts_hidden = getattr(ts_config, 'd_model', 768)
@@ -2076,14 +2077,14 @@ class InternS1Analyzer(TransformerAnalyzer):
             # Encoder-Decoder structure in TS config?
             # "encoder_layers": 17, "decoder_layers": 4
             ts_dec_layers = getattr(ts_config, 'decoder_layers', 4)
-            
+
             ts_enc_params = 12 * ts_layers * ts_hidden * ts_hidden
             ts_dec_params = 12 * ts_dec_layers * ts_hidden * ts_hidden
-            
+
             ts_params = ts_enc_params + ts_dec_params
             layers.append(Layer("TimeSeries Model", "encoder", ts_params, (ts_layers + ts_dec_layers, ts_hidden), "TS-Transformer"))
             total_params += ts_params
-            
+
             # TS Adapter/Projector
             ts_out = getattr(ts_config, 'ts_adapt_out_dim', 1024)
             ts_proj = ts_hidden * ts_out
@@ -2091,45 +2092,45 @@ class InternS1Analyzer(TransformerAnalyzer):
             total_params += ts_proj
 
         # --- Language Model ---
-        
+
         # 1. Embedding
         emb_params = vocab_size * hidden_size
         layers.append(Layer("Token Embedding", "embedding", emb_params, (vocab_size, hidden_size), f"Vocab: {vocab_size}"))
         total_params += emb_params
-        
+
         # 2. Layers
         for i in range(num_layers):
             layers.append(Layer(f"Block {i}", "block_start", 0, (), ""))
-            
+
             # Norm 1
             ln_params = hidden_size
             layers.append(Layer(f"Block {i} - Norm 1", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # Attention
             head_dim = getattr(text_config, 'head_dim', hidden_size // num_heads)
             q_params = hidden_size * (num_heads * head_dim)
             k_params = hidden_size * (num_kv_heads * head_dim)
             v_params = hidden_size * (num_kv_heads * head_dim)
             o_params = (num_heads * head_dim) * hidden_size
-            
+
             attn_params = q_params + k_params + v_params + o_params
             layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size), "GQA"))
             total_params += attn_params
-            
+
             # Norm 2
             layers.append(Layer(f"Block {i} - Norm 2", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # FFN / MoE
             # InternLM MoE: Gate + Experts
             intermediate_size = getattr(text_config, 'intermediate_size', 0)
             moe_inter_size = getattr(text_config, 'moe_intermediate_size', intermediate_size)
-            
-            # Check if this layer is MoE? 
+
+            # Check if this layer is MoE?
             # "mlp_only_layers": [] -> all MoE? or implied by num_experts > 0
             # Assuming all layers MoE if num_experts > 0
-            
+
             if n_experts > 0:
                 gate_params = hidden_size * n_experts
                 expert_params = n_experts * (3 * hidden_size * moe_inter_size)
@@ -2138,16 +2139,16 @@ class InternS1Analyzer(TransformerAnalyzer):
             else:
                 ffn_params = 3 * hidden_size * intermediate_size
                 desc = f"Dense (Inter: {intermediate_size})"
-            
+
             layers.append(Layer(f"Block {i} - FFN", "feedforward", ffn_params, (hidden_size, moe_inter_size), desc))
             total_params += ffn_params
-            
+
             layers.append(Layer(f"Block {i}", "block_end", 0, (), ""))
-            
+
         # 3. Final Norm
         layers.append(Layer("Final Norm", "normalization", hidden_size, (hidden_size,)))
         total_params += hidden_size
-        
+
         # 4. Head
         if getattr(text_config, 'tie_word_embeddings', False):
             head_params = 0
@@ -2182,7 +2183,7 @@ class InternS1Analyzer(TransformerAnalyzer):
 
 class Qwen35Analyzer(TransformerAnalyzer):
     """Qwen3.5 MoE (A3B) Analyzer."""
-    
+
     def analyze(self, config: Any) -> Architecture:
         def _get(obj: Any, key: str, default: Any = 0) -> Any:
             if isinstance(obj, dict):
@@ -2192,7 +2193,7 @@ class Qwen35Analyzer(TransformerAnalyzer):
         # Qwen3.5 MoE has "text_config" and "vision_config"
         text_config = getattr(config, 'text_config', config)
         vision_config = getattr(config, 'vision_config', None)
-        
+
         # Base
         vocab_size = int(_get(text_config, 'vocab_size', 0) or 0)
         hidden_size = int(_get(text_config, 'hidden_size', 0) or 0)
@@ -2201,23 +2202,23 @@ class Qwen35Analyzer(TransformerAnalyzer):
         if num_heads <= 0 and hidden_size:
             num_heads = 1
         num_kv_heads = int(_get(text_config, 'num_key_value_heads', num_heads) or 0) or num_heads
-        
+
         # MoE
         n_experts = int(_get(text_config, 'num_experts', 0) or 0)
         active_experts = int(_get(text_config, 'num_experts_per_tok', 0) or 0)
-        
+
         # Layer Types (Linear vs Full Attention)
         layer_types = _get(text_config, 'layer_types', []) or []
-        
+
         features = ["Qwen3.5", "MoE"]
         if vision_config:
             features.append("Vision")
         if "linear_attention" in layer_types:
             features.append("Linear Attention (Mamba/SSM?)")
-        
+
         layers = []
         total_params = 0
-        
+
         # --- Vision ---
         if vision_config:
             v_hidden = getattr(vision_config, 'hidden_size', 0)
@@ -2225,25 +2226,25 @@ class Qwen35Analyzer(TransformerAnalyzer):
             v_params = 12 * v_layers * v_hidden * v_hidden # approx
             layers.append(Layer("Vision Encoder", "encoder", v_params, (v_layers, v_hidden), "Qwen-Vision"))
             total_params += v_params
-            
+
         # --- Text ---
         # 1. Embedding
         emb_params = vocab_size * hidden_size
         layers.append(Layer("Token Embedding", "embedding", emb_params, (vocab_size, hidden_size), f"Vocab: {vocab_size}"))
         total_params += emb_params
-        
+
         # 2. Layers
         for i in range(num_layers):
             layers.append(Layer(f"Block {i}", "block_start", 0, (), ""))
-            
+
             # Norm 1
             ln_params = hidden_size
             layers.append(Layer(f"Block {i} - Norm 1", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # Attention (Linear or Full)
             l_type = layer_types[i] if i < len(layer_types) else "full_attention"
-            
+
             head_dim = _get(text_config, 'head_dim', None)
             head_dim = int(head_dim or 0)
             if head_dim <= 0:
@@ -2253,19 +2254,19 @@ class Qwen35Analyzer(TransformerAnalyzer):
             v_params = hidden_size * (num_kv_heads * head_dim)
             o_params = (num_heads * head_dim) * hidden_size
             attn_params = q_params + k_params + v_params + o_params
-            
+
             attn_desc = "Full Attn" if l_type == "full_attention" else "Linear Attn"
             layers.append(Layer(f"Block {i} - Attention", "attention", attn_params, (hidden_size, hidden_size), attn_desc))
             total_params += attn_params
-            
+
             # Norm 2
             layers.append(Layer(f"Block {i} - Norm 2", "normalization", ln_params, (hidden_size,)))
             total_params += ln_params
-            
+
             # MoE FFN
             moe_inter = int(_get(text_config, 'moe_intermediate_size', 0) or 0)
             shared_inter = int(_get(text_config, 'shared_expert_intermediate_size', 0) or 0)
-            
+
             # Gate
             gate_params = hidden_size * n_experts
             # Routed (SwiGLU)
@@ -2273,19 +2274,19 @@ class Qwen35Analyzer(TransformerAnalyzer):
             # Shared (SwiGLU)
             # Is shared expert enabled? usually yes if size > 0
             shared_params = 3 * hidden_size * shared_inter
-            
+
             ffn_params = gate_params + routed_params + shared_params
             desc = f"MoE (Routed: {n_experts}, Active: {active_experts}, Shared Inter: {shared_inter})"
-            
+
             layers.append(Layer(f"Block {i} - FFN", "feedforward", ffn_params, (hidden_size, moe_inter), desc))
             total_params += ffn_params
-            
+
             layers.append(Layer(f"Block {i}", "block_end", 0, (), ""))
-            
+
         # 3. Final Norm
         layers.append(Layer("Final Norm", "normalization", hidden_size, (hidden_size,)))
         total_params += hidden_size
-        
+
         # 4. Head
         if getattr(text_config, 'tie_word_embeddings', False):
             head_params = 0
@@ -2295,7 +2296,7 @@ class Qwen35Analyzer(TransformerAnalyzer):
             desc = "Untied"
         layers.append(Layer("LM Head", "output", head_params, (hidden_size, vocab_size), desc))
         total_params += head_params
-        
+
         return _finalize_architecture(
             Architecture(
                 model_type="qwen3_5_moe",
@@ -2594,7 +2595,7 @@ class AnalyzerRegistry:
         ("retnet", "retnet"),
         ("hyena", "hyena"),
     ]
-    
+
     @classmethod
     def _resolve_key(cls, model_type: str) -> str:
         normalized = str(model_type or "").lower()

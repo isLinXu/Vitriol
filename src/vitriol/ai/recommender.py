@@ -10,9 +10,9 @@ Provides intelligent recommendations for:
 
 import logging
 import time
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,14 @@ class Recommendation:
 class StrategyRecommender:
     """
     Recommends optimal generation strategy.
-    
+
     Considers:
     - Model size and architecture
     - Available hardware
     - Desired compression level
     - Use case requirements
     """
-    
+
     STRATEGY_PROFILES = {
         "ultra": {
             "compression": 0.99,
@@ -84,7 +84,7 @@ class StrategyRecommender:
             "use_cases": ["baseline", "ablation"]
         }
     }
-    
+
     def recommend(
         self,
         model_size_gb: float,
@@ -94,21 +94,21 @@ class StrategyRecommender:
     ) -> Recommendation:
         """
         Recommend strategy based on constraints.
-        
+
         Args:
             model_size_gb: Model size in GB
             available_memory_gb: Available memory in GB
             use_case: Intended use case
             requires_training: Whether training is needed
-            
+
         Returns:
             Recommendation
         """
         scores = {}
-        
+
         for strategy, profile in self.STRATEGY_PROFILES.items():
             score = 0.0
-            
+
             # Memory constraint
             if profile["memory"] == "minimal":
                 score += 1.0
@@ -118,36 +118,36 @@ class StrategyRecommender:
                 score += 0.5
             else:
                 score += 0.2
-            
+
             # Training requirement
             if requires_training and profile["training"]:
                 score += 1.0
             elif requires_training and not profile["training"]:
                 score -= 10.0  # Heavy penalty
-            
+
             # Use case match
             if use_case in profile["use_cases"]:
                 score += 0.5
-            
+
             # Compression preference for large models
             if model_size_gb > 10:
                 score += profile["compression"] * 0.5
-            
+
             scores[strategy] = score
-        
+
         # Select best
         best_strategy = max(scores, key=scores.get)
         best_score = scores[best_strategy]
-        
+
         # Get alternatives
         alternatives = sorted(
             [s for s in scores if s != best_strategy],
             key=lambda s: scores[s],
             reverse=True
         )[:2]
-        
+
         profile = self.STRATEGY_PROFILES[best_strategy]
-        
+
         return Recommendation(
             type=RecommendationType.STRATEGY,
             item=best_strategy,
@@ -162,7 +162,7 @@ class HardwareRecommender:
     """
     Recommends optimal hardware configuration.
     """
-    
+
     def recommend(
         self,
         model_params: int,
@@ -171,20 +171,20 @@ class HardwareRecommender:
     ) -> List[Recommendation]:
         """
         Recommend hardware configuration.
-        
+
         Args:
             model_params: Number of model parameters
             batch_size: Target batch size
             latency_requirement_ms: Latency requirement
-            
+
         Returns:
             List of recommendations
         """
         recommendations = []
-        
+
         # Memory estimation
         model_size_gb = model_params * 2 / (1024**3)  # bfloat16
-        
+
         # GPU recommendation
         if model_size_gb > 40:
             recommendations.append(Recommendation(
@@ -213,7 +213,7 @@ class HardwareRecommender:
                 expected_benefit="Low cost inference",
                 alternatives=[["A10", "CPU"]]
             ))
-        
+
         # CPU recommendation
         if latency_requirement_ms and latency_requirement_ms < 100:
             recommendations.append(Recommendation(
@@ -224,7 +224,7 @@ class HardwareRecommender:
                 expected_benefit="Parallel processing for speed",
                 alternatives=["GPU_acceleration"]
             ))
-        
+
         return recommendations
 
 
@@ -232,7 +232,7 @@ class ParameterRecommender:
     """
     Recommends optimal generation parameters.
     """
-    
+
     def recommend_shard_size(
         self,
         model_size_gb: float,
@@ -241,12 +241,12 @@ class ParameterRecommender:
     ) -> Recommendation:
         """
         Recommend shard size.
-        
+
         Args:
             model_size_gb: Model size in GB
             disk_speed_mbps: Disk write speed
             network_speed_mbps: Network speed (if distributed)
-            
+
         Returns:
             Recommendation
         """
@@ -263,13 +263,13 @@ class ParameterRecommender:
             shard_size = "500MB"
             confidence = 0.85
             reason = "Slow HDD requires smaller shards"
-        
+
         # Adjust for network if distributed
         if network_speed_mbps:
             if network_speed_mbps < 100:  # Slow network
                 shard_size = "1GB"
                 reason += ", adjusted for slow network"
-        
+
         return Recommendation(
             type=RecommendationType.PARAMETERS,
             item=shard_size,
@@ -278,7 +278,7 @@ class ParameterRecommender:
             expected_benefit="Optimal I/O performance",
             alternatives=["2GB", "1GB"] if shard_size == "5GB" else ["5GB", "1GB"]
         )
-    
+
     def recommend_parallel_workers(
         self,
         cpu_count: int,
@@ -286,11 +286,11 @@ class ParameterRecommender:
     ) -> Recommendation:
         """
         Recommend number of parallel workers.
-        
+
         Args:
             cpu_count: Number of CPUs
             io_bound: Whether task is I/O bound
-            
+
         Returns:
             Recommendation
         """
@@ -304,7 +304,7 @@ class ParameterRecommender:
             workers = max(1, cpu_count - 1)
             confidence = 0.95
             reason = "CPU bound tasks limited by core count"
-        
+
         return Recommendation(
             type=RecommendationType.PARAMETERS,
             item=str(workers),
@@ -318,15 +318,15 @@ class ParameterRecommender:
 class VitriolRecommender:
     """
     Main recommendation engine.
-    
+
     Aggregates recommendations from all sub-recommenders.
     """
-    
+
     def __init__(self):
         self.strategy = StrategyRecommender()
         self.hardware = HardwareRecommender()
         self.parameters = ParameterRecommender()
-    
+
     def recommend_all(
         self,
         model_id: str,
@@ -337,26 +337,26 @@ class VitriolRecommender:
     ) -> Dict[str, Any]:
         """
         Get all recommendations.
-        
+
         Args:
             model_id: Model identifier
             model_params: Number of parameters
             available_memory_gb: Available memory
             use_case: Intended use case
             **kwargs: Additional context
-            
+
         Returns:
             Complete recommendation set
         """
         model_size_gb = model_params * 2 / (1024**3)
-        
+
         recommendations = {
             "model_id": model_id,
             "model_size_gb": round(model_size_gb, 2),
             "timestamp": time.time(),
             "recommendations": []
         }
-        
+
         # Strategy recommendation
         strategy_rec = self.strategy.recommend(
             model_size_gb=model_size_gb,
@@ -372,7 +372,7 @@ class VitriolRecommender:
             "expected_benefit": strategy_rec.expected_benefit,
             "alternatives": strategy_rec.alternatives
         })
-        
+
         # Hardware recommendations
         hardware_recs = self.hardware.recommend(
             model_params=model_params,
@@ -388,7 +388,7 @@ class VitriolRecommender:
             }
             for rec in hardware_recs
         ])
-        
+
         # Parameter recommendations
         shard_rec = self.parameters.recommend_shard_size(
             model_size_gb=model_size_gb,
@@ -401,7 +401,7 @@ class VitriolRecommender:
             "confidence": round(shard_rec.confidence, 2),
             "reason": shard_rec.reason
         })
-        
+
         workers_rec = self.parameters.recommend_parallel_workers(
             cpu_count=kwargs.get("cpu_count", 4)
         )
@@ -412,9 +412,9 @@ class VitriolRecommender:
             "confidence": round(workers_rec.confidence, 2),
             "reason": workers_rec.reason
         })
-        
+
         return recommendations
-    
+
     def explain_recommendation(
         self,
         recommendation_type: str,
@@ -422,16 +422,16 @@ class VitriolRecommender:
     ) -> str:
         """
         Explain why a recommendation was made.
-        
+
         Args:
             recommendation_type: Type of recommendation
             choice: The chosen option
-            
+
         Returns:
             Human-readable explanation
         """
         explanations = {
-            ("strategy", "ultra"): 
+            ("strategy", "ultra"):
                 "Ultra strategy selected for maximum compression. "
                 "Uses stride=0 tensors to achieve 99%+ size reduction. "
                 "Best for storage and transfer, not for training.",
@@ -444,7 +444,7 @@ class VitriolRecommender:
                 "Uses small random values for reasonable initialization. "
                 "Good for development and experimentation.",
         }
-        
+
         return explanations.get(
             (recommendation_type, choice),
             f"{choice} is recommended based on your requirements."

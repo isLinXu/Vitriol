@@ -1,18 +1,18 @@
 
-from pathlib import Path
-from typing import Dict, Any, Optional
 import json
 import logging
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 class IncrementalGenerator:
     """Support incremental generation and checkpointing"""
-    
+
     def __init__(self, output_dir: str):
         self.output_dir = output_dir
         self.checkpoint_file = Path(output_dir) / '.vitriol_checkpoint.json'
-        
+
     def save_checkpoint(self, state: Dict[str, Any]):
         """Save generation progress"""
         try:
@@ -21,7 +21,7 @@ class IncrementalGenerator:
                 json.dump(state, f)
         except Exception as e:
             logger.warning(f"Failed to save checkpoint: {e}")
-            
+
     def load_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Load previous progress"""
         if self.checkpoint_file.exists():
@@ -32,7 +32,7 @@ class IncrementalGenerator:
                 logger.warning(f"Failed to load checkpoint: {e}")
                 return None
         return None
-        
+
     def clear_checkpoint(self):
         """Remove checkpoint file after completion"""
         if self.checkpoint_file.exists():

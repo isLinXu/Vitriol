@@ -6,12 +6,11 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 import tempfile
-import shutil
 import traceback
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # ---------------------------------------------------------------------------
@@ -50,6 +49,70 @@ _ROPE_DEFAULTS: Dict[str, Any] = {
     "rope_theta": 10000.0,
 }
 
+_CUSTOM_CODE_PREFIXES = (
+    "configuration_",
+    "modeling_",
+    "tokenization_",
+    "processing_",
+    "image_processing_",
+    "feature_extraction_",
+)
+_CUSTOM_ASSET_EXTENSIONS = (
+    ".json",
+    ".txt",
+    ".model",
+    ".spm",
+    ".tiktoken",
+    ".tokens",
+    ".vocab",
+    ".merges",
+    ".yaml",
+    ".yml",
+)
+_BLOCKED_CUSTOM_ASSET_EXTENSIONS = (
+    ".bin",
+    ".safetensors",
+    ".pt",
+    ".pth",
+    ".msgpack",
+    ".h5",
+    ".pkl",
+    ".pickle",
+    ".so",
+    ".dylib",
+    ".dll",
+    ".sh",
+    ".bash",
+    ".zsh",
+)
+_CUSTOM_CODE_MAX_FILES_ENV = "VITRIOL_CUSTOM_CODE_MAX_FILES"
+_CUSTOM_CODE_MAX_PY_BYTES_ENV = "VITRIOL_CUSTOM_CODE_MAX_PY_BYTES"
+_CUSTOM_CODE_MAX_ASSET_BYTES_ENV = "VITRIOL_CUSTOM_CODE_MAX_ASSET_BYTES"
+_CUSTOM_CODE_DEFAULT_MAX_FILES = 32
+_CUSTOM_CODE_DEFAULT_MAX_PY_BYTES = 1 * 1024 * 1024
+_CUSTOM_CODE_DEFAULT_MAX_ASSET_BYTES = 50 * 1024 * 1024
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+    return value
+
+
+def _custom_repo_file_size_limit(file_name: str) -> int:
+    if file_name.lower().endswith(".py"):
+        return _positive_int_env(_CUSTOM_CODE_MAX_PY_BYTES_ENV, _CUSTOM_CODE_DEFAULT_MAX_PY_BYTES)
+    return _positive_int_env(_CUSTOM_CODE_MAX_ASSET_BYTES_ENV, _CUSTOM_CODE_DEFAULT_MAX_ASSET_BYTES)
+
 
 @dataclass
 class GenerationResult:
@@ -74,7 +137,7 @@ def _set_missing(obj, **kv) -> None:
         if not hasattr(obj, k):
             try:
                 setattr(obj, k, v)
-            except Exception as e:
+            except (AttributeError, TypeError) as e:
                 logger.debug("Could not set missing attribute %s on %s: %s", k, type(obj).__name__, e)
 
 
@@ -129,7 +192,7 @@ def _inject_recursive(obj, attr: str, val: Any,
     if not hasattr(obj, attr):
         try:
             setattr(obj, attr, val)
-        except Exception as e:
+        except (AttributeError, TypeError) as e:
             logger.debug("Could not inject attribute %s on %s: %s", attr, type(obj).__name__, e)
 
     if not hasattr(obj, "__dict__"):
@@ -156,7 +219,7 @@ def _copy_safe_attrs(src, dst) -> None:
         if val is not None:
             try:
                 setattr(dst, key, val)
-            except Exception as e:
+            except (AttributeError, TypeError) as e:
                 logger.debug("Could not copy safe attr %s to %s: %s", key, type(dst).__name__, e)
 
 
@@ -170,7 +233,7 @@ def _build_fallback_config(cfg_name: str, cls_name: str, hf_config):
     fb.rope_theta   = 10000.0
     fb.rope_scaling = None
     if not getattr(fb, "rope_parameters", None):
-        setattr(fb, "rope_parameters", dict(_ROPE_DEFAULTS))
+        fb.rope_parameters = dict(_ROPE_DEFAULTS)
     logger.info("Fallback: initialising %s", cls_name)
     return mdl_cls(fb)
 
@@ -192,12 +255,12 @@ def _extract_shard_id(filename: str, fallback_idx: int) -> int:
 # § 3  LATE IMPORTS (project-internal; after patches)
 # ═════════════════════════════════════════════════════════════════════════════
 
-from ..config.manager import GenerationConfig            # noqa: E402
-from ..adapters.registry import AdapterRegistry          # noqa: E402
-from ..strategies import get_strategy                    # noqa: E402
+from ..adapters.registry import AdapterRegistry  # noqa: E402
+from ..config.manager import GenerationConfig  # noqa: E402
+from ..strategies import get_strategy  # noqa: E402
 from ..utils.exceptions import GenerationError, ModelNotSupportedError  # noqa: E402
-from .incremental import IncrementalGenerator            # noqa: E402
-
+from ..utils.size import parse_size_to_bytes  # noqa: E402
+from .incremental import IncrementalGenerator  # noqa: E402
 
 # ═════════════════════════════════════════════════════════════════════════════
 # § 4  MinimalWeightGenerator
@@ -213,7 +276,7 @@ class MinimalWeightGenerator:
         self,
         model_id: str,
         output_dir: str,
-        config: Optional["GenerationConfig"] = None,
+        config: Optional[GenerationConfig] = None,
         save_dummy_config: bool = False,
         shrink_config: Optional[bool] = None,
         **kwargs,
@@ -262,27 +325,7 @@ class MinimalWeightGenerator:
         Raises:
             ValueError: If size_str cannot be parsed
         """
-        if not size_str or not isinstance(size_str, str):
-            raise ValueError(f"Invalid size string: {size_str!r}")
-        upper = size_str.upper().strip()
-        for unit, mult in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
-            if upper.endswith(unit):
-                try:
-                    val = float(size_str[:-2])
-                except ValueError:
-                    raise ValueError(
-                        f"Cannot parse numeric value from size string: {size_str!r}"
-                    )
-                if val < 0:
-                    raise ValueError(f"Negative size not allowed: {size_str!r}")
-                return int(val * mult)
-        try:
-            result = int(size_str)
-        except ValueError:
-            raise ValueError(f"Cannot parse size string: {size_str!r}")
-        if result < 0:
-            raise ValueError(f"Negative size not allowed: {size_str!r}")
-        return result
+        return parse_size_to_bytes(size_str)
 
     @staticmethod
     def _get_dtype_size(dtype: torch.dtype) -> int:
@@ -709,12 +752,23 @@ class MinimalWeightGenerator:
     def _patch_remote_classes(self, hf_config) -> None:
         if not hasattr(hf_config, "auto_map"):
             return
+        if not getattr(self.config.security, "trust_remote_code", False):
+            logger.debug("Skipping dynamic module patching because trust_remote_code is disabled.")
+            return
+        local_files_only = bool(
+            getattr(self.config.security, "local_files_only", False)
+            or not getattr(self.config.security, "allow_network", True)
+        )
         for key in ("AutoModelForCausalLM", "AutoModel"):
             if key not in hf_config.auto_map:
                 continue
             try:
                 from transformers.dynamic_module_utils import get_class_from_dynamic_module
-                cls = get_class_from_dynamic_module(hf_config.auto_map[key], self.model_id)
+                cls = get_class_from_dynamic_module(
+                    hf_config.auto_map[key],
+                    self.model_id,
+                    local_files_only=local_files_only,
+                )
                 mod = sys.modules[cls.__module__]
             except Exception as e:
                 logger.warning("Cannot load dynamic module: %s", e)
@@ -835,8 +889,9 @@ class MinimalWeightGenerator:
         #    e.g. "gemma4" → try "gemma3", "gemma2", "gemma"
         #         "qwen3_5_moe" → try "qwen3_moe", "qwen2_moe"
         try:
-            from transformers.models.auto.configuration_auto import CONFIG_MAPPING
             import re
+
+            from transformers.models.auto.configuration_auto import CONFIG_MAPPING
             # Try progressively shorter version suffixes
             base = re.sub(r'[\d_.]+$', '', original_type)  # "gemma4" → "gemma"
             if base and base != original_type:
@@ -1225,27 +1280,71 @@ class MinimalWeightGenerator:
                 or not getattr(self.config.security, "allow_network", True)
             ):
                 return
-            from huggingface_hub import list_repo_files, hf_hub_download
+            from huggingface_hub import hf_hub_download, list_repo_files
             repo_id = self.model_id
             # List all files in the repo
             files = list_repo_files(repo_id)
-            # Filter for python files (usually modeling, configuration, tokenization)
-            # Also include any files in custom subdirectories (like encoding/, inference/) except heavy weights
+            auto_map_modules = self._custom_code_modules_from_saved_config()
+            # Filter for known HuggingFace custom-code module names and small tokenizer/config assets.
             target_files = []
             for f in files:
-                if f.endswith(".py"):
+                if self._is_allowed_custom_repo_file(f):
+                    if (
+                        f.lower().endswith(".py")
+                        and auto_map_modules is not None
+                        and not self._custom_code_file_matches_auto_map(f, auto_map_modules)
+                    ):
+                        logger.warning("Skipping custom Python file not referenced by auto_map: %s", f)
+                        continue
                     target_files.append(f)
-                elif "/" in f and not any(f.endswith(ext) for ext in (".bin", ".safetensors", ".pt", ".pth", ".msgpack", ".h5")):
-                    target_files.append(f)
-            
+                elif f.endswith(".py"):
+                    logger.warning("Skipping non-whitelisted custom Python file: %s", f)
+
             if not target_files:
                 return
-                
+            max_files = _positive_int_env(_CUSTOM_CODE_MAX_FILES_ENV, _CUSTOM_CODE_DEFAULT_MAX_FILES)
+            if len(target_files) > max_files:
+                logger.warning(
+                    "Refusing to sync all custom-code files: %d allowed files exceeds limit %d; "
+                    "syncing the first %d only.",
+                    len(target_files),
+                    max_files,
+                    max_files,
+                )
+                target_files = target_files[:max_files]
+
             logger.info("Downloading %d custom code/asset files for trust_remote_code...", len(target_files))
+            # [Security] Anchor every destination path under self.output_dir to
+            # block path-traversal payloads coming from a malicious HF repo
+            # listing (e.g. filenames like "../../etc/passwd" or absolute paths).
+            real_root = os.path.realpath(self.output_dir)
             for file_name in target_files:
                 try:
+                    if os.path.isabs(file_name) or ".." in file_name.replace("\\", "/").split("/"):
+                        logger.warning(
+                            "Refusing suspicious custom-code filename (path traversal): %s",
+                            file_name,
+                        )
+                        continue
                     file_path = hf_hub_download(repo_id=repo_id, filename=file_name)
+                    file_size = os.path.getsize(file_path)
+                    max_file_size = _custom_repo_file_size_limit(file_name)
+                    if file_size > max_file_size:
+                        logger.warning(
+                            "Skipping oversized custom-code file %s (%d bytes > %d bytes)",
+                            file_name,
+                            file_size,
+                            max_file_size,
+                        )
+                        continue
                     dest_path = os.path.join(self.output_dir, file_name)
+                    real_dest = os.path.realpath(dest_path)
+                    if not (real_dest == real_root or real_dest.startswith(real_root + os.sep)):
+                        logger.warning(
+                            "Refusing custom-code filename that escapes output_dir: %s",
+                            file_name,
+                        )
+                        continue
                     dest_dir = os.path.dirname(dest_path)
                     if dest_dir:
                         os.makedirs(dest_dir, exist_ok=True)
@@ -1255,6 +1354,78 @@ class MinimalWeightGenerator:
                     logger.warning("Failed to copy %s: %s", file_name, e)
         except Exception as e:
             logger.warning("Could not sync custom code files: %s", e)
+
+    def _custom_code_modules_from_saved_config(self) -> Set[str] | None:
+        """Return Python modules referenced by saved ``auto_map`` metadata, if present."""
+        for config_name in ("meta-config.json", "config.json"):
+            config_path = os.path.join(self.output_dir, config_name)
+            if not os.path.exists(config_path):
+                continue
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    config_data = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                logger.debug("Could not inspect %s for auto_map custom code: %s", config_path, e)
+                continue
+            modules = self._extract_auto_map_modules(config_data.get("auto_map"))
+            if modules:
+                return modules
+        return None
+
+    @staticmethod
+    def _extract_auto_map_modules(auto_map: Any) -> Set[str]:
+        """Extract importable module names from HuggingFace ``auto_map`` metadata."""
+        modules: Set[str] = set()
+
+        def visit(value: Any) -> None:
+            if isinstance(value, str):
+                ref = value.strip()
+                if "." not in ref:
+                    return
+                module_name = ref.rsplit(".", 1)[0].replace("\\", ".").replace("/", ".").strip(".")
+                if module_name and all(part and part != ".." for part in module_name.split(".")):
+                    modules.add(module_name)
+                return
+            if isinstance(value, dict):
+                for item in value.values():
+                    visit(item)
+                return
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    visit(item)
+
+        visit(auto_map)
+        return modules
+
+    @staticmethod
+    def _custom_code_file_matches_auto_map(file_name: str, auto_map_modules: Set[str]) -> bool:
+        normalized = file_name.replace("\\", "/")
+        if not normalized.lower().endswith(".py"):
+            return False
+        module_path = normalized[:-3].replace("/", ".").strip(".")
+        module_basenames = {module.rsplit(".", 1)[-1] for module in auto_map_modules}
+        return module_path in auto_map_modules or module_path.rsplit(".", 1)[-1] in module_basenames
+
+    @staticmethod
+    def _is_allowed_custom_repo_file(file_name: str) -> bool:
+        """Return whether a repo file is safe enough to mirror into output_dir."""
+        normalized = file_name.replace("\\", "/")
+        if os.path.isabs(file_name):
+            return False
+        parts = normalized.split("/")
+        if not parts or any(part in {"", ".."} for part in parts):
+            return False
+
+        base_name = parts[-1]
+        lower_name = base_name.lower()
+        if lower_name.endswith(".py"):
+            return base_name.startswith(_CUSTOM_CODE_PREFIXES)
+
+        if "/" not in normalized:
+            return False
+        if lower_name.endswith(_BLOCKED_CUSTOM_ASSET_EXTENSIONS):
+            return False
+        return lower_name.endswith(_CUSTOM_ASSET_EXTENSIONS)
 
     # ──────────────────────────────────────────────────────────────────────
     # Shard I/O
@@ -1348,227 +1519,15 @@ class MinimalWeightGenerator:
                     idx_name, len(final), total_shards)
 
     def _write_manifest(self) -> None:
-        try:
-            import platform
-            import vitriol
-            import transformers
-            from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
+        """Write ``vitriol-manifest.json``.
 
-            def _hash_file(p: str) -> Optional[str]:
-                if not p or not os.path.exists(p):
-                    return None
-                h = sha256()
-                with open(p, "rb") as f:
-                    for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                        h.update(chunk)
-                return h.hexdigest()
+        Delegated to :mod:`vitriol.core.manifest_writer` to keep this module
+        focused on generation orchestration. The wrapper preserves the legacy
+        method name for any tests or subclasses that may still call it.
+        """
+        from .manifest_writer import write_manifest
 
-            config_path = os.path.join(self.output_dir, "config.json")
-            meta_path = os.path.join(self.output_dir, "meta-config.json")
-            reconcile_path = os.path.join(self.output_dir, "vitriol-reconcile.json")
-
-            prefix = self.strategy.get_shard_prefix()
-            idx_name = (
-                f"{prefix}.bin.index.json"
-                if self.strategy.storage_format == "pytorch"
-                else "model.safetensors.index.json"
-            )
-            idx_path = os.path.join(self.output_dir, idx_name)
-
-            idx_data = None
-            if os.path.exists(idx_path):
-                try:
-                    with open(idx_path) as f:
-                        idx_data = json.load(f)
-                except Exception as e:
-                    logger.debug("Failed to read index file %s: %s", idx_path, e)
-                    idx_data = None
-
-            weight_map = (idx_data or {}).get("weight_map", {})
-            unique_shards = sorted(set(weight_map.values())) if isinstance(weight_map, dict) else []
-
-            active_dims = None
-            try:
-                if os.path.exists(config_path):
-                    with open(config_path) as f:
-                        active_cfg = json.load(f)
-                    active_dims = {
-                        k: active_cfg.get(k)
-                        for k in (
-                            "vocab_size",
-                            "hidden_size",
-                            "intermediate_size",
-                            "num_hidden_layers",
-                            "num_attention_heads",
-                            "num_key_value_heads",
-                            "head_dim",
-                            "num_experts",
-                            "num_experts_per_tok",
-                        )
-                    }
-            except Exception as e:
-                logger.debug("Active dims extraction failed: %s", e)
-                active_dims = None
-
-            reconcile_info = None
-            try:
-                if os.path.exists(reconcile_path):
-                    with open(reconcile_path) as f:
-                        r = json.load(f)
-                    if isinstance(r, dict):
-                        _diff_raw = r.get("diff")
-                        diff_obj = _diff_raw if isinstance(_diff_raw, dict) else {}
-                        reconcile_info = {
-                            "patched": bool(r.get("patched")),
-                            "diff_keys": sorted(diff_obj.keys()),
-                            "diff_count": len(diff_obj),
-                        }
-            except Exception as e:
-                logger.debug("Reconcile info extraction failed: %s", e)
-                reconcile_info = None
-
-            loadability: Dict[str, Any] = {
-                "checked": False,
-                "ok": None,
-                "loader": None,
-                "error": None,
-            }
-            try:
-                loadability["checked"] = True
-                trust_rc = bool(getattr(self.config.security, "trust_remote_code", True))
-                local_only = True
-                last_err = None
-                # Common kwargs for manifest loadability check
-                _load_kwargs: Dict[str, Any] = dict(
-                    local_files_only=local_only,
-                    trust_remote_code=trust_rc,
-                    low_cpu_mem_usage=True,
-                    torch_dtype="auto",
-                    device_map="cpu",
-                )
-                for loader, name in (
-                    (AutoModelForCausalLM, "AutoModelForCausalLM"),
-                    (AutoModelForSeq2SeqLM, "AutoModelForSeq2SeqLM"),
-                    (AutoModel, "AutoModel"),
-                ):
-                    try:
-                        loader.from_pretrained(self.output_dir, **_load_kwargs)
-                        loadability["ok"] = True
-                        loadability["loader"] = name
-                        break
-                    except Exception as e:
-                        last_err = e
-                        err_str = str(e).lower()
-                        # Retry with ignore_mismatched_sizes for size mismatches
-                        if "size mismatch" in err_str or "mismatch" in err_str:
-                            try:
-                                loader.from_pretrained(
-                                    self.output_dir,
-                                    **_load_kwargs,
-                                    ignore_mismatched_sizes=True,
-                                )
-                                loadability["ok"] = True
-                                loadability["loader"] = f"{name} (ignore_mismatched)"
-                                break
-                            except Exception as e2:
-                                last_err = e2
-                if loadability["ok"] is not True:
-                    loadability["ok"] = False
-                    loadability["error"] = str(last_err)[:500] if last_err else "unknown"
-            except Exception as e:
-                loadability["checked"] = True
-                loadability["ok"] = False
-                loadability["error"] = str(e)[:500]
-
-            meta_equals_source = None
-            meta_source_path = None
-            try:
-                if os.path.isdir(self.model_id):
-                    p = os.path.join(self.model_id, "config.json")
-                    if os.path.exists(p):
-                        meta_source_path = p
-                else:
-                    meta_source_path = cached_file(
-                        self.model_id,
-                        "config.json",
-                        _raise_exceptions_for_missing_entries=False,
-                        local_files_only=bool(
-                            getattr(self.config.security, "local_files_only", False)
-                            or not getattr(self.config.security, "allow_network", True)
-                        ),
-                    )
-                if meta_source_path and os.path.exists(meta_source_path) and os.path.exists(meta_path):
-                    meta_equals_source = _hash_file(meta_source_path) == _hash_file(meta_path)
-            except Exception as e:
-                logger.debug("meta-config comparison failed: %s", e)
-                meta_equals_source = None
-
-            from .manifest import build_manifest
-
-            security_context = getattr(self.config, "security_context", None)
-
-            manifest = build_manifest(
-                schema_version=2,
-                generated_at=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                source={
-                    "model_id": self.model_id,
-                    "source_config_sha256": _hash_file(meta_path),
-                    "meta_config_equals_source_config": meta_equals_source,
-                },
-                environment={
-                    "vitriol_version": getattr(vitriol, "__version__", None),
-                    "python": sys.version.split()[0],
-                    "platform": platform.platform(),
-                    "torch": getattr(torch, "__version__", None),
-                    "transformers": getattr(transformers, "__version__", None),
-                },
-                security={
-                    "trust_remote_code": bool(getattr(self.config.security, "trust_remote_code", True)),
-                    "allow_network": bool(getattr(self.config.security, "allow_network", True)),
-                    "local_files_only": bool(getattr(self.config.security, "local_files_only", False)),
-                },
-                security_context=security_context,
-                generation={
-                    "strategy": self.config.strategy,
-                    "shrink_config": bool(self.shrink_config),
-                    "dtype": self.config.dtype,
-                    "max_shard_size": self.config.max_shard_size,
-                    "storage_format": self.strategy.storage_format,
-                    "file_extension": self.strategy.file_extension,
-                    "active_dims": active_dims,
-                },
-                artifacts={
-                    "config_json": {"sha256": _hash_file(config_path)},
-                    "meta_config_json": {"sha256": _hash_file(meta_path)},
-                    "reconcile": {
-                        "path": "vitriol-reconcile.json" if os.path.exists(reconcile_path) else None,
-                        "sha256": _hash_file(reconcile_path),
-                        "info": reconcile_info,
-                    },
-                    "index": {
-                        "name": idx_name if os.path.exists(idx_path) else None,
-                        "sha256": _hash_file(idx_path),
-                        "total_size": (idx_data or {}).get("metadata", {}).get("total_size"),
-                        "weight_entries": len(weight_map) if isinstance(weight_map, dict) else None,
-                        "unique_shards": len(unique_shards),
-                    },
-                    "viz": {
-                        "architecture_html": os.path.exists(os.path.join(self.output_dir, "architecture.html")),
-                        "architecture_png": os.path.exists(os.path.join(self.output_dir, "architecture.png")),
-                        "architecture_detail_png": os.path.exists(os.path.join(self.output_dir, "architecture_detail.png")),
-                    },
-                    "tokenizer": {
-                        "tokenizer_json": os.path.exists(os.path.join(self.output_dir, "tokenizer.json")),
-                        "tokenizer_config_json": os.path.exists(os.path.join(self.output_dir, "tokenizer_config.json")),
-                    },
-                },
-                loadability=loadability,
-            )
-
-            with open(os.path.join(self.output_dir, "vitriol-manifest.json"), "w") as f:
-                json.dump(manifest, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.warning("Manifest write failed: %s", e)
+        write_manifest(self)
 
     # ──────────────────────────────────────────────────────────────────────
     # Config / tokenizer save
@@ -1776,14 +1735,17 @@ class MinimalWeightGenerator:
             shard_path = os.path.join(self.output_dir, shard_name)
             if os.path.exists(shard_path):
                 try:
-                    # [Security hardening] Prefer weights_only=True for torch.load
-                    # to prevent arbitrary code execution via pickle deserialization.
-                    # Fall back to weights_only=False only if the shard contains
-                    # non-tensor objects (unlikely for weight shards).
                     try:
                         d = torch.load(shard_path, map_location="cpu", weights_only=True)
-                    except Exception:
-                        d = torch.load(shard_path, map_location="cpu", weights_only=False)
+                    except Exception as e:
+                        logger.warning(
+                            "Skipping shape extraction for %s: torch.load(weights_only=True) failed "
+                            "and unsafe pickle fallback is disabled. Convert this shard to safetensors "
+                            "or regenerate it. Error: %s",
+                            shard_path,
+                            e,
+                        )
+                        continue
                     for k, v in d.items():
                         shapes[k] = tuple(v.shape)
                 except Exception as e:
@@ -1972,7 +1934,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, Pretra
 
 path = "{self.output_dir}"
 tok = AutoTokenizer.from_pretrained(path, local_files_only=True)
-trust_remote_code = True  # set False to disable remote code execution
+trust_remote_code = False  # set True only for trusted custom-code model repos
 cfg = AutoConfig.from_pretrained(path, local_files_only=True, trust_remote_code=trust_remote_code)
 for k in ("text_config", "vision_config", "encoder_config", "decoder_config"):
     v = getattr(cfg, k, None)

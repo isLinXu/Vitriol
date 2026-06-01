@@ -1,4 +1,5 @@
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,264 @@ def test_copy_custom_code_files_respects_security_offline_flags(tmp_path: Path, 
     g = MinimalWeightGenerator(model_id=str(model_dir), output_dir=str(out_dir), config=cfg)
     g._copy_custom_code_files()
     assert called["list_repo_files"] == 0
+
+
+def test_copy_custom_code_files_uses_filename_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    out_dir = tmp_path / "out"
+    source_dir = tmp_path / "source"
+    out_dir.mkdir()
+    source_dir.mkdir()
+
+    repo_files = [
+        "modeling_demo.py",
+        "configuration_demo.py",
+        "tokenization_demo.py",
+        "evil.py",
+        "scripts/post_install.py",
+        "tokenizer/tokenizer.json",
+        "tokenizer/payload.sh",
+        "../modeling_escape.py",
+    ]
+    downloads: list[str] = []
+
+    def _list_repo_files(_repo_id: str):
+        return list(repo_files)
+
+    def _hf_hub_download(*, repo_id: str, filename: str):
+        downloads.append(filename)
+        source_path = source_dir / filename.replace("/", "__")
+        source_path.write_text(f"{repo_id}:{filename}", encoding="utf-8")
+        return str(source_path)
+
+    monkeypatch.setattr("huggingface_hub.list_repo_files", _list_repo_files, raising=False)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _hf_hub_download, raising=False)
+
+    cfg = GenerationConfig()
+    cfg.security = SecurityOptions(
+        trust_remote_code=True,
+        allow_network=True,
+        local_files_only=False,
+    )
+    g = MinimalWeightGenerator(model_id="demo/model", output_dir=str(out_dir), config=cfg)
+    g._copy_custom_code_files()
+
+    assert (out_dir / "modeling_demo.py").exists()
+    assert (out_dir / "configuration_demo.py").exists()
+    assert (out_dir / "tokenization_demo.py").exists()
+    assert (out_dir / "tokenizer" / "tokenizer.json").exists()
+    assert not (out_dir / "evil.py").exists()
+    assert not (out_dir / "scripts" / "post_install.py").exists()
+    assert not (out_dir / "tokenizer" / "payload.sh").exists()
+    assert not (tmp_path / "modeling_escape.py").exists()
+    assert downloads == [
+        "modeling_demo.py",
+        "configuration_demo.py",
+        "tokenization_demo.py",
+        "tokenizer/tokenizer.json",
+    ]
+
+
+def test_copy_custom_code_files_scopes_python_files_to_auto_map(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    source_dir = tmp_path / "source"
+    out_dir.mkdir()
+    source_dir.mkdir()
+    (out_dir / "meta-config.json").write_text(
+        json.dumps(
+            {
+                "auto_map": {
+                    "AutoConfig": "configuration_demo.DemoConfig",
+                    "AutoModel": "modeling_demo.DemoModel",
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    repo_files = [
+        "modeling_demo.py",
+        "modeling_unused.py",
+        "configuration_demo.py",
+        "tokenization_unused.py",
+        "tokenizer/tokenizer.json",
+    ]
+    downloads: list[str] = []
+
+    def _list_repo_files(_repo_id: str):
+        return list(repo_files)
+
+    def _hf_hub_download(*, repo_id: str, filename: str):
+        downloads.append(filename)
+        source_path = source_dir / filename.replace("/", "__")
+        source_path.write_text(f"{repo_id}:{filename}", encoding="utf-8")
+        return str(source_path)
+
+    monkeypatch.setattr("huggingface_hub.list_repo_files", _list_repo_files, raising=False)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _hf_hub_download, raising=False)
+
+    cfg = GenerationConfig()
+    cfg.security = SecurityOptions(
+        trust_remote_code=True,
+        allow_network=True,
+        local_files_only=False,
+    )
+    g = MinimalWeightGenerator(model_id="demo/model", output_dir=str(out_dir), config=cfg)
+    g._copy_custom_code_files()
+
+    assert (out_dir / "modeling_demo.py").exists()
+    assert (out_dir / "configuration_demo.py").exists()
+    assert (out_dir / "tokenizer" / "tokenizer.json").exists()
+    assert not (out_dir / "modeling_unused.py").exists()
+    assert not (out_dir / "tokenization_unused.py").exists()
+    assert downloads == [
+        "modeling_demo.py",
+        "configuration_demo.py",
+        "tokenizer/tokenizer.json",
+    ]
+
+
+def test_copy_custom_code_files_honors_file_count_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    source_dir = tmp_path / "source"
+    out_dir.mkdir()
+    source_dir.mkdir()
+    monkeypatch.setenv("VITRIOL_CUSTOM_CODE_MAX_FILES", "2")
+
+    repo_files = [
+        "modeling_demo.py",
+        "configuration_demo.py",
+        "tokenization_demo.py",
+    ]
+    downloads: list[str] = []
+
+    def _list_repo_files(_repo_id: str):
+        return list(repo_files)
+
+    def _hf_hub_download(*, repo_id: str, filename: str):
+        downloads.append(filename)
+        source_path = source_dir / filename
+        source_path.write_text(f"{repo_id}:{filename}", encoding="utf-8")
+        return str(source_path)
+
+    monkeypatch.setattr("huggingface_hub.list_repo_files", _list_repo_files, raising=False)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _hf_hub_download, raising=False)
+
+    cfg = GenerationConfig()
+    cfg.security = SecurityOptions(
+        trust_remote_code=True,
+        allow_network=True,
+        local_files_only=False,
+    )
+    g = MinimalWeightGenerator(model_id="demo/model", output_dir=str(out_dir), config=cfg)
+    g._copy_custom_code_files()
+
+    assert (out_dir / "modeling_demo.py").exists()
+    assert (out_dir / "configuration_demo.py").exists()
+    assert not (out_dir / "tokenization_demo.py").exists()
+    assert downloads == ["modeling_demo.py", "configuration_demo.py"]
+
+
+def test_copy_custom_code_files_skips_oversized_python_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    source_dir = tmp_path / "source"
+    out_dir.mkdir()
+    source_dir.mkdir()
+    monkeypatch.setenv("VITRIOL_CUSTOM_CODE_MAX_PY_BYTES", "4")
+
+    def _list_repo_files(_repo_id: str):
+        return ["modeling_demo.py"]
+
+    def _hf_hub_download(*, repo_id: str, filename: str):
+        source_path = source_dir / filename
+        source_path.write_text("12345", encoding="utf-8")
+        return str(source_path)
+
+    monkeypatch.setattr("huggingface_hub.list_repo_files", _list_repo_files, raising=False)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _hf_hub_download, raising=False)
+
+    cfg = GenerationConfig()
+    cfg.security = SecurityOptions(
+        trust_remote_code=True,
+        allow_network=True,
+        local_files_only=False,
+    )
+    g = MinimalWeightGenerator(model_id="demo/model", output_dir=str(out_dir), config=cfg)
+    g._copy_custom_code_files()
+
+    assert not (out_dir / "modeling_demo.py").exists()
+
+
+def test_patch_remote_classes_skips_dynamic_module_when_trust_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    calls: list[tuple[str, str]] = []
+
+    def _get_class_from_dynamic_module(class_reference: str, model_id: str, **_kwargs):
+        calls.append((class_reference, model_id))
+        raise AssertionError("dynamic module loading should not run without trust_remote_code")
+
+    monkeypatch.setattr(
+        "transformers.dynamic_module_utils.get_class_from_dynamic_module",
+        _get_class_from_dynamic_module,
+    )
+
+    cfg = GenerationConfig()
+    cfg.security = SecurityOptions(
+        trust_remote_code=False,
+        allow_network=True,
+        local_files_only=False,
+    )
+    g = MinimalWeightGenerator(model_id="demo/model", output_dir=str(out_dir), config=cfg)
+    hf_config = types.SimpleNamespace(auto_map={"AutoModel": "modeling_demo.DemoModel"})
+
+    g._patch_remote_classes(hf_config)
+
+    assert calls == []
+
+
+def test_reconcile_config_never_uses_unsafe_torch_load_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    cfg_path = out_dir / "config.json"
+    cfg_path.write_text(json.dumps({"model_type": "gpt2"}, indent=2), encoding="utf-8")
+    (out_dir / "pytorch_model.bin.index.json").write_text(
+        json.dumps(
+            {"weight_map": {"model.embed_tokens.weight": "pytorch_model-00001-of-00001.bin"}},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (out_dir / "pytorch_model-00001-of-00001.bin").write_bytes(b"not a safe weights file")
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_torch_load(_path, **kwargs):
+        calls.append(dict(kwargs))
+        raise RuntimeError("weights_only blocked")
+
+    monkeypatch.setattr("vitriol.core.generator.torch.load", _fake_torch_load)
+
+    cfg = GenerationConfig()
+    g = MinimalWeightGenerator(model_id="demo/model", output_dir=str(out_dir), config=cfg)
+    g._reconcile_config_with_weights(str(cfg_path))
+
+    assert calls == [{"map_location": "cpu", "weights_only": True}]
 
 
 def test_arch_viz_parser_falls_back_to_pretrained_config_for_unknown_type(tmp_path: Path) -> None:

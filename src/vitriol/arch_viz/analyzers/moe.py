@@ -4,8 +4,7 @@ Mixture of Experts (MoE) Analyzer.
 Detects and analyzes MoE-based architectures (Mixtral, etc.).
 """
 
-from typing import Dict, Any, List, Optional
-import json
+from typing import Any, Dict
 
 
 class MoEAnalyzer:

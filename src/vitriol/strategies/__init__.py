@@ -5,11 +5,11 @@ This module provides different strategies for generating model weights,
 each with different trade-offs between size, training support, and compatibility.
 """
 
-from .base import WeightGenerationStrategy, StrategyCapabilities
-from .random import RandomStrategy
+from .base import StrategyCapabilities, WeightGenerationStrategy
 from .compact import CompactStrategy
-from .ultra import UltraStrategy
 from .hybrid_ultra import HybridUltraStrategy
+from .random import RandomStrategy
+from .ultra import UltraStrategy
 
 # Import other strategies if they exist
 try:
@@ -49,7 +49,7 @@ except ImportError:
 
 # Learning-based strategies (P0 innovation)
 try:
-    from .learned import LearnedWeightStrategy, HybridLearnedStrategy
+    from .learned import HybridLearnedStrategy, LearnedWeightStrategy
 except ImportError:
     LearnedWeightStrategy = None
     HybridLearnedStrategy = None
@@ -87,14 +87,14 @@ if HybridLearnedStrategy:
 def get_strategy(name: str, **kwargs) -> WeightGenerationStrategy:
     """
     Get a strategy instance by name.
-    
+
     Args:
         name: Strategy name (e.g., "random", "compact", "ultra")
         **kwargs: Additional arguments passed to strategy constructor
-    
+
     Returns:
         Strategy instance (validated)
-    
+
     Raises:
         KeyError: If strategy name is not found
         ValueError: If strategy configuration is invalid
@@ -102,7 +102,7 @@ def get_strategy(name: str, **kwargs) -> WeightGenerationStrategy:
     if name not in STRATEGY_REGISTRY:
         from ..utils.exceptions import StrategyNotFoundError
         raise StrategyNotFoundError(name, list(STRATEGY_REGISTRY.keys()))
-    
+
     strategy = STRATEGY_REGISTRY[name](**kwargs)
 
     # [Hardening] Validate strategy configuration after construction
@@ -121,7 +121,7 @@ def get_strategy(name: str, **kwargs) -> WeightGenerationStrategy:
 def list_strategies() -> list:
     """
     List all available strategy names.
-    
+
     Returns:
         List of strategy names
     """

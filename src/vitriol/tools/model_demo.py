@@ -9,7 +9,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-
 DEFAULT_MODEL_ID = "zai-org/GLM-5.1"
 DEFAULT_OUTPUT_SLUG = "glm_5_1_demo"
 PORT_STRIDE = 2
@@ -37,7 +36,7 @@ class DemoOptions:
     exclude_families: frozenset[str] = frozenset()
     precheck_config: bool = False
     precheck_viz: bool = False
-    trust_remote_code: bool = True
+    trust_remote_code: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,7 +56,7 @@ def list_supported_families() -> list[str]:
     return families
 
 
-def build_vitriol_command(python_bin: str, *args: str, trust_remote_code: bool = True) -> list[str]:
+def build_vitriol_command(python_bin: str, *args: str, trust_remote_code: bool = False) -> list[str]:
     command = [python_bin, "-m", "vitriol.cli.main"]
     if args and args[0] != "weight-viz":
         command.append("--trust-remote-code" if trust_remote_code else "--no-trust-remote-code")
@@ -127,7 +126,7 @@ def load_demo_targets(file_path: Path) -> list[dict[str, str | Path | None]]:
 def probe_demo_target(
     model_id: str,
     model_path: Path | None,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> dict[str, object]:
     from ..utils.hf_loading import load_config_or_raw
 
@@ -163,7 +162,7 @@ def probe_demo_target(
 
 def precheck_demo_targets(
     targets: list[dict[str, str | Path | None]],
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> list[dict[str, str]]:
     reports: list[dict[str, str]] = []
     for target in targets:
@@ -208,7 +207,7 @@ def check_viz_metadata(config_dict: dict[str, object]) -> dict[str, object]:
 
 def precheck_viz_targets(
     targets: list[dict[str, str | Path | None]],
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> list[dict[str, str]]:
     reports: list[dict[str, str]] = []
     for target in targets:
@@ -507,7 +506,20 @@ def parse_args(argv: list[str] | None = None) -> DemoOptions:
     parser.add_argument("--exclude", default="")
     parser.add_argument("--precheck-config", action="store_true")
     parser.add_argument("--precheck-viz", action="store_true")
-    parser.add_argument("--no-trust-remote-code", action="store_true")
+    trust_group = parser.add_mutually_exclusive_group()
+    trust_group.add_argument(
+        "--trust-remote-code",
+        dest="trust_remote_code",
+        action="store_true",
+        default=False,
+        help="Enable trust_remote_code for trusted model repositories.",
+    )
+    trust_group.add_argument(
+        "--no-trust-remote-code",
+        dest="trust_remote_code",
+        action="store_false",
+        help="Disable trust_remote_code for all load steps (default).",
+    )
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve()
@@ -543,7 +555,7 @@ def parse_args(argv: list[str] | None = None) -> DemoOptions:
         exclude_families=parse_family_filter(args.exclude),
         precheck_config=args.precheck_config,
         precheck_viz=args.precheck_viz,
-        trust_remote_code=not args.no_trust_remote_code,
+        trust_remote_code=bool(args.trust_remote_code),
     )
 
 

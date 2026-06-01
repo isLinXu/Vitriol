@@ -9,14 +9,15 @@ Provides hierarchical configuration with:
 - Validation and type checking
 """
 
-import os
 import json
-import yaml
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from enum import Enum
 import logging
+import os
+from dataclasses import asdict, dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 from vitriol.version import __version__
 
@@ -91,12 +92,12 @@ class VitriolConfig:
     """Main Vitriol configuration."""
     version: str = __version__
     environment: str = "development"
-    
+
     generation: GenerationDefaults = field(default_factory=GenerationDefaults)
     nas: NASConfig = field(default_factory=NASConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
-    
+
     # Custom user settings
     custom: Dict[str, Any] = field(default_factory=dict)
 
@@ -104,21 +105,21 @@ class VitriolConfig:
 class ConfigManager:
     """
     Centralized configuration manager.
-    
+
     Features:
         - Hierarchical config (default -> file -> env -> runtime)
         - Hot reload support
         - Validation and type checking
         - Environment-specific configs
         - Secrets management
-    
+
     Example:
         >>> config = ConfigManager()
         >>> config.load_from_file("config.yaml")
         >>> config.get("generation.default_strategy")
         'compact'
     """
-    
+
     # Config file search paths
     CONFIG_PATHS = [
         "vitriol.yaml",
@@ -127,22 +128,22 @@ class ConfigManager:
         "~/.vitriol/config.yaml",
         "/etc/vitriol/config.yaml",
     ]
-    
+
     def __init__(self):
         self._config = VitriolConfig()
         self._loaded_files: List[str] = []
         self._watchers: List[callable] = []
-        
+
         # Load default config
         self._load_defaults()
-        
+
         # Auto-discover config files
         self._auto_load()
-    
+
     def _load_defaults(self):
         """Load default configuration."""
         self._config = VitriolConfig()
-    
+
     def _auto_load(self):
         """Automatically load config from standard locations."""
         for path in self.CONFIG_PATHS:
@@ -150,42 +151,42 @@ class ConfigManager:
             if expanded_path.exists():
                 self.load_from_file(str(expanded_path))
                 break
-        
+
         # Load from environment
         self._load_from_env()
-    
+
     def load_from_file(self, path: str) -> "ConfigManager":
         """
         Load configuration from file.
-        
+
         Args:
             path: Path to config file (yaml or json)
-            
+
         Returns:
             Self for chaining
         """
         path = Path(path).expanduser()
-        
+
         if not path.exists():
             logger.warning(f"Config file not found: {path}")
             return self
-        
+
         try:
-            with open(path, 'r') as f:
+            with open(path) as f:
                 if path.suffix in ['.yaml', '.yml']:
                     data = yaml.safe_load(f)
                 else:
                     data = json.load(f)
-            
+
             self._merge_config(data)
             self._loaded_files.append(str(path))
             logger.info(f"Loaded config from {path}")
-            
+
         except Exception as e:
             logger.error(f"Failed to load config from {path}: {e}")
-        
+
         return self
-    
+
     def _load_from_env(self):
         """Load configuration from environment variables."""
         env_mappings = {
@@ -195,7 +196,7 @@ class ConfigManager:
             "VITRIOL_GPU_ENABLED": "system.gpu_enabled",
             "VITRIOL_DEFAULT_STRATEGY": "generation.default_strategy",
         }
-        
+
         for env_var, config_key in env_mappings.items():
             value = os.getenv(env_var)
             if value is not None:
@@ -204,9 +205,9 @@ class ConfigManager:
                     value = value.lower() == 'true'
                 elif value.isdigit():
                     value = int(value)
-                
+
                 self.set(config_key, value)
-    
+
     def _merge_config(self, data: Dict[str, Any]):
         """Merge dictionary into current config."""
         for key, value in data.items():
@@ -222,21 +223,21 @@ class ConfigManager:
             else:
                 # Store in custom
                 self._config.custom[key] = value
-    
+
     def get(self, key: str, default: Any = None) -> Any:
         """
         Get configuration value by key.
-        
+
         Args:
             key: Dot-separated key (e.g., "generation.default_strategy")
             default: Default value if key not found
-            
+
         Returns:
             Configuration value
         """
         keys = key.split('.')
         value = self._config
-        
+
         for k in keys:
             if hasattr(value, k):
                 value = getattr(value, k)
@@ -244,23 +245,23 @@ class ConfigManager:
                 value = value[k]
             else:
                 return default
-        
+
         return value
-    
+
     def set(self, key: str, value: Any) -> "ConfigManager":
         """
         Set configuration value.
-        
+
         Args:
             key: Dot-separated key
             value: Value to set
-            
+
         Returns:
             Self for chaining
         """
         keys = key.split('.')
         target = self._config
-        
+
         for k in keys[:-1]:
             if hasattr(target, k):
                 target = getattr(target, k)
@@ -270,43 +271,43 @@ class ConfigManager:
                 target = target[k]
             else:
                 return self
-        
+
         final_key = keys[-1]
         if hasattr(target, final_key):
             setattr(target, final_key, value)
         elif isinstance(target, dict):
             target[final_key] = value
-        
+
         # Notify watchers
         for watcher in self._watchers:
             try:
                 watcher(key, value)
             except Exception as e:
                 logger.debug("Config watcher callback failed for key %s: %s", key, e)
-        
+
         return self
-    
+
     def save_to_file(self, path: str, format: str = "yaml"):
         """
         Save current configuration to file.
-        
+
         Args:
             path: Output file path
             format: 'yaml' or 'json'
         """
         path = Path(path).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         data = self.to_dict()
-        
+
         with open(path, 'w') as f:
             if format == "yaml":
                 yaml.dump(data, f, default_flow_style=False)
             else:
                 json.dump(data, f, indent=2)
-        
+
         logger.info(f"Saved config to {path}")
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
         return {
@@ -318,24 +319,24 @@ class ConfigManager:
             "security": asdict(self._config.security),
             "custom": self._config.custom,
         }
-    
+
     def watch(self, callback: callable):
         """Register a config change watcher."""
         self._watchers.append(callback)
-    
+
     def unwatch(self, callback: callable):
         """Unregister a watcher."""
         if callback in self._watchers:
             self._watchers.remove(callback)
-    
+
     def get_environment(self) -> ConfigEnvironment:
         """Get current environment."""
         return ConfigEnvironment(self._config.environment)
-    
+
     def is_production(self) -> bool:
         """Check if running in production."""
         return self._config.environment == "production"
-    
+
     def is_development(self) -> bool:
         """Check if running in development."""
         return self._config.environment == "development"
@@ -357,8 +358,8 @@ def init_config(path: Optional[str] = None) -> ConfigManager:
     """Initialize global configuration."""
     global _config_instance
     _config_instance = ConfigManager()
-    
+
     if path:
         _config_instance.load_from_file(path)
-    
+
     return _config_instance

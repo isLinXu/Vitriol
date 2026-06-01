@@ -3,9 +3,8 @@ from pathlib import Path
 
 import click
 
-from ..version import __version__
 from ..utils.logging import setup_logging
-
+from ..version import __version__
 
 COMMAND_SPECS = {
     "infer": "vitriol.cli.commands.infer:infer",
@@ -81,10 +80,10 @@ class LazyGroup(click.Group):
 @click.option("--config", type=click.Path(exists=True), help="Path to configuration file")
 @click.option(
     "--trust-remote-code/--no-trust-remote-code",
-    default=True,
+    default=False,
     help=(
         "Whether to allow executing remote model code (trust_remote_code) when loading configs/models. "
-        "Keeping this enabled improves compatibility but is riskier; disable it for safer CI environments."
+        "Disabled by default for safety; pass --trust-remote-code only for trusted model repositories."
     ),
 )
 @click.option(

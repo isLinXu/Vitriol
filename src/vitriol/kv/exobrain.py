@@ -141,11 +141,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import time
-import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -709,8 +709,8 @@ class APIKnowledgeSource:
                     response.raise_for_status()
                     data = response.json()
                 else:
-                    import urllib.request
                     import urllib.error
+                    import urllib.request
                     body = json.dumps(payload).encode("utf-8")
                     req = urllib.request.Request(
                         self._endpoint,
@@ -2130,6 +2130,7 @@ class ExoBrainAttentionPatcher:
             return
 
         import transformers.modeling_utils as mu
+
         from ..patches.cache_hooks import _thread_local
 
         orig_get_interface = self._registry.get_interface

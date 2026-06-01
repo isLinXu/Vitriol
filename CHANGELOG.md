@@ -92,6 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- API authentication now accepts `X-API-Key` and `Authorization: Bearer` headers, while retaining the legacy `api_key` query parameter for compatibility.
+- Sensitive API read endpoints (`/status`, `/jobs`, `/batch/{id}`, `/models`, `/strategies`, `/stream/logs`) now honor `security.api_key_required`; `/` and `/health` remain public.
+- Dynamic remote-module patching is skipped unless `trust_remote_code=True` is explicitly enabled.
+- Custom-code synchronization is restricted to whitelisted HuggingFace module names, `auto_map`-referenced Python files when metadata is available, safe output paths, configurable file counts, and configurable per-file byte limits.
+
+### Changed
+- Runtime dependency constraints now pin NumPy to `>=1.21,<2` and PyTorch to `>=2.0.0,<3.0.0` to reduce accidental major-version breakage.
+
 ### Added
 - GitHub Pages deployment with automated CI/CD pipeline
 - `CONTRIBUTING.md` contribution guidelines

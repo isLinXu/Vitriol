@@ -14,10 +14,10 @@ Supports multiple quantization formats:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union
 
-import math
 import torch
 import torch.nn.functional as F
 
@@ -604,12 +604,14 @@ def compute_skip_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    cfg: ComputeSkipConfig = ComputeSkipConfig(),
+    cfg: Optional[ComputeSkipConfig] = None,
     attn_mask: Optional[torch.Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     scaling: Optional[float] = None,
 ) -> ComputeSkipResult:
+    if cfg is None:
+        cfg = ComputeSkipConfig()
     b, h, seq_len, d = query.shape
     s = key.shape[-2]
     bs = int(cfg.block_size)

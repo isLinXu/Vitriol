@@ -165,7 +165,7 @@ class TestResolveSecurityContext:
         monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
 
         ctx = resolve_security_context()
-        assert ctx.trust_remote_code is True
+        assert ctx.trust_remote_code is False
         assert ctx.allow_network is True
         assert ctx.local_files_only is False
         assert ctx.provenance["trust_remote_code"] == "base"

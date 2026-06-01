@@ -44,7 +44,7 @@ from typing import Dict, Optional
 import torch
 from torch import nn
 
-from .base import WeightGenerationStrategy, StrategyCapabilities
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 logger = logging.getLogger(__name__)
 

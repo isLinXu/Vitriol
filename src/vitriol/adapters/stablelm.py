@@ -1,7 +1,9 @@
 """Adapter for StableLM / Stability AI models (StableLM, StableDiffusion, etc.)."""
 
 import logging
-from transformers import PretrainedConfig, AutoConfig
+
+from transformers import AutoConfig, PretrainedConfig
+
 from .base import ModelAdapter
 from .registry import AdapterRegistry
 

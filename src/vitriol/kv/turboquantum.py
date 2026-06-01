@@ -378,7 +378,7 @@ def quantum_standardize(rotated: torch.Tensor) -> Tuple[torch.Tensor, torch.Tens
 
     Maps to approximately N(0,1) distribution so that Lloyd-Max codebook
     (optimized for Gaussian) works optimally.
-    
+
     Returns:
         normalized: same shape as input
         sigma: [..., seq_len] (one per vector along last two dims)
@@ -801,7 +801,7 @@ def turboquantum_compress(
 # Integration helpers: bridge to existing policy/store system
 # ============================================================================
 
-def create_turboquantum_codec(config: Optional[TurboQuantumConfig] = None) -> "TurboQuantumCodec":
+def create_turboquantum_codec(config: Optional[TurboQuantumConfig] = None) -> TurboQuantumCodec:
     """
     Create a TurboQuantum codec compatible with existing KVCacheStore interface.
     """
@@ -813,7 +813,7 @@ def create_turboquantum_codec(config: Optional[TurboQuantumConfig] = None) -> "T
 class TurboQuantumCodec:
     """
     Adapter that wraps TurboQuantum into the existing AdaptiveKVCodec interface.
-    
+
     This allows seamless integration with:
     - KVCacheStore.encode_tensor() / decode_tensor()
     - KVPolicy system

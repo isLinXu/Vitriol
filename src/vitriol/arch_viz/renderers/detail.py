@@ -1,11 +1,13 @@
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
 from ..core import Architecture
+
 
 class DetailRenderer:
     """Renders a detailed list of layers using pandas styling."""
-    
+
     def render(self, architecture: Architecture, output_path: str):
         # Prepare data
         data = []
@@ -20,9 +22,9 @@ class DetailRenderer:
                 "Params": f"{layer.params:,}",
                 "Description": layer.description
             })
-            
+
         df = pd.DataFrame(data)
-        
+
         # Limit rows for static image to avoid huge files
         max_rows = 50
         if len(df) > max_rows:
@@ -31,30 +33,30 @@ class DetailRenderer:
             df_tail = df.iloc[-20:]
             df_mid = pd.DataFrame([{"Layer Name": "...", "Role": "...", "Type": "...", "Shape": "...", "Params": "...", "Description": "..."}])
             df = pd.concat([df_head, df_mid, df_tail])
-            
+
         # Render as table using matplotlib
         # Increase width and adjust height
         fig, ax = plt.subplots(figsize=(18, len(df) * 0.5 + 3))
         ax.set_axis_off()
-        
+
         # Title
-        ax.text(0.5, 0.98, f"Detailed Architecture: {architecture.model_type.upper()}", 
+        ax.text(0.5, 0.98, f"Detailed Architecture: {architecture.model_type.upper()}",
                 ha='center', fontsize=24, weight='bold', transform=ax.transAxes, family='sans-serif', color='#1A1A1A')
-        
+
         # Table
-        table = ax.table(cellText=df.values, colLabels=df.columns, loc='center', cellLoc='left', 
+        table = ax.table(cellText=df.values, colLabels=df.columns, loc='center', cellLoc='left',
                         colWidths=[0.25, 0.12, 0.13, 0.17, 0.13, 0.2])
-        
+
         # Style
         table.auto_set_font_size(False)
         table.set_fontsize(11)
         table.scale(1, 2.0) # More vertical padding
-        
+
         # Header styling
         for (row, col), cell in table.get_celld().items():
             cell.set_edgecolor('#E0E0E0')
             cell.set_linewidth(1)
-            
+
             if row == 0:
                 cell.set_text_props(weight='bold', color='#333333', family='sans-serif')
                 cell.set_facecolor('#F5F5F5')
@@ -74,16 +76,16 @@ class DetailRenderer:
                     cell.set_facecolor('#F3E5F5')
                 elif role == "MTP":
                     cell.set_facecolor('#EDE7F6')
-                
+
                 # Right align Params column (index 4)
                 if col == 4:
                     cell.get_text().set_horizontalalignment('right')
                     cell.set_text_props(weight='bold', family='monospace')
-                
+
                 # Type column styling
                 if col in (1, 2):
                     cell.set_text_props(weight='bold', size=9)
-                
+
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.5)
         plt.close(fig)

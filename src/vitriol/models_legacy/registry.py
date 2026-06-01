@@ -1,6 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Type, Optional
+from typing import Optional, Type
+
 from transformers import PretrainedConfig
 
 logger = logging.getLogger(__name__)
@@ -10,7 +11,7 @@ class ModelAdapter(ABC):
     Base class for model-specific adapters.
     Allows injecting custom logic for config patching, model instantiation, and weight generation.
     """
-    
+
     @classmethod
     @abstractmethod
     def match(cls, model_id: str, config: PretrainedConfig) -> bool:
@@ -21,7 +22,7 @@ class ModelAdapter(ABC):
         """Modify config before model instantiation (e.g. fix attributes)."""
         return config
 
-    def register_classes(self):
+    def register_classes(self):  # noqa: B027  (optional hook for subclasses)
         """Register custom classes with AutoConfig/AutoModel if needed."""
         pass
 
@@ -31,7 +32,7 @@ class ModelAdapter(ABC):
 
 class DefaultAdapter(ModelAdapter):
     """Default adapter that handles standard transformers models."""
-    
+
     @classmethod
     def match(cls, model_id: str, config: PretrainedConfig) -> bool:
         return True

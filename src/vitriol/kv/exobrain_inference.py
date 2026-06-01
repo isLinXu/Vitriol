@@ -263,7 +263,7 @@ class TeacherKVExtractor:
         model_id: str,
         device: str = "cpu",
         dtype: torch.dtype = torch.float32,
-        trust_remote_code: bool = True,
+        trust_remote_code: bool = False,
         local_files_only: bool = False,
     ) -> None:
         self.model_id = model_id
@@ -893,8 +893,8 @@ class BrainKVCompressor:
 
     def compress_teacher_cache(
         self,
-        teacher_kv: "TeacherKVCache",
-    ) -> "TeacherKVCache":
+        teacher_kv: TeacherKVCache,
+    ) -> TeacherKVCache:
         """
         Compress an entire TeacherKVCache.
 
@@ -1072,7 +1072,7 @@ class ExoBrainInferencePipeline:
         fusion_mode: str = "replace",
         device: str = "cpu",
         dtype: torch.dtype = torch.float32,
-        trust_remote_code: bool = True,
+        trust_remote_code: bool = False,
         local_files_only: bool = False,
         retrieval_top_k: int = 5,
         residual_alpha: float = 0.1,
@@ -1290,8 +1290,8 @@ class ExoBrainInferencePipeline:
 
                 # Step 3: Run shell model inference with ExoBrain injection
                 # We use the ExoBrain backend to inject KV at attention time
-                from .exobrain import ExoBrainBackend
                 from .cache_store import KVCacheStoreConfig
+                from .exobrain import ExoBrainBackend
 
                 kv_cfg = KVCacheStoreConfig()
                 ExoBrainBackend(
@@ -2192,7 +2192,7 @@ class ExoBrainProfiler:
         self._stages: Dict[str, Dict[str, Any]] = {}
         self._memory_snapshots: List[Dict[str, Any]] = []
 
-    def stage(self, name: str) -> "_ProfilerContext":
+    def stage(self, name: str) -> _ProfilerContext:
         """
         Context manager for timing a pipeline stage.
 
@@ -2284,7 +2284,7 @@ class _ProfilerContext:
         self.name = name
         self._start = 0.0
 
-    def __enter__(self) -> "_ProfilerContext":
+    def __enter__(self) -> _ProfilerContext:
         self._start = time.time()
         return self
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,26 @@ def _write_fake_safetensors(path: Path, tensors: dict[str, dict[str, object]]) -
         offset += nbytes
     raw = json.dumps(header, separators=(",", ":")).encode("utf-8")
     path.write_bytes(len(raw).to_bytes(8, "little") + raw + (b"\0" * offset))
+
+
+def test_weight_inspector_refuses_unsafe_torch_load_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from vitriol.viz import weight_inspector as wi
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_torch_load(_path, **kwargs):
+        calls.append(dict(kwargs))
+        raise RuntimeError("weights_only blocked")
+
+    monkeypatch.setattr(wi, "torch", SimpleNamespace(load=_fake_torch_load))
+
+    with pytest.raises(ValueError, match="Unsafe legacy PyTorch pickle fallback is disabled"):
+        wi._load_shard(tmp_path / "pytorch_model.bin", is_safetensors=False)
+
+    assert calls == [{"map_location": "cpu", "weights_only": True}]
 
 
 def test_weight_inspector_reads_safetensors_header_without_loading_torch(tmp_path: Path) -> None:

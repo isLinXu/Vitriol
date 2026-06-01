@@ -4,8 +4,7 @@ Grouped Query Attention (GQA) Analyzer.
 Detects and analyzes GQA-based architectures from HuggingFace model configs.
 """
 
-from typing import Dict, Any, Optional
-import json
+from typing import Any, Dict
 
 
 class GQAAnalyzer:

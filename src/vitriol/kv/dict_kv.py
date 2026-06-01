@@ -28,7 +28,7 @@ Method
 2. **Sparse Encoding** (per KV vector):
    For each vector x, solve:
      min ||x - D·α||²  s.t.  ||α||₀ ≤ L
-   
+
    Using Orthogonal Matching Pursuit (OMP) with L atoms.
    Store: L × (log₂(K) + 16) bits per vector.
 
@@ -44,12 +44,12 @@ For a KV vector x ∈ ℝᵈ (d = hidden_dim, typically 1024-4096):
 
   - TurboQuant 3-bit: d × 3 = 3d bits per vector
   - DictKV (L=4, K=1024): 4 × (10 + 16) = 104 bits per vector
-  
+
   Compression ratio: 3d / 104
     d=1024: 29.5×
     d=2048: 59.1×
     d=4096: 118×
-  
+
   vs TurboQuant: 3d/3d × 16/3 ≈ 5.3× → DictKV is 5.5-22× better
 
 Sparsity level L controls the trade-off:
@@ -96,7 +96,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
-
 
 # ─────────────────────────────────────────────────────────────
 # Orthogonal Matching Pursuit (OMP)
@@ -274,7 +273,7 @@ def learn_dictionary_ksvd(
     # Normalize dictionary atoms
     dictionary = dictionary / (dictionary.norm(dim=-1, keepdim=True) + 1e-12)
 
-    for iteration in range(n_iterations):
+    for _iteration in range(n_iterations):
         # Sparse coding step: encode each vector
         coeffs, _ = orthogonal_matching_pursuit(data, dictionary, sparsity)
 
@@ -349,7 +348,7 @@ def learn_dictionary_online(
 
     batch_size = min(256, N)
 
-    for iteration in range(n_iterations):
+    for _iteration in range(n_iterations):
         # Sample mini-batch
         idx = _sample_index_subset(N, batch_size, device)
         batch = data[idx]

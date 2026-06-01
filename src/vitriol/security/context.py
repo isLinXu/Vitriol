@@ -30,7 +30,7 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     # generic mapping-like
     try:
         return dict(value)
-    except Exception:
+    except (TypeError, ValueError):
         return {}
 
 
@@ -82,7 +82,7 @@ def resolve_security_context(
     provenance: Dict[str, str] = {}
 
     if trc is None:
-        trc = True
+        trc = False
     provenance["trust_remote_code"] = "base"
     if an is None:
         an = True

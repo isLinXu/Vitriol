@@ -1,10 +1,10 @@
 """Layer configuration data class."""
 
 from dataclasses import dataclass
-from typing import Dict, Tuple, List, Any, Optional
+from typing import Tuple
 
-import torch
 import numpy as np
+import torch
 
 
 @dataclass

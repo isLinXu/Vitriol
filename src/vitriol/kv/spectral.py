@@ -77,7 +77,6 @@ import torch.nn.functional as F
 
 from .codec import walsh_hadamard_rotate
 
-
 # ─────────────────────────────────────────────────────────────
 # Spectral Energy Analysis
 # ─────────────────────────────────────────────────────────────

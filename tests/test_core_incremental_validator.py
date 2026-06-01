@@ -134,7 +134,7 @@ class TestModelValidator:
     def test_init_defaults(self):
         validator = self.ModelValidator("/output")
         assert validator.output_dir == "/output"
-        assert validator.trust_remote_code is True
+        assert validator.trust_remote_code is False
         assert validator.report.success is True
         assert validator.report.model_loadable is False
 

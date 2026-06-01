@@ -7,7 +7,9 @@ handles the version transitions and config patching.
 
 import logging
 from typing import Optional, Type
-from transformers import PretrainedConfig, AutoConfig
+
+from transformers import AutoConfig, PretrainedConfig
+
 from .base import ModelAdapter
 from .registry import AdapterRegistry
 

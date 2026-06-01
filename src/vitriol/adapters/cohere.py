@@ -6,7 +6,9 @@ aliases and patches config for compatibility.
 """
 
 import logging
-from transformers import PretrainedConfig, AutoConfig
+
+from transformers import AutoConfig, PretrainedConfig
+
 from .base import ModelAdapter
 from .registry import AdapterRegistry
 

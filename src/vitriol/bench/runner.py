@@ -21,23 +21,31 @@ from typing import Any, Dict, List, Tuple
 import torch
 from transformers.cache_utils import DynamicCache
 
+from ..kv.backend import KVStoreBackend
+from ..kv.cache_store import KVCacheStoreConfig
+from ..kv.policy import (
+    KVLayerType,
+    KVPolicyPreset,
+    Turbo3ExactKApproxVPolicy,
+    apply_policy_to_store_cfg,
+    build_policy,
+    classify_kv_layer,
+    resolve_layer_strategy,
+)
+from ..patches.cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher, get_cache_hook_stats
+from ..patches.turboquant import get_turboquant_stats, reset_turboquant_stats, turbo_quantize
+from ..telemetry.run_context import new_run_id
 from ..utils.hf_loading import load_causallm as hf_load_causallm
 from ..utils.hf_loading import load_config as hf_load_config
 from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
 
-from ..kv.backend import KVStoreBackend
-from ..kv.cache_store import KVCacheStoreConfig
-from ..kv.policy import KVLayerType, KVPolicyPreset, Turbo3ExactKApproxVPolicy, apply_policy_to_store_cfg, build_policy, classify_kv_layer, resolve_layer_strategy
-from ..patches.cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher, get_cache_hook_stats
-from ..patches.turboquant import get_turboquant_stats, reset_turboquant_stats, turbo_quantize
-from ..telemetry.run_context import new_run_id
 try:
     from ..kv.turboquantum import (
         TurboQuantumConfig,
-        turboquantum_compress,
         compute_attention_entropy,
-        get_turboquantum_presets,
         create_turboquantum_codec,
+        get_turboquantum_presets,
+        turboquantum_compress,
     )
     _HAS_TURBOQUANTUM = True
 except ImportError:
@@ -400,7 +408,7 @@ def build_policy_plan(
     preset: str = "balanced",
     preset_params: Dict[str, Any] | None = None,
     *,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> Dict[str, Any]:
     """Build a KV policy plan for a model without running inference.
 
@@ -1240,7 +1248,7 @@ def run_smoke(
     calib_new_tokens: int = 8,
     search_max_n: int = 2,
     preset_params: Dict[str, Any] | None = None,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> Dict[str, Any]:
     run_id = new_run_id()
     device = select_device()
@@ -1357,7 +1365,7 @@ def run_generate_preset(
     calib_new_tokens: int = 8,
     search_max_n: int = 2,
     preset_params: Dict[str, Any] | None = None,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> Dict[str, Any]:
     run_id = new_run_id()
     device = select_device()
@@ -1521,7 +1529,7 @@ def run_turboquantum_synthetic(
 ) -> Dict[str, Any]:
     """
     Run a synthetic TurboQuantum benchmark without loading any real model.
-    
+
     Useful for:
     - Quick validation that TurboQuantum is working
     - Comparing different modes (conservative/balanced/aggressive)
@@ -1631,7 +1639,7 @@ def run_turboquantum_on_model_kv(
     model_id: str,
     prompt_tokens: int = 128,
     mode: str = "balanced",
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
 ) -> Dict[str, Any]:
     """Run TurboQuantum compression on a real model's KV cache."""
     if not _HAS_TURBOQUANTUM:

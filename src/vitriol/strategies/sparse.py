@@ -14,11 +14,13 @@ Note:
     object rather than a torch.Tensor.
 """
 
-import torch
 import json
 import struct
 from typing import Dict
-from .base import WeightGenerationStrategy, StrategyCapabilities
+
+import torch
+
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 
 class SparseSpec:

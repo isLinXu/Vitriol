@@ -4,8 +4,7 @@ Multi-head Latent Attention (MLA) Analyzer.
 Detects and analyzes MLA-based architectures (Deepseek-V3, etc.).
 """
 
-from typing import Dict, Any, Optional
-import json
+from typing import Any, Dict
 
 
 class MLAAnalyzer:

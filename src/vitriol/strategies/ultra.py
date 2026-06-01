@@ -7,10 +7,11 @@ allowing a single float value to represent an arbitrarily large tensor shape.
 
 import logging
 from typing import Dict
+
 import torch
 
-from .base import WeightGenerationStrategy, StrategyCapabilities
 from ..utils.exceptions import IncompatibleStrategyError
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -18,22 +19,22 @@ logger = logging.getLogger(__name__)
 class UltraStrategy(WeightGenerationStrategy):
     """
     Ultra compression strategy using strided tensors (stride=0).
-    
+
     This strategy creates tensors with stride=0, allowing a single
     float value to represent an arbitrarily large tensor shape.
-    
+
     Capabilities:
         ✅ Extreme compression (up to 99.99% size reduction)
         ✅ Zero memory allocation for weights
         ❌ Does NOT support Safetensors format
         ❌ Does NOT support gradient computation (training)
-    
+
     Limitations:
         - Incompatible with Safetensors format (requires contiguous tensors)
         - Only supports PyTorch .bin format
         - May not work with all training frameworks (stride=0 gradients)
         - Not suitable for actual inference (outputs will be meaningless)
-    
+
     Example:
         >>> strategy = UltraStrategy()
         >>> tensor = strategy.generate_tensor((4096, 4096), torch.bfloat16, "weight")
@@ -41,20 +42,20 @@ class UltraStrategy(WeightGenerationStrategy):
         torch.Size([4096, 4096])
         >>> tensor.storage().size()
         1  # Only 1 element in storage!
-    
+
     Technical Details:
         The trick uses PyTorch's `as_strided` to create a view with stride=0:
-        
+
         ```python
         storage = torch.zeros(1, dtype=dtype)  # 1 element
         tensor = torch.as_strided(storage, shape=(4096, 4096), strides=(0, 0))
         # All elements of tensor point to the same memory location
         ```
-        
+
         This allows us to "simulate" a large tensor without allocating
         the actual memory.
     """
-    
+
     def __init__(
         self,
         device: str = "cpu",
@@ -63,7 +64,7 @@ class UltraStrategy(WeightGenerationStrategy):
     ):
         """
         Initialize Ultra strategy.
-        
+
         Args:
             device: Device to generate tensors on
             save_dummy_config: Whether to save dummy config files
@@ -72,7 +73,7 @@ class UltraStrategy(WeightGenerationStrategy):
         super().__init__(device, save_dummy_config=save_dummy_config, **kwargs)
         self.first_tensor_logged = False
         self._storage_format = "pytorch"  # Always PyTorch for Ultra
-    
+
     @property
     def capabilities(self) -> StrategyCapabilities:
         """Return Ultra strategy capabilities."""
@@ -86,19 +87,19 @@ class UltraStrategy(WeightGenerationStrategy):
                 "Extreme size reduction but incompatible with Safetensors and training."
             )
         )
-    
+
     @property
     def storage_format(self) -> str:
         """Always return 'pytorch' for Ultra strategy."""
         return "pytorch"
-    
+
     def set_storage_format(self, fmt: str):
         """
         Ultra strategy only supports PyTorch format.
-        
+
         Args:
             fmt: Desired format
-        
+
         Raises:
             IncompatibleStrategyError: If fmt is 'safetensors'
         """
@@ -109,7 +110,7 @@ class UltraStrategy(WeightGenerationStrategy):
                 reason="Ultra strategy uses stride=0 tensors which are incompatible with Safetensors"
             )
         # Ignore other format requests
-    
+
     def generate_tensor(
         self,
         shape: tuple,
@@ -119,16 +120,16 @@ class UltraStrategy(WeightGenerationStrategy):
     ) -> torch.Tensor:
         """
         Generate a strided tensor with stride=0.
-        
+
         Args:
             shape: Desired shape (will be simulated, not actually allocated)
             dtype: Data type (float32 -> bfloat16 conversion)
             name: Parameter name (for logging)
             **kwargs: Additional parameters (ignored)
-        
+
         Returns:
             Strided tensor with stride=0
-        
+
         Raises:
             ValueError: If shape has non-positive dimensions
         """
@@ -142,14 +143,14 @@ class UltraStrategy(WeightGenerationStrategy):
         # Convert float32 to bfloat16 for even smaller size
         if dtype == torch.float32:
             dtype = torch.bfloat16
-        
+
         # Create minimal storage (1 element)
         storage = torch.zeros(1, dtype=dtype, device=self.device)
-        
+
         # Create strided view with stride=0
         # All elements point to the same memory location
         tensor = torch.as_strided(storage, shape, [0] * len(shape))
-        
+
         # Log first tensor for debugging
         if not self.first_tensor_logged:
             logger.info(
@@ -158,21 +159,21 @@ class UltraStrategy(WeightGenerationStrategy):
                 f"actual storage: {storage.numel()} elements"
             )
             self.first_tensor_logged = True
-        
+
         return tensor
-    
+
     def save_shard(self, shard_data: Dict[str, torch.Tensor], path: str) -> None:
         """
         Save shard using PyTorch format.
-        
+
         Note: We always use torch.save for Ultra strategy, even if
         the filename suggests .safetensors, because stride=0 tensors
         cannot be saved in Safetensors format.
-        
+
         Args:
             shard_data: Dict mapping parameter names to tensors
             path: Output file path
-        
+
         Raises:
             OSError: If file cannot be written
         """
@@ -188,7 +189,7 @@ class UltraStrategy(WeightGenerationStrategy):
                 "Ultra strategy: Changed output format from .safetensors to .bin "
                 "(stride=0 tensors incompatible with Safetensors)"
             )
-        
+
         logger.info(f"Saving Ultra shard to {path}")
         try:
             torch.save(shard_data, path)

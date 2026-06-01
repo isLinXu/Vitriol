@@ -1,6 +1,6 @@
 """Spectral Matching Loss."""
 
-from typing import Tuple, Dict
+from typing import Dict, Tuple
 
 import torch
 import torch.nn as nn

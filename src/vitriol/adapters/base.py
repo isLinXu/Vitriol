@@ -49,7 +49,7 @@ class ModelAdapter(ABC):
         """
         return config
 
-    def register_classes(self) -> None:
+    def register_classes(self) -> None:  # noqa: B027  (optional hook for subclasses)
         """Register custom classes with AutoConfig/AutoModel if needed.
 
         This is called once when the adapter is selected. Use it to

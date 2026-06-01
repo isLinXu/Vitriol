@@ -30,30 +30,30 @@ _ensure_cache_dirs()
 import gradio as gr  # noqa: E402
 
 from vitriol.evolution import (  # noqa: E402
-    EvolutionTree,
-    TreeVisualizer,
     ArchComparator,
-    ComparisonReport,
-    ArchSimulator,
-    InnovationTimeline,
     ArchitectureRecommender,
+    ArchSimulator,
+    ComparisonReport,
+    EvolutionTree,
+    InnovationTimeline,
+    TreeVisualizer,
     UseCase,
 )
+from vitriol.nas.search_space import LLMSearchSpace  # noqa: E402
 from vitriol.nas.targeted_nas import (  # noqa: E402
+    Constraint,
     ConstraintOptimizer,
     ConstraintType,
-    Constraint,
-    OptimizationTarget,
     ObjectiveType,
+    OptimizationTarget,
 )
-from vitriol.nas.search_space import LLMSearchSpace  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 def load_model_config(
     model_id: str,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
     allow_network: bool = True,
     local_files_only: bool = False,
 ) -> Optional[Dict]:
@@ -89,7 +89,7 @@ def format_params(params: int) -> str:
 
 def create_app(
     title: str = "Vitriol - LLM Architecture Explorer",
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
     allow_network: bool = True,
     local_files_only: bool = False,
 ) -> gr.Blocks:
@@ -148,7 +148,7 @@ def create_app(
                         )
                         compare_trc = gr.Checkbox(
                             label="Trust Remote Code (⚠️ may execute remote code)",
-                            value=True,
+                            value=trust_remote_code,
                         )
                         compare_btn = gr.Button("🔄 Compare", variant="primary")
 
@@ -165,7 +165,7 @@ def create_app(
                     inputs=[model1_id, model2_id],
                 )
 
-                def compare_models(m1_id, m2_id, trc, progress=gr.Progress()):
+                def compare_models(m1_id, m2_id, trc, progress=gr.Progress()):  # noqa: B008
                     """Compare two model architectures."""
                     try:
                         progress(0, desc="Loading model 1...")
@@ -311,7 +311,7 @@ def create_app(
                         nas_results = gr.JSON(label="Search Results")
                         nas_summary = gr.Markdown()
 
-                def run_targeted_nas(vram_limit, param_limit, objective_choice, iterations, progress=gr.Progress()):
+                def run_targeted_nas(vram_limit, param_limit, objective_choice, iterations, progress=gr.Progress()):  # noqa: B008
                     """Run targeted NAS search."""
                     try:
                         progress(0, desc="Initializing optimizer...")
@@ -428,7 +428,7 @@ def create_app(
                         )
                         sim_trc = gr.Checkbox(
                             label="Trust Remote Code (⚠️ may execute remote code)",
-                            value=True,
+                            value=trust_remote_code,
                         )
                         simulate_btn = gr.Button("⚡ Simulate", variant="primary")
 
@@ -436,7 +436,7 @@ def create_app(
                         sim_results = gr.JSON(label="Simulation Results")
                         sim_summary = gr.Markdown()
 
-                def simulate_architecture(model_id, batch_size, seq_length, dtype, gpu, trc, progress=gr.Progress()):
+                def simulate_architecture(model_id, batch_size, seq_length, dtype, gpu, trc, progress=gr.Progress()):  # noqa: B008
                     """Simulate architecture performance."""
                     try:
                         progress(0, desc="Loading configuration...")
@@ -522,14 +522,14 @@ def create_app(
                         )
                         score_trc = gr.Checkbox(
                             label="Trust Remote Code (⚠️ may execute remote code)",
-                            value=True,
+                            value=trust_remote_code,
                         )
                         generate_score_btn = gr.Button("📊 Generate Scorecard", variant="primary")
 
                     with gr.Column(scale=2):
                         score_output = gr.HTML(label="Scorecard")
 
-                def generate_scorecard(model_id, trc, progress=gr.Progress()):
+                def generate_scorecard(model_id, trc, progress=gr.Progress()):  # noqa: B008
                     """Generate architecture scorecard."""
                     try:
                         progress(0, desc="Loading configuration...")
@@ -713,7 +713,7 @@ def create_app(
                         recommend_output = gr.JSON(label="Recommendations")
                         recommend_summary = gr.Markdown()
 
-                def get_recommendations(max_params, max_vram, use_case, prefer_moe, require_gqa, long_context, progress=gr.Progress()):
+                def get_recommendations(max_params, max_vram, use_case, prefer_moe, require_gqa, long_context, progress=gr.Progress()):  # noqa: B008
                     """Get architecture recommendations."""
                     try:
                         progress(0, desc="Initializing recommender...")
@@ -786,7 +786,7 @@ def launch(
     share: bool = False,
     port: Optional[int] = None,
     debug: bool = False,
-    trust_remote_code: bool = True,
+    trust_remote_code: bool = False,
     allow_network: bool = True,
     local_files_only: bool = False,
 ) -> None:

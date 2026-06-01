@@ -14,10 +14,12 @@ Example:
     >>> tensor = strategy.generate_tensor((1024, 1024), torch.float32, "weight")
 """
 
-import torch
 from typing import Dict
-from .base import WeightGenerationStrategy, StrategyCapabilities
+
+import torch
 from safetensors.torch import save_file
+
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 
 class QuantizedStrategy(WeightGenerationStrategy):

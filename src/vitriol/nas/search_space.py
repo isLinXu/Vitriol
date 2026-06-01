@@ -1,6 +1,7 @@
 import random
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field, asdict, fields
+from dataclasses import asdict, dataclass, field, fields
+from typing import Any, Dict, List, Optional
+
 
 @dataclass
 class ArchitectureGene:
@@ -9,15 +10,15 @@ class ArchitectureGene:
     n_layers: int
     hidden_size: int
     n_heads: int
-    
+
     # Micro Architecture
     attention_type: str  # "MHA", "GQA", "MQA"
     ffn_type: str        # "Standard", "SwiGLU", "GeGLU"
     activation: str      # "gelu", "silu", "relu"
     norm_type: str       # "LayerNorm", "RMSNorm"
-    
+
     vocab_size: int = 32000  # Default to 32k, but can be larger
-    
+
     # Derived/Optional
     intermediate_size: int = field(init=False)
     num_kv_heads: int = field(init=False)
@@ -27,11 +28,11 @@ class ArchitectureGene:
         if self.hidden_size % self.n_heads != 0:
             # Adjust hidden size to be divisible by n_heads
             self.hidden_size = (self.hidden_size // self.n_heads) * self.n_heads
-            
+
         # Default FFN ratio (typically 4x or 8/3x for SwiGLU)
         mult = 8/3 if self.ffn_type in ["SwiGLU", "GeGLU"] else 4.0
         self.intermediate_size = int(self.hidden_size * mult)
-        
+
         # KV Heads logic
         if self.attention_type == "MHA":
             self.num_kv_heads = self.n_heads
@@ -116,14 +117,14 @@ class SearchSpace:
 
 class LLMSearchSpace(SearchSpace):
     """Defines the search space for LLM architectures."""
-    
+
     def __init__(self, vocab_sizes: Optional[List[int]] = None):
         # Macro Dimensions
         self.n_layers_range = list(range(6, 33, 2))  # 6 to 32, step 2
         self.hidden_size_choices = [512, 768, 1024, 1536, 2048, 4096]
         self.n_heads_choices = [4, 8, 12, 16, 24, 32]
         self.vocab_size_choices = vocab_sizes if vocab_sizes else [32000, 151936] # Standard + Qwen
-        
+
         # Micro Dimensions
         self.attention_types = ["MHA", "GQA", "MQA"]
         self.ffn_types = ["Standard", "SwiGLU"]
@@ -146,14 +147,14 @@ class LLMSearchSpace(SearchSpace):
         """Randomly sample an architecture from the search space."""
         # Sample hidden size first
         hidden = random.choice(self.hidden_size_choices)
-        
+
         # Filter valid n_heads (hidden % heads == 0)
         valid_heads = [h for h in self.n_heads_choices if hidden % h == 0]
         if not valid_heads:
             # Fallback
             valid_heads = [4]
             hidden = (hidden // 4) * 4
-            
+
         return ArchitectureGene(
             n_layers=random.choice(self.n_layers_range),
             hidden_size=hidden,
@@ -192,10 +193,10 @@ class LLMSearchSpace(SearchSpace):
     def mutate(self, gene: ArchitectureGene, mutation_rate: float = 0.1) -> ArchitectureGene:
         """Mutate a gene with given probability."""
         new_gene_dict = asdict(gene)
-        
+
         if random.random() < mutation_rate:
             new_gene_dict['n_layers'] = random.choice(self.n_layers_range)
-            
+
         if random.random() < mutation_rate:
             hidden = random.choice(self.hidden_size_choices)
             new_gene_dict['hidden_size'] = hidden
@@ -203,14 +204,14 @@ class LLMSearchSpace(SearchSpace):
             valid_heads = [h for h in self.n_heads_choices if hidden % h == 0]
             if new_gene_dict['n_heads'] not in valid_heads:
                 new_gene_dict['n_heads'] = random.choice(valid_heads)
-                
+
         if random.random() < mutation_rate:
             # Mutate micro architecture
             new_gene_dict['attention_type'] = random.choice(self.attention_types)
 
         if random.random() < mutation_rate:
             new_gene_dict['vocab_size'] = random.choice(self.vocab_size_choices)
-        
+
         if random.random() < mutation_rate:
             new_gene_dict['ffn_type'] = random.choice(self.ffn_types)
 

@@ -13,7 +13,7 @@ import os
 from typing import TYPE_CHECKING, Dict, List
 
 if TYPE_CHECKING:
-    from .tree_builder import EvolutionTree, ArchNode
+    from .tree_builder import ArchNode, EvolutionTree
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +470,7 @@ class TreeVisualizer:
         "Other": "#7c3aed",
     }
 
-    def __init__(self, tree: "EvolutionTree"):
+    def __init__(self, tree: EvolutionTree):
         """
         Initialize the visualizer.
 
@@ -606,7 +606,7 @@ class TreeVisualizer:
         ]
 
         # Group by family
-        families: Dict[str, List["ArchNode"]] = {}
+        families: Dict[str, List[ArchNode]] = {}
         for node in self.tree.nodes.values():
             if node.family not in families:
                 families[node.family] = []

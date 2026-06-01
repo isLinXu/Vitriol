@@ -12,7 +12,6 @@ from pathlib import Path
 from ..adapters.registry import AdapterRegistry
 from ..patches import PatchRegistry, apply_all_patches
 
-
 DEFAULT_MODEL_ID = "MiniMaxAI/MiniMax-M2.7"
 DEFAULT_STRATEGY = "ultra"
 DEFAULT_MAX_SHARD_SIZE = "5GB"
@@ -28,7 +27,7 @@ class PipelineOptions:
     model_id: str = DEFAULT_MODEL_ID
     strategy: str = DEFAULT_STRATEGY
     max_shard_size: str = DEFAULT_MAX_SHARD_SIZE
-    trust_remote_code: bool = True
+    trust_remote_code: bool = False
     run_inference: bool = False
     serve_viz: bool = False
     no_open: bool = False
@@ -41,7 +40,7 @@ class PipelineStep:
     command: list[str] | None = None
 
 
-def build_vitriol_command(python_bin: str, *args: str, trust_remote_code: bool = True) -> list[str]:
+def build_vitriol_command(python_bin: str, *args: str, trust_remote_code: bool = False) -> list[str]:
     command = [python_bin, "-m", "vitriol.cli.main"]
     command.append("--trust-remote-code" if trust_remote_code else "--no-trust-remote-code")
     command.extend(args)
@@ -164,10 +163,11 @@ def normalize_nested_subconfigs(config) -> None:
 def validate_model_dir(model_dir: Path, run_inference: bool, trust_remote_code: bool) -> dict[str, object]:
     apply_validation_runtime_patches()
 
+    import torch
+
     from ..utils.hf_loading import load_causallm as hf_load_causallm
     from ..utils.hf_loading import load_config as hf_load_config
     from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
-    import torch
 
     report: dict[str, object] = {
         "model_dir": str(model_dir),
@@ -254,10 +254,19 @@ def parse_args(argv: list[str] | None = None) -> PipelineOptions:
     parser.add_argument("--serve-viz", action="store_true", help="Launch the interactive viz server after static artifacts are generated.")
     parser.add_argument("--no-open", action="store_true", help="Do not auto-open the browser when --serve-viz is used.")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument(
-        "--no-trust-remote-code",
+    trust_group = parser.add_mutually_exclusive_group()
+    trust_group.add_argument(
+        "--trust-remote-code",
+        dest="trust_remote_code",
         action="store_true",
-        help="Disable trust_remote_code for all load steps.",
+        default=False,
+        help="Enable trust_remote_code for trusted model repositories.",
+    )
+    trust_group.add_argument(
+        "--no-trust-remote-code",
+        dest="trust_remote_code",
+        action="store_false",
+        help="Disable trust_remote_code for all load steps (default).",
     )
     args = parser.parse_args(argv)
 
@@ -270,7 +279,7 @@ def parse_args(argv: list[str] | None = None) -> PipelineOptions:
         model_id=args.model_id,
         strategy=args.strategy,
         max_shard_size=args.max_shard_size,
-        trust_remote_code=not args.no_trust_remote_code,
+        trust_remote_code=bool(args.trust_remote_code),
         run_inference=args.with_inference,
         serve_viz=args.serve_viz,
         no_open=args.no_open,

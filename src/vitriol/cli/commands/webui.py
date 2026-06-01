@@ -2,8 +2,9 @@
 CLI command for launching the Web UI.
 """
 
-import click
 import logging
+
+import click
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,23 @@ def _load_webui_launch():
     from vitriol.webui import launch
 
     return launch
+
+
+def _launch_kwargs(ctx, *, share, port, debug):
+    """Forward non-default runtime controls without widening the default call contract."""
+    ctx_obj = getattr(ctx, "obj", None) or {}
+    kwargs = {
+        "share": share,
+        "port": port,
+        "debug": debug,
+    }
+    if bool(ctx_obj.get("trust_remote_code", False)):
+        kwargs["trust_remote_code"] = True
+    if not bool(ctx_obj.get("allow_network", True)):
+        kwargs["allow_network"] = False
+    if bool(ctx_obj.get("local_files_only", False)):
+        kwargs["local_files_only"] = True
+    return kwargs
 
 
 @click.command(name="webui")
@@ -33,16 +51,9 @@ def launch_webui(ctx, port, share, debug):
 
     try:
         launch = _load_webui_launch()
-        launch(
-            share=share,
-            port=port,
-            debug=debug,
-            trust_remote_code=bool(ctx.obj.get("trust_remote_code", True)) if getattr(ctx, "obj", None) else True,
-            allow_network=bool(ctx.obj.get("allow_network", True)) if getattr(ctx, "obj", None) else True,
-            local_files_only=bool(ctx.obj.get("local_files_only", False)) if getattr(ctx, "obj", None) else False,
-        )
+        launch(**_launch_kwargs(ctx, share=share, port=port, debug=debug))
     except KeyboardInterrupt:
         click.echo("\n👋 Web UI stopped.")
     except Exception as e:
         logger.error(f"Failed to launch web UI: {e}")
-        raise click.ClickException(str(e))
+        raise click.ClickException(str(e)) from e

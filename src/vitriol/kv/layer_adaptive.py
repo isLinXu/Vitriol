@@ -35,7 +35,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-
 # ─────────────────────────────────────────────────────────────
 # Layer depth sensitivity profile
 # ─────────────────────────────────────────────────────────────

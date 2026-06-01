@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-
 # ─────────────────────────────────────────────────────────────
 # 1. Sliding Window Eviction Policy
 # ─────────────────────────────────────────────────────────────
@@ -394,8 +393,10 @@ class HybridKVCacheStore:
         instead of re-decoding packed representations every time.
         """
         from .codec import (
-            PackedKVTensor, ResidualQJLPackedTensor,
-            unpack_blockwise_tensor, unpack_qjl_residual_tensor,
+            PackedKVTensor,
+            ResidualQJLPackedTensor,
+            unpack_blockwise_tensor,
+            unpack_qjl_residual_tensor,
         )
 
         if self._k_raw is None or self._v_raw is None:

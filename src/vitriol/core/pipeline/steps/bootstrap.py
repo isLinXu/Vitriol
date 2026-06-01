@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-
-from ...incremental import IncrementalGenerator
 from ....strategies import get_strategy
+from ....utils.size import parse_size_to_bytes as _parse_size
+from ...incremental import IncrementalGenerator
 from ..context import GenerationContext
-
-
-def _parse_size(size_str: str) -> int:
-    upper = size_str.upper()
-    for unit, mult in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
-        if upper.endswith(unit):
-            return int(float(size_str[:-2]) * mult)
-    return int(size_str)
 
 
 class BootstrapStep:
@@ -34,4 +26,3 @@ class BootstrapStep:
 
         if ctx.shrink_config is None:
             ctx.shrink_config = ctx.config.strategy in ("ultra", "hybrid_ultra")
-

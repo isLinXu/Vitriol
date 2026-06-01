@@ -32,14 +32,14 @@ classifiers = [
 ]
 dependencies = [
     "transformers>=4.40.0,<5.0.0",
-    "torch>=2.0.0",
+    "torch>=2.0.0,<3.0.0",
     "accelerate>=0.20.0",
     "safetensors>=0.3.0",
     "huggingface_hub>=0.14.0",
     "click>=8.0.0",
     "tqdm",
     "PyYAML>=6.0",
-    "numpy<2",
+    "numpy>=1.21,<2",
 ]
 
 [project.optional-dependencies]
@@ -103,3 +103,30 @@ filterwarnings = [
 [tool.ruff]
 target-version = "py39"
 line-length = 120
+
+[tool.ruff.lint]
+# Conservative high-value rule set:
+#   E, W  - pycodestyle errors / warnings (whitespace, line-length, etc.)
+#   F     - Pyflakes (unused imports, undefined names, real bugs)
+#   I     - isort (import ordering)
+#   B     - flake8-bugbear (mutable defaults, missing `from` in re-raise, etc.)
+#   UP    - pyupgrade (modern Python syntax)
+# Specific UP sub-rules opted out of below until we drop Python 3.9 support.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    # Long lines are common in generated strings and HTML templates here.
+    # Keep the 120-char target enforceable elsewhere but do not block on it.
+    "E501",
+    # PEP 585 / 604 / typing imports require Python 3.10+ for runtime evaluation
+    # (Pydantic, dataclasses, FastAPI all introspect annotations at import time).
+    # The project still targets py39; revisit when the minimum bumps to 3.10.
+    "UP006",  # use `dict` instead of `Dict`
+    "UP007",  # use `X | Y` instead of `Union[X, Y]`
+    "UP035",  # `typing.Dict` is deprecated, use `dict`
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately import fixtures lazily and use long parametrize ids.
+"tests/**" = ["E501", "F401"]
+# __init__ files re-export public API on purpose.
+"**/__init__.py" = ["F401"]

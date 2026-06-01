@@ -5,25 +5,26 @@ Generates minimal weight files using zeros with optional caching
 for fast generation.
 """
 
-import torch
 from typing import Dict
 
-from .base import WeightGenerationStrategy, StrategyCapabilities
+import torch
+
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 
 class CompactStrategy(WeightGenerationStrategy):
     """
     Compact strategy using zero-filled tensors.
-    
+
     Generates weights filled with zeros, achieving good compression
     while maintaining compatibility with all formats.
-    
+
     Capabilities:
         ✅ Supports Safetensors format
         ⚠️ Limited training support (zeros may cause gradient issues)
         ✅ Good compression (compresses well with zip/gzip)
         ✅ Fast generation
-    
+
     Example:
         >>> strategy = CompactStrategy()
         >>> tensor = strategy.generate_tensor((1024, 1024), torch.float32, "weight")
@@ -32,7 +33,7 @@ class CompactStrategy(WeightGenerationStrategy):
         >>> tensor.sum()
         tensor(0.)
     """
-    
+
     def __init__(
         self,
         device: str = "cpu",
@@ -42,7 +43,7 @@ class CompactStrategy(WeightGenerationStrategy):
     ):
         """
         Initialize Compact strategy.
-        
+
         Args:
             device: Device to generate tensors on
             save_dummy_config: Whether to save dummy config files
@@ -52,7 +53,7 @@ class CompactStrategy(WeightGenerationStrategy):
         super().__init__(device, save_dummy_config=save_dummy_config, **kwargs)
         self.cache_size = cache_size
         self._cache: Dict[tuple, torch.Tensor] = {}
-    
+
     @property
     def capabilities(self) -> StrategyCapabilities:
         """Return Compact strategy capabilities."""
@@ -66,7 +67,7 @@ class CompactStrategy(WeightGenerationStrategy):
                 "May cause training issues with gradient flow."
             )
         )
-    
+
     def generate_tensor(
         self,
         shape: tuple,
@@ -76,34 +77,34 @@ class CompactStrategy(WeightGenerationStrategy):
     ) -> torch.Tensor:
         """
         Generate a zero-filled tensor (with caching).
-        
+
         Args:
             shape: Tensor shape
             dtype: Data type
             name: Parameter name
             **kwargs: Additional parameters (ignored)
-        
+
         Returns:
             Zero-filled tensor
         """
         dtype = self._normalize_dtype(dtype)
         self._validate_shape(shape)
-        
+
         # Check cache
         cache_key = (shape, dtype)
         if cache_key in self._cache:
             # Return a clone to avoid shared storage issues
             return self._cache[cache_key].clone()
-        
+
         # Generate new tensor
         tensor = torch.zeros(shape, dtype=dtype, device=self.device)
-        
+
         # Add to cache if space available
         if len(self._cache) < self.cache_size:
             self._cache[cache_key] = tensor.clone()
-        
+
         return tensor
-    
+
     def save_shard(self, shard_data: Dict[str, torch.Tensor], path: str):
         """
         Save shard to disk.
@@ -145,7 +146,7 @@ class CompactStrategy(WeightGenerationStrategy):
             torch.save(shard_data, fallback_path)
         else:
             torch.save(shard_data, path)
-    
+
     def clear_cache(self):
         """Clear the tensor cache to free memory."""
         self._cache.clear()

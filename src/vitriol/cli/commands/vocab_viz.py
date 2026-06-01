@@ -1,6 +1,5 @@
-import click
-import logging
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -8,6 +7,8 @@ import time
 import webbrowser
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+
+import click
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ class QuietHTTPHandler(SimpleHTTPRequestHandler):
     """HTTP handler that suppresses logging"""
     def log_message(self, format, *args):
         pass  # Suppress request logging
-        
+
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
@@ -140,11 +141,11 @@ def vocab_viz(output, viz_type, model_id, plot_type, is_3d):
         if not model_id:
             logger.error("--model-id is required for 3D visualization.")
             return
-        
+
         click.echo(f"Loading tokenizer for {model_id}...")
         try:
             ctx = click.get_current_context(silent=True)
-            trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", True)) if ctx else True
+            trust_remote_code = bool((ctx.obj or {}).get("trust_remote_code", False)) if ctx else False
             allow_network = bool((ctx.obj or {}).get("allow_network", True)) if ctx else True
             local_files_only = bool((ctx.obj or {}).get("local_files_only", False)) if ctx else False
             tokenizer = hf_load_tokenizer(
@@ -165,22 +166,22 @@ def vocab_viz(output, viz_type, model_id, plot_type, is_3d):
             except Exception:
                 click.echo(f"Error loading tokenizer: {e}", err=True)
                 return
-            
+
         click.echo("Processing vocabulary and assigning categories...")
         categories = ["Special", "English/Latin", "Chinese", "Digits", "Cyrillic", "Other/Symbol"]
         cat_map = {c: i for i, c in enumerate(categories)}
-        
+
         sorted_vocab = sorted(vocab.items(), key=lambda x: x[1])
         tokens_data = []
-        
+
         for token, idx in sorted_vocab:
             # pad missing IDs
             while len(tokens_data) < idx:
                 tokens_data.append(["<unk>", cat_map["Special"]])
-                
+
             clean_token = token.replace('Ġ', '').replace(' ', '').replace('##', '').replace(' ', '')
             cat = "Other/Symbol"
-            
+
             if idx in special_ids:
                 cat = "Special"
             else:
@@ -196,16 +197,16 @@ def vocab_viz(output, viz_type, model_id, plot_type, is_3d):
                     cat = "Cyrillic"
                 else:
                     cat = "Other/Symbol"
-                    
+
             tokens_data.append([token, cat_map[cat]])
-            
+
         data = {
             "model_id": model_id,
             "vocab_size": len(tokens_data),
             "categories": categories,
             "tokens": tokens_data
         }
-        
+
         # Write to temp directory and serve
         temp_dir = tempfile.mkdtemp()
         json_path = os.path.join(temp_dir, "vocab_data.json")
@@ -216,12 +217,12 @@ def vocab_viz(output, viz_type, model_id, plot_type, is_3d):
         except Exception as e:
             click.echo(f"Error writing vocab_data.json: {e}", err=True)
             return
-            
+
         # Copy HTML
         html_path = Path(__file__).parent.parent.parent / "viz" / "vocab_3d_visualizer.html"
         with open(os.path.join(temp_dir, "vocab_3d_visualizer.html"), "w", encoding="utf-8") as f:
             f.write(html_path.read_text(encoding="utf-8"))
-            
+
         serve_3d_vocab(temp_dir)
         return
 
@@ -233,7 +234,7 @@ def vocab_viz(output, viz_type, model_id, plot_type, is_3d):
         raise _missing_viz_dependency(exc) from exc
 
     viz = VocabVisualizer() # Uses default dataset
-    
+
     if viz_type == "single":
         if not model_id:
             logger.error("--model-id is required for single mode.")
@@ -245,10 +246,10 @@ def vocab_viz(output, viz_type, model_id, plot_type, is_3d):
 
     if model_id:
         viz.add_model_from_id(model_id, family="Custom")
-    
+
     if viz_type == "treemap":
         path = viz.generate_treemap(output)
     else:
         path = viz.generate_bar_chart(output)
-        
+
     logger.info(f"Visualization saved to {path}")

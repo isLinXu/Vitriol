@@ -1,44 +1,44 @@
-import logging
 import json
+import logging
 from functools import partial
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-from .search_space import LLMSearchSpace, ArchitectureGene
 from .evaluator import HybridEvaluator
-from .searcher import RandomSearcher, EvolutionarySearcher
 from .rl_agent import RLSearcher
+from .search_space import ArchitectureGene, LLMSearchSpace
+from .searcher import EvolutionarySearcher, RandomSearcher
 
 logger = logging.getLogger(__name__)
 
 class NASController:
     """Orchestrates the Neural Architecture Search process."""
-    
+
     def __init__(self, output_dir: str = "output/nas_results", device: str = "cpu"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.search_space = LLMSearchSpace()
         self.evaluator = HybridEvaluator(str(self.output_dir / "eval"), device=device)
         self.checkpoint_path = self.output_dir / "checkpoint.json"
-        
+
     def run(self, algorithm: str = "random", n_iterations: int = 10, population_size: int = 20, resume: bool = False, dataset_config: Optional[Dict] = None) -> Dict[str, Any]:
         """Run the search."""
         logger.info("Starting NAS run with algorithm=%s, iterations=%d", algorithm, n_iterations)
-        
+
         searcher = None
-        
+
         # Define checkpoint callback
         def checkpoint_cb():
             if searcher:
                 self._save_checkpoint(searcher)
-        
+
         if algorithm == "random":
             searcher = RandomSearcher(self.search_space, self.evaluator, save_checkpoint_callback=checkpoint_cb)
         elif algorithm == "evolutionary":
             searcher = EvolutionarySearcher(
-                self.search_space, 
-                self.evaluator, 
+                self.search_space,
+                self.evaluator,
                 population_size=population_size,
                 save_checkpoint_callback=checkpoint_cb
             )
@@ -62,10 +62,10 @@ class NASController:
         if resume and self.checkpoint_path.exists():
             logger.info("Resuming from checkpoint: %s", self.checkpoint_path)
             self._load_checkpoint(searcher)
-            
+
         try:
             best_gene = searcher.search(n_iterations)
-            
+
         except KeyboardInterrupt:
             logger.info("Search interrupted! Saving checkpoint...")
             self._save_checkpoint(searcher)
@@ -85,15 +85,15 @@ class NASController:
                 for r in searcher.history
             ]
         }
-        
+
         output_file = self.output_dir / "results.json"
         with open(output_file, "w") as f:
             json.dump(results, f, indent=2)
-            
+
         # Clean checkpoint on success
         if self.checkpoint_path.exists():
             self.checkpoint_path.unlink()
-            
+
         logger.info("NAS run completed. Results saved to %s", output_file)
         return results
 
@@ -108,15 +108,15 @@ class NASController:
             }
             for r in searcher.history
         ]
-        
+
         data = {
             "history": history_serializable,
         }
-        
+
         # If Evolutionary, save population
         if hasattr(searcher, "population"):
             data["population"] = [g.to_dict() for g in searcher.population]
-            
+
         with open(self.checkpoint_path, "w") as f:
             json.dump(data, f, indent=2)
         logger.info("Checkpoint saved.")
@@ -127,9 +127,9 @@ class NASController:
             return
 
         try:
-            with open(self.checkpoint_path, "r") as f:
+            with open(self.checkpoint_path) as f:
                 data = json.load(f)
-            
+
             # Restore history
             if "history" in data:
                 searcher.history = []
@@ -146,7 +146,7 @@ class NASController:
             if "population" in data and hasattr(searcher, "population"):
                 searcher.population = [ArchitectureGene.from_dict(g) for g in data["population"]]
                 logger.info("Restored population of size %d.", len(searcher.population))
-                
+
         except Exception as e:
             logger.error("Failed to load checkpoint: %s", e)
             # Don't crash, just start fresh if checkpoint is corrupted

@@ -26,10 +26,10 @@ Academic Value:
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
-import torch
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 

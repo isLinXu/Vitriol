@@ -6,7 +6,7 @@ patches to configurations, handling differences between model families.
 """
 
 import logging
-from typing import Any, Dict, List, Tuple, Callable
+from typing import Any, Callable, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def _ensure_rope_params(config: Any) -> None:
     """Ensure RoPE parameters are present with defaults."""
     existing = getattr(config, "rope_parameters", None)
     if not isinstance(existing, dict):
-        setattr(config, "rope_parameters", dict(_ROPE_DEFAULTS))
+        config.rope_parameters = dict(_ROPE_DEFAULTS)
     else:
         for k, v in _ROPE_DEFAULTS.items():
             existing.setdefault(k, v)
@@ -46,7 +46,7 @@ def _fix_rope_theta(config: Any) -> None:
         config.rope_theta = float(theta[0]) if theta else 10000.0
     elif theta is None:
         config.rope_theta = 10000.0
-    
+
     if isinstance(getattr(config, "rope_scaling", None), (list, tuple)):
         config.rope_scaling = None
 
@@ -61,9 +61,9 @@ def _fix_rms_norm(config: Any) -> None:
 class PatchRegistry:
     """
     Decorator-based registry mapping family keywords to patch functions.
-    
+
     Match order: config class-name substring, then model_id substring.
-    
+
     Example:
         >>> @PatchRegistry.register("qwen")
         ... def patch_qwen(config, model_id):
@@ -72,20 +72,20 @@ class PatchRegistry:
         >>> config = AutoConfig.from_pretrained("Qwen/Qwen2-7B")
         >>> PatchRegistry.apply(config, "Qwen/Qwen2-7B")
     """
-    
+
     _entries: List[Tuple[Tuple[str, ...], Callable]] = []
-    
+
     @classmethod
     def register(cls, *keys: str) -> Callable:
         """
         Register a patch function for specific model keywords.
-        
+
         Args:
             *keys: Keywords to match (case-insensitive)
-        
+
         Returns:
             Decorator function
-        
+
         Example:
             @PatchRegistry.register("qwen", "qwenvl")
             def patch_qwen_family(config, model_id):
@@ -96,19 +96,19 @@ class PatchRegistry:
             cls._entries.append((tuple(k.lower() for k in keys), fn))
             return fn
         return decorator
-    
+
     @classmethod
     def apply(cls, config: Any, model_id: str) -> None:
         """
         Apply all matching patches to a config.
-        
+
         Args:
             config: Model configuration object
             model_id: Model identifier (e.g., "Qwen/Qwen2-7B")
         """
         cname = type(config).__name__.lower()
         mid = model_id.lower()
-        
+
         for keys, fn in cls._entries:
             if any(k in cname or k in mid for k in keys):
                 try:
@@ -131,7 +131,7 @@ def _patch_qwen(config: Any, _mid: str) -> None:
         intermediate_size=512,
         mlp_only_layers=[],
     )
-    
+
     if not hasattr(config, "qkv_bias"):
         config.qkv_bias = getattr(config, "attention_bias", True)
 
@@ -236,7 +236,7 @@ def _patch_deepseek(config: Any, _mid: str) -> None:
     _fix_rope_theta(config)
     _fix_rms_norm(config)
     _ensure_rope_params(config)
-    
+
     # Handle DeepSeek-V3 MLA
     if hasattr(config, "q_lora_rank"):
         _set_missing(config, kv_lora_rank=getattr(config, "q_lora_rank", 512))

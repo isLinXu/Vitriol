@@ -9,7 +9,7 @@ its symbol is actually accessed.
 
 from __future__ import annotations
 
-from .search_space import LLMSearchSpace, ArchitectureGene
+from .search_space import ArchitectureGene, LLMSearchSpace
 
 _LAZY_EXPORTS = {
     # searcher

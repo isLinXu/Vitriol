@@ -4,12 +4,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-%3E%3D3.8-blue?logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/python-%3E%3D3.9-blue?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/version-0.3.0-green" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License">
   <img src="https://img.shields.io/badge/torch-%3E%3D2.0-red?logo=pytorch" alt="PyTorch">
   <img src="https://img.shields.io/badge/transformers-%3E%3D4.40-orange?logo=huggingface" alt="Transformers">
-  <img src="https://img.shields.io/badge/source_files-150+-blueviolet" alt="Source Files">
+  <img src="https://img.shields.io/badge/source_files-200+-blueviolet" alt="Source Files">
 </p>
 
 <p align="center">

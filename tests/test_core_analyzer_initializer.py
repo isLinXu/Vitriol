@@ -52,7 +52,7 @@ class TestModelAnalyzer:
     def test_init_defaults(self):
         analyzer = ModelAnalyzer("test-model")
         assert analyzer.model_id == "test-model"
-        assert analyzer.trust_remote_code is True
+        assert analyzer.trust_remote_code is False
         assert analyzer.allow_network is True
         assert analyzer.local_files_only is False
         assert analyzer.config is None

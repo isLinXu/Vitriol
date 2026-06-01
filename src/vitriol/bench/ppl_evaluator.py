@@ -57,7 +57,7 @@ class PPLConfig:
     model_id: str = "Qwen/Qwen2.5-0.5B"          # Model to evaluate
     device: Optional[str] = None                   # Auto-detect if None
     dtype: str = "float16"                         # or float32, bfloat16
-    trust_remote_code: bool = True                 # HF loading security switch
+    trust_remote_code: bool = False                # HF loading security switch
 
     # Evaluation parameters
     max_new_tokens: int = 64                       # Generation length for PPL calc

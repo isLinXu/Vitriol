@@ -1,22 +1,23 @@
 
+import logging
 from pathlib import Path
-from .parser import ConfigParser
+
 from .analyzer import ArchitectureAnalyzer
+from .parser import ConfigParser
 from .renderers.block import BlockRenderer
 from .renderers.detail import DetailRenderer
 from .renderers.html import HTMLRenderer
-import logging
 
 logger = logging.getLogger(__name__)
 
 class ArchitectureVisualizer:
     """Main entry point for Architecture Visualization."""
-    
+
     def __init__(
         self,
         model_id_or_path: str,
         style: str = 'default',
-        trust_remote_code: bool = True,
+        trust_remote_code: bool = False,
         local_files_only: bool = False,
     ):
         self.model_id = model_id_or_path
@@ -25,10 +26,10 @@ class ArchitectureVisualizer:
         self.local_files_only = bool(local_files_only)
         self.config = None
         self.architecture = None
-        
+
         # Load and analyze
         self._load()
-        
+
     def _load(self):
         logger.info(f"Loading config for {self.model_id}...")
         self.config = ConfigParser.load_config(
@@ -58,7 +59,7 @@ class ArchitectureVisualizer:
     def generate_all(self, output_dir: str):
         path = Path(output_dir)
         path.mkdir(parents=True, exist_ok=True)
-        
+
         self.architecture.to_json(path / "architecture.json")
         self.generate_block_diagram(str(path / "block_diagram.png"))
         self.generate_detailed_diagram(str(path / "detailed_view.png"))

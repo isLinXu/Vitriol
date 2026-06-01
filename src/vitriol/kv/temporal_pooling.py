@@ -3,7 +3,7 @@ Temporal Importance Pooling for KV Cache Attention.
 
 Problem with current Sparse V (cache_store.py:386):
     sparse = torch.where(weights > threshold, weights, zeros)
-    
+
     This hard-threshold causes:
     1. Abrupt quality cliff at threshold boundary
     2. Information loss for tokens slightly below threshold
@@ -19,15 +19,15 @@ Instead of hard threshold, apply:
 
 Formula:
     For attention weight w[i] at position i (0=oldest, s-1=newest):
-    
+
     decay_factor[i] = exp(-λ · (s - 1 - i) / s)  # temporal decay
-    
+
     importance_score[i] = w[i] · decay_factor[i]    # combined score
-    
+
     soft_mask[i] = sigmoid((importance_score[i] - μ) / τ)  # smooth gating
-    
+
     pooled_weight[i] = w[i] · soft_mask[i]
-    
+
 Where:
     λ = temporal decay rate (0 = no decay, ∞ = only last token)
     μ = mean importance (adaptive threshold)
@@ -115,7 +115,7 @@ def temporal_importance_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    config: TemporalPoolingConfig = TemporalPoolingConfig(),
+    config: Optional[TemporalPoolingConfig] = None,
     attn_mask: Optional[torch.Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
@@ -138,6 +138,8 @@ def temporal_importance_attention(
         output: [batch, heads, q_len, d]
         report: Diagnostic dictionary
     """
+    if config is None:
+        config = TemporalPoolingConfig()
     d = query.size(-1)
     scale_factor = float(scale) if scale is not None else (1.0 / math.sqrt(d))
 
@@ -237,7 +239,7 @@ def temporal_importance_attention_with_residual_proxy(
     query: torch.Tensor,
     packed_key: Any,  # ResidualQJLPackedTensor
     value: torch.Tensor,
-    config: TemporalPoolingConfig = TemporalPoolingConfig(),
+    config: Optional[TemporalPoolingConfig] = None,
     attn_mask: Optional[torch.Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
@@ -252,6 +254,8 @@ def temporal_importance_attention_with_residual_proxy(
     Key difference: instead of hard-threshold sparse V, we use soft temporal
     importance gating on the attention weights.
     """
+    if config is None:
+        config = TemporalPoolingConfig()
     from .codec import approx_inner_product_with_qjl_residual
 
     d = query.size(-1)

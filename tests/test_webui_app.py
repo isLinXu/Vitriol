@@ -3,7 +3,9 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
+pytest.importorskip("gradio")
 from vitriol.webui.app import (
     _ensure_cache_dirs,
     format_params,
@@ -56,3 +58,19 @@ class TestCreateApp:
         create_app()
         _, kwargs = mock_gr.Blocks.call_args
         assert "Vitriol" in kwargs["title"]
+
+    @patch("vitriol.webui.app.gr")
+    def test_create_app_defaults_remote_code_checkbox_off(self, mock_gr):
+        mock_blocks = MagicMock()
+        mock_gr.Blocks.return_value = mock_blocks
+        mock_gr.themes.Soft.return_value = MagicMock()
+
+        create_app()
+
+        trust_checkbox_values = [
+            kwargs.get("value")
+            for _, kwargs in mock_gr.Checkbox.call_args_list
+            if "Trust Remote Code" in kwargs.get("label", "")
+        ]
+        assert trust_checkbox_values
+        assert all(value is False for value in trust_checkbox_values)

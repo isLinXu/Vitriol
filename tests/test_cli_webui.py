@@ -66,6 +66,22 @@ class TestWebuiCommandMocked:
         assert result.exit_code == 0
         mock_launch.assert_called_once_with(share=True, port=3000, debug=True)
 
+    @patch("vitriol.cli.commands.webui._load_webui_launch")
+    def test_webui_offline_forwards_runtime_controls(self, mock_load_launch):
+        runner = CliRunner()
+        mock_launch = MagicMock()
+        mock_load_launch.return_value = mock_launch
+
+        result = runner.invoke(cli, ["--offline", "webui"])
+        assert result.exit_code == 0
+        mock_launch.assert_called_once_with(
+            share=False,
+            port=7860,
+            debug=False,
+            allow_network=False,
+            local_files_only=True,
+        )
+
 
 class TestWebuiCommandErrors:
     @patch("vitriol.cli.commands.webui._load_webui_launch")

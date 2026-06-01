@@ -257,4 +257,4 @@ def test_process_generation_job_uses_build_generation_config(monkeypatch):
     assert captured["overrides"]["strategy"] == "compact"
     assert captured["overrides"]["dtype"] == "float16"
     assert captured["overrides"]["max_shard_size"] == "2GB"
-    assert captured["overrides"]["trust_remote_code"] is True
+    assert captured["overrides"]["trust_remote_code"] is False

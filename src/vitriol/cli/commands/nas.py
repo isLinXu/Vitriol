@@ -1,6 +1,8 @@
-import os
-import click
 import logging
+import os
+
+import click
+
 from vitriol.nas.controller import NASController
 
 logger = logging.getLogger(__name__)
@@ -83,11 +85,11 @@ def nas(ctx, algorithm, iterations, generations, episodes, population, output_di
         elif algorithm == "targeted":
             # Run targeted/constraint-based NAS
             from vitriol.nas.targeted_nas import (
+                Constraint,
                 ConstraintOptimizer,
                 ConstraintType,
-                Constraint,
-                OptimizationTarget,
                 ObjectiveType,
+                OptimizationTarget,
             )
 
             # Create optimizer with constraints
@@ -152,4 +154,4 @@ def nas(ctx, algorithm, iterations, generations, episodes, population, output_di
 
     except Exception as e:
         logger.error(f"NAS failed: {e}")
-        raise click.ClickException(str(e))
+        raise click.ClickException(str(e)) from e

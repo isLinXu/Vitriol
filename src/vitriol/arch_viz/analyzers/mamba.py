@@ -4,7 +4,7 @@ Mamba/SWA Analyzer.
 Detects and analyzes Mamba/Sliding Window Attention architectures.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
 
 class MambaAnalyzer:

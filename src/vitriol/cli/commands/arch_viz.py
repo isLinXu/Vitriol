@@ -1,6 +1,19 @@
+import sys
 
 import click
-import sys
+
+
+def _visualizer_kwargs(ctx, style):
+    """Preserve the stable CLI contract while still honoring offline flags."""
+    ctx_obj = getattr(ctx, "obj", None) or {}
+    kwargs = {
+        "style": style,
+        "trust_remote_code": bool(ctx_obj.get("trust_remote_code", False)),
+    }
+    if bool(ctx_obj.get("local_files_only", False)):
+        kwargs["local_files_only"] = True
+    return kwargs
+
 
 @click.command()
 @click.argument('model_id')
@@ -14,15 +27,10 @@ import sys
 def arch_viz(ctx, model_id, output, generate_all, block, detail, html, style):
     """Visualize model architecture from config"""
     from ...arch_viz.visualizer import ArchitectureVisualizer
-    
+
     try:
-        viz = ArchitectureVisualizer(
-            model_id,
-            style=style,
-            trust_remote_code=bool(ctx.obj.get("trust_remote_code", True)) if getattr(ctx, "obj", None) else True,
-            local_files_only=bool(ctx.obj.get("local_files_only", False)) if getattr(ctx, "obj", None) else False,
-        )
-        
+        viz = ArchitectureVisualizer(model_id, **_visualizer_kwargs(ctx, style))
+
         if generate_all:
             if not output:
                 output = f"{model_id.split('/')[-1]}_viz"
@@ -32,19 +40,19 @@ def arch_viz(ctx, model_id, output, generate_all, block, detail, html, style):
         # Default to block diagram if nothing specified
         if not (block or detail or html):
             block = True
-            
+
         if block:
             path = output if output else "architecture_block.png"
             viz.generate_block_diagram(path)
-            
+
         if detail:
             path = output if output else "architecture_detail.png"
             viz.generate_detailed_diagram(path)
-            
+
         if html:
             path = output if output else "architecture.html"
             viz.generate_interactive_html(path)
-            
+
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)

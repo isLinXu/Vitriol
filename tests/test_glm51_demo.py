@@ -66,7 +66,7 @@ def test_model_demo_plan_contains_prepare_weight_viz_and_arch_viz() -> None:
         "python3",
         "-m",
         "vitriol.cli.main",
-        "--trust-remote-code",
+        "--no-trust-remote-code",
         "viz",
         "/repo/output/glm_5_1_demo",
         "--port",
@@ -102,7 +102,7 @@ def test_model_demo_plan_uses_local_model_path_without_prepare_step() -> None:
         "python3",
         "-m",
         "vitriol.cli.main",
-        "--trust-remote-code",
+        "--no-trust-remote-code",
         "arch-viz",
         "/models/local-demo",
         "--block",
@@ -124,6 +124,17 @@ def test_parse_args_prefers_model_path_for_existing_local_model() -> None:
     assert options.source_path == Path("/models/local-demo")
     assert options.output_dir == Path("/models/local-demo")
     assert options.static_arch_viz is True
+    assert options.trust_remote_code is False
+
+
+def test_parse_args_enables_remote_code_only_when_requested() -> None:
+    options = parse_args([
+        "--repo-root",
+        "/repo",
+        "--trust-remote-code",
+    ])
+
+    assert options.trust_remote_code is True
 
 
 def test_list_supported_families_exposes_registered_adapter_modules() -> None:

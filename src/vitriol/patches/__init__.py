@@ -5,16 +5,16 @@ This module contains all necessary patches for compatibility with various
 transformers versions and model architectures.
 """
 
-from .transformers_patches import (
-    patch_transformers_generic,
-    patch_fx_available,
-    patch_pretrained_init,
-)
+from .cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher
 from .detectron2_mock import mock_detectron2
 from .dynamic_model_patches import patch_remote_module
-from .model_family_patches import PatchRegistry
 from .kv_runtime_patches import KVRuntimePatchConfig, KVRuntimePatcher, patch_kv_runtime
-from .cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher
+from .model_family_patches import PatchRegistry
+from .transformers_patches import (
+    patch_fx_available,
+    patch_pretrained_init,
+    patch_transformers_generic,
+)
 
 __all__ = [
     "apply_all_patches",

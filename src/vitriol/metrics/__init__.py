@@ -8,17 +8,17 @@ Provides:
 """
 
 from .compression_intelligence import (
-    CompressionScores,
-    StrategyMetrics,
-    CompressionIntelligenceScorer,
-    CriticalPointDetector,
     STRATEGY_SCORE_MATRIX,
-    compute_theoretical_psi,
-    generate_score_comparison_table,
+    CompressionIntelligenceScorer,
+    CompressionScores,
+    CriticalPointDetector,
+    ExpressivePowerMetrics,
     InformationPreservationMetrics,
     StorageEfficiencyMetrics,
-    ExpressivePowerMetrics,
+    StrategyMetrics,
     TrainabilityMetrics,
+    compute_theoretical_psi,
+    generate_score_comparison_table,
 )
 
 __all__ = [

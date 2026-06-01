@@ -13,25 +13,26 @@ Install via: `pip install "vitriol[api]"`
 """
 
 import asyncio
+import hmac
 import json
-import os
 import logging
-import time
-from typing import Dict, Any, Optional, List
-import uuid
-from datetime import datetime, timezone
-from collections import defaultdict, deque
+import os
 import threading
+import time
+import uuid
+from collections import defaultdict, deque
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Request
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..config.manager import build_generation_config
-from ..logging.logger import get_logger
 from ..config.settings import get_config
+from ..logging.logger import get_logger
 from ..version import __version__
 
 logger = get_logger("vitriol.api")
@@ -317,14 +318,35 @@ async def rate_limit_middleware(request: Request, call_next):
 
 
 # Authentication
-def verify_api_key(api_key: Optional[str] = Query(None, description="API Key")):
-    """Verify API key."""
+def _bearer_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _matches_api_key(candidate: Optional[str], valid_keys: List[str]) -> bool:
+    if not candidate:
+        return False
+    return any(hmac.compare_digest(candidate, str(valid_key)) for valid_key in valid_keys)
+
+
+def verify_api_key(
+    api_key: Optional[str] = Query(None, description="Deprecated: API key query parameter"),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    authorization: Optional[str] = Header(None),
+):
+    """Verify API key from X-API-Key, Bearer token, or legacy query parameter."""
     config = get_config()
     if config.get("security.api_key_required"):
-        valid_keys = config.get("security.api_keys", [])
-        if api_key not in valid_keys:
+        valid_keys = config.get("security.api_keys", []) or []
+        candidate = x_api_key or _bearer_token(authorization) or api_key
+        if not _matches_api_key(candidate, valid_keys):
             raise HTTPException(status_code=401, detail="Invalid API key")
-    return api_key
+        return candidate
+    return x_api_key or _bearer_token(authorization) or api_key
 
 
 # Routes
@@ -347,12 +369,12 @@ async def health_check():
 
 
 @app.get("/status", response_model=SystemStatus)
-async def get_status():
+async def get_status(_api_key: Optional[str] = Depends(verify_api_key)):
     """Get system status."""
     import psutil
 
     uptime_seconds = max(0.0, time.monotonic() - _APP_STARTED_AT)
-    
+
     return SystemStatus(
         status="running",
         version=__version__,
@@ -376,12 +398,12 @@ async def generate_weights(
 ):
     """
     Generate model weights.
-    
+
     This endpoint starts a weight generation job asynchronously.
     Use the returned job_id to check status.
     """
     job_id = str(uuid.uuid4())
-    
+
     # Create job
     job = {
         "id": job_id,
@@ -391,15 +413,15 @@ async def generate_weights(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "progress": 0
     }
-    
+
     active_jobs[job_id] = job
     await job_queue.put(job)
-    
+
     # Start background processing
     background_tasks.add_task(process_generation_job, job_id)
-    
+
     logger.info(f"Generation job queued: {job_id}")
-    
+
     return GenerateResponse(
         job_id=job_id,
         status="queued",
@@ -409,27 +431,28 @@ async def generate_weights(
 
 
 @app.get("/jobs/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, _api_key: Optional[str] = Depends(verify_api_key)):
     """Get job status."""
     if job_id not in active_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     return active_jobs[job_id]
 
 
 @app.get("/jobs")
 async def list_jobs(
     status: Optional[str] = Query(None, description="Filter by status"),
-    limit: int = Query(10, ge=1, le=100)
+    limit: int = Query(10, ge=1, le=100),
+    _api_key: Optional[str] = Depends(verify_api_key),
 ):
     """List all jobs."""
     jobs = list(active_jobs.values())
-    
+
     if status:
         jobs = [j for j in jobs if j["status"] == status]
-    
+
     jobs = sorted(jobs, key=lambda x: x["created_at"], reverse=True)
-    
+
     return {"jobs": jobs[:limit], "total": len(active_jobs)}
 
 
@@ -441,7 +464,7 @@ async def start_nas_search(
 ):
     """Start architecture search."""
     job_id = str(uuid.uuid4())
-    
+
     job = {
         "id": job_id,
         "type": "nas",
@@ -450,12 +473,12 @@ async def start_nas_search(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "progress": 0
     }
-    
+
     active_jobs[job_id] = job
     await job_queue.put(job)
-    
+
     background_tasks.add_task(process_nas_job, job_id)
-    
+
     return {
         "job_id": job_id,
         "status": "queued",
@@ -464,7 +487,7 @@ async def start_nas_search(
 
 
 @app.get("/models")
-async def list_supported_models():
+async def list_supported_models(_api_key: Optional[str] = Depends(verify_api_key)):
     """List supported model families, adapters, and known models.
 
     Dynamically generated from Vitriol's internal data sources:
@@ -473,8 +496,8 @@ async def list_supported_models():
     - ``AdapterRegistry`` (registered model adapters)
     - ``STRATEGY_REGISTRY`` (available weight generation strategies)
     """
-    from ..evolution.tree_builder import DEFAULT_FAMILIES, FALLBACK_PARAMS
     from ..adapters.registry import AdapterRegistry
+    from ..evolution.tree_builder import DEFAULT_FAMILIES, FALLBACK_PARAMS
     from ..utils.strategy_discovery import discover_strategy_names
 
     # ── Families ──────────────────────────────────────────────────────
@@ -522,7 +545,7 @@ async def list_supported_models():
         "adapters": adapters,
         "strategies": strategy_names,
         "notes": {
-            "trust_remote_code": "Default True; can be overridden per request or via CLI --no-trust-remote-code",
+            "trust_remote_code": "Default False; can be enabled per request or via CLI --trust-remote-code",
             "source": "Dynamically generated from Vitriol internal registries",
             "families_count": len(families),
             "known_models_count": len(known_models),
@@ -532,7 +555,7 @@ async def list_supported_models():
 
 
 @app.get("/models/families")
-async def list_model_families():
+async def list_model_families(_api_key: Optional[str] = Depends(verify_api_key)):
     """List model architecture families from the evolution tree."""
     from ..evolution.tree_builder import DEFAULT_FAMILIES
 
@@ -555,7 +578,7 @@ async def list_model_families():
 
 
 @app.get("/models/adapters")
-async def list_model_adapters():
+async def list_model_adapters(_api_key: Optional[str] = Depends(verify_api_key)):
     """List registered model adapters and their capabilities."""
     from ..adapters.registry import AdapterRegistry
     adapters = AdapterRegistry.discover_builtin_adapter_metadata()
@@ -564,10 +587,10 @@ async def list_model_adapters():
 
 
 @app.get("/strategies")
-async def list_strategies():
+async def list_strategies(_api_key: Optional[str] = Depends(verify_api_key)):
     """List available generation strategies."""
     from ..strategies import STRATEGY_REGISTRY
-    
+
     strategies = []
     for name, strategy_class in STRATEGY_REGISTRY.items():
         instance = strategy_class()
@@ -579,15 +602,18 @@ async def list_strategies():
             "supports_training": caps.supports_training,
             "max_compression": caps.max_compression_ratio
         })
-    
+
     return {"strategies": strategies}
 
 
 @app.get("/stream/logs")
-async def stream_logs(since: Optional[str] = Query(None, description="ISO timestamp to get logs since")):
+async def stream_logs(
+    since: Optional[str] = Query(None, description="ISO timestamp to get logs since"),
+    _api_key: Optional[str] = Depends(verify_api_key),
+):
     """
     Stream logs in real-time using the LogStreamQueue handler.
-    
+
     This endpoint streams all log messages captured by the LogStreamQueue handler,
     which is attached to the root logger to capture all logs from the application.
     """
@@ -596,7 +622,7 @@ async def stream_logs(since: Optional[str] = Query(None, description="ISO timest
         recent_logs = _log_stream_handler.get_logs(since_timestamp=since)
         for log_entry in recent_logs:
             yield f"data: {json.dumps(log_entry)}\n\n"
-        
+
         # Then stream new logs as they come in
         last_idx = len(recent_logs)
         while True:
@@ -698,7 +724,7 @@ async def start_batch_generation(
 
 
 @app.get("/batch/{batch_id}", response_model=BatchJobStatus)
-async def get_batch_status(batch_id: str):
+async def get_batch_status(batch_id: str, _api_key: Optional[str] = Depends(verify_api_key)):
     """Get the status of a batch generation job."""
     if batch_id not in active_jobs:
         raise HTTPException(status_code=404, detail="Batch job not found")
@@ -821,8 +847,8 @@ async def process_generation_job(job_id: str):
             "dtype": request.get("dtype", "bfloat16"),
             "max_shard_size": request.get("max_shard_size", "5GB"),
         }
-        # Keep CLI default behavior: if not provided, default to True for broader model compatibility.
-        overrides["trust_remote_code"] = bool(request.get("trust_remote_code", True))
+        # Fail closed: remote model code must be enabled explicitly per request.
+        overrides["trust_remote_code"] = bool(request.get("trust_remote_code", False))
         overrides["allow_network"] = bool(request.get("allow_network", True))
         overrides["local_files_only"] = bool(
             request.get("local_files_only", False) or (not overrides["allow_network"])
@@ -858,7 +884,7 @@ async def process_nas_job(job_id: str):
     job = active_jobs.get(job_id)
     if not job:
         return
-    
+
     job["status"] = "running"
     logger.info(f"Starting NAS job: {job_id}")
 
@@ -871,7 +897,7 @@ async def process_nas_job(job_id: str):
         # This endpoint provides an observable loop: streaming progress per iteration and exporting
         # the best gene/metrics as artifacts.
         from ..nas.search_space import LLMSearchSpace
-        from ..nas.targeted_nas import ConstraintOptimizer, OptimizationTarget, ObjectiveType
+        from ..nas.targeted_nas import ConstraintOptimizer, ObjectiveType, OptimizationTarget
 
         optimizer = ConstraintOptimizer(
             constraints=[],
@@ -943,7 +969,7 @@ def main():
     config = get_config()
     host = os.environ.get("VITRIOL_API_HOST", "127.0.0.1")
     port = int(os.environ.get("VITRIOL_API_PORT", "8000"))
-    
+
     uvicorn.run(
         "vitriol.api.server:app",
         host=host,

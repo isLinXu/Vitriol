@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from .cache_store import KVCacheStoreConfig
@@ -193,7 +193,7 @@ def resolve_layer_strategy(policy: KVPolicy, handle: Any, layer_idx: int) -> KVL
     return KVLayerStrategy(layer_type, True, turbo_quantize_v, enable_sparse_v, enable_compute_skip)
 
 
-def apply_policy_to_store_cfg(base_cfg: "KVCacheStoreConfig", policy: KVPolicy, handle: Any, layer_idx: int) -> "KVCacheStoreConfig":
+def apply_policy_to_store_cfg(base_cfg: KVCacheStoreConfig, policy: KVPolicy, handle: Any, layer_idx: int) -> KVCacheStoreConfig:
     strategy = resolve_layer_strategy(policy, handle, layer_idx)
     overrides = {
         "turbo_quantize_k": strategy.turbo_quantize_k,
@@ -250,15 +250,15 @@ class KVPolicyPreset:
         return {"name": self.name, "policy_type": self.policy_type, "params": dict(self.params)}
 
     @staticmethod
-    def from_dict(d: Dict[str, Any]) -> "KVPolicyPreset":
+    def from_dict(d: Dict[str, Any]) -> KVPolicyPreset:
         return KVPolicyPreset(name=str(d["name"]), policy_type=str(d["policy_type"]), params=dict(d.get("params", {})))
 
     @staticmethod
-    def safe_default() -> "KVPolicyPreset":
+    def safe_default() -> KVPolicyPreset:
         return KVPolicyPreset(name="safe", policy_type="SafeExactPolicy", params={})
 
     @staticmethod
-    def balanced_default() -> "KVPolicyPreset":
+    def balanced_default() -> KVPolicyPreset:
         return KVPolicyPreset(
             name="balanced",
             policy_type="Turbo3ExactKApproxVPolicy",
@@ -266,7 +266,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def fast_balanced_default() -> "KVPolicyPreset":
+    def fast_balanced_default() -> KVPolicyPreset:
         return KVPolicyPreset(
             name="fast-balanced",
             policy_type="Turbo3ExactKApproxVPolicy",
@@ -278,7 +278,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def aggressive_default() -> "KVPolicyPreset":
+    def aggressive_default() -> KVPolicyPreset:
         return KVPolicyPreset(
             name="aggressive",
             policy_type="Turbo3ExactKApproxVPolicy",
@@ -291,7 +291,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def ultra_long_default() -> "KVPolicyPreset":
+    def ultra_long_default() -> KVPolicyPreset:
         return KVPolicyPreset(
             name="ultra-long",
             policy_type="Turbo3ExactKApproxVPolicy",
@@ -307,7 +307,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def deepseek_v4_default() -> "KVPolicyPreset":
+    def deepseek_v4_default() -> KVPolicyPreset:
         """DeepSeek-V4 preset: compression-aware and conservative for CSA/HCA/hash layers."""
         return KVPolicyPreset(
             name="deepseek-v4",
@@ -322,7 +322,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def hy3_default() -> "KVPolicyPreset":
+    def hy3_default() -> KVPolicyPreset:
         """Hy3 preset: long-context GQA/MoE-friendly KV compression with protected tail layers."""
         return KVPolicyPreset(
             name="hy3",
@@ -338,7 +338,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def smart_default() -> "KVPolicyPreset":
+    def smart_default() -> KVPolicyPreset:
         """Smart preset: uses Temporal Pooling + Zero-Copy Decode + Sliding Window."""
         return KVPolicyPreset(
             name="smart",
@@ -353,7 +353,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def spectral_default() -> "KVPolicyPreset":
+    def spectral_default() -> KVPolicyPreset:
         """SpectralKV preset: frequency-aware compression for better quality at same bpv."""
         return KVPolicyPreset(
             name="spectral",
@@ -367,7 +367,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def predictive_default() -> "KVPolicyPreset":
+    def predictive_default() -> KVPolicyPreset:
         """PredictiveKV preset: linear-prediction residual coding for temporal correlation."""
         return KVPolicyPreset(
             name="predictive",
@@ -381,7 +381,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def spectral_predictive_default() -> "KVPolicyPreset":
+    def spectral_predictive_default() -> KVPolicyPreset:
         """Combined SpectralKV + PredictiveKV: maximum compression quality."""
         return KVPolicyPreset(
             name="spectral-predictive",
@@ -397,7 +397,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def cross_layer_default() -> "KVPolicyPreset":
+    def cross_layer_default() -> KVPolicyPreset:
         """CrossLayerKV: cross-layer differential compression for depth correlation."""
         return KVPolicyPreset(
             name="cross-layer",
@@ -412,7 +412,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def cross_layer_spectral_default() -> "KVPolicyPreset":
+    def cross_layer_spectral_default() -> KVPolicyPreset:
         """CrossLayerKV + SpectralKV: depth correlation + frequency compression."""
         return KVPolicyPreset(
             name="cross-layer-spectral",
@@ -428,7 +428,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def ultimate_default() -> "KVPolicyPreset":
+    def ultimate_default() -> KVPolicyPreset:
         """Ultimate: CrossLayer + Predictive + Spectral — maximum compression."""
         return KVPolicyPreset(
             name="ultimate",
@@ -447,7 +447,7 @@ class KVPolicyPreset:
         )
 
     @staticmethod
-    def attention_gated_default() -> "KVPolicyPreset":
+    def attention_gated_default() -> KVPolicyPreset:
         """AttentionGatedKV: attention-importance-driven variable precision."""
         return KVPolicyPreset(
             name="attention-gated",

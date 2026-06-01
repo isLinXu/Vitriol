@@ -27,7 +27,7 @@ For a group of consecutive layers [l₀, l₀+1, ..., l₀+G-1]:
 
   1. **I-frame** (every `iframe_interval` layers):
      Store complete KV at full precision using PredictiveKV or SpectralKV.
-     
+
   2. **P-frame** (intermediate layers):
      Compute delta: δ[l] = KV[l] - KV[l-1]
      The delta has **much lower variance** (4-36% of original),
@@ -57,7 +57,7 @@ Average bits per value (iframe_interval = G):
   - P-frame layers: target_bpv · ratio (e.g. 0.3-0.6)
   - Average: target_bpv · (1/G + (G-1)/G · ratio)
   - For G=4, ρ=0.95: avg ≈ 3.0 · (0.25 + 0.75·0.1) = 0.975 bpv
-  
+
   vs Turbo3: 3.5 bpv → **3.6× compression gain**
 
 ═══════════════════════════════════════════════════════════════
@@ -102,7 +102,6 @@ import torch
 import torch.nn.functional as F
 
 from .codec import walsh_hadamard_rotate
-
 
 # ─────────────────────────────────────────────────────────────
 # Cross-Layer Correlation Analysis
@@ -777,7 +776,7 @@ def compress_multilayer_kv(
     prev_k = None
     prev_v = None
 
-    for layer_idx, (key, value) in enumerate(kv_layers):
+    for _layer_idx, (key, value) in enumerate(kv_layers):
         k_comp, k_rep = codec.compress_single(key, is_key=True, prev_x=prev_k)
         v_comp, v_rep = codec.compress_single(value, is_key=False, prev_x=prev_v)
 

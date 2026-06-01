@@ -1,5 +1,11 @@
 from vitriol.arch_viz.core import Architecture
+from vitriol.arch_viz.renderers import html as html_renderer
 from vitriol.arch_viz.renderers.html import HTMLRenderer
+
+
+def test_html_renderer_uses_core_architecture_type() -> None:
+    assert html_renderer.Architecture is Architecture
+    assert not hasattr(html_renderer, "MODEL_REGISTRY")
 
 
 def _render_hy3_html(*, total_params: int, parameters: dict) -> str:

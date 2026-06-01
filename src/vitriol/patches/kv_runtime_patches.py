@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from collections import OrderedDict
 import math
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import torch
@@ -85,7 +85,7 @@ class KVRuntimePatcher:
     def __init__(self, cfg: KVRuntimePatchConfig) -> None:
         self.cfg = cfg
         self._original: Optional[Callable[..., Any]] = None
-        self._preprocess_cache: "OrderedDict[tuple[Any, ...], tuple[torch.Tensor, torch.Tensor]]" = OrderedDict()
+        self._preprocess_cache: OrderedDict[tuple[Any, ...], tuple[torch.Tensor, torch.Tensor]] = OrderedDict()
         self._calls_total: int = 0
         self._calls_bypassed: int = 0
         self._calls_patched: int = 0

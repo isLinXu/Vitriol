@@ -1,6 +1,7 @@
 
 import click
 
+
 @click.command()
 @click.argument('input_dir', type=click.Path(exists=True))
 @click.option('--output', '-o', required=True, help='Output file path')
@@ -10,7 +11,7 @@ def export(input_dir, output, format):
     from ...core.exporter import ModelExporter
 
     exporter = ModelExporter(input_dir)
-    
+
     if format == 'json':
         exporter.export_structure(output)
     elif format == 'gguf':

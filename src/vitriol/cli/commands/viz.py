@@ -1,14 +1,15 @@
-import click
-import webbrowser
+import copy
+import json
+import logging
 import os
+import re
 import sys
 import threading
-import json
-import re
-import logging
-import copy
-from pathlib import Path
+import webbrowser
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from pathlib import Path
+
+import click
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ def build_inline_config_model(model_path):
     """Build a complete model config object from config.json or model_index.json for inline use"""
     config_path = model_path / 'config.json'
     model_index_path = model_path / 'model_index.json'
-    
+
     if model_index_path.exists():
         # Handle Diffusers format (Stable Diffusion, etc.)
         try:
@@ -24,16 +25,16 @@ def build_inline_config_model(model_path):
             unet_config_path = model_path / 'unet' / 'config.json'
             vae_config_path = model_path / 'vae' / 'config.json'
             text_encoder_config_path = model_path / 'text_encoder' / 'config.json'
-            
+
             unet_config = json.loads(unet_config_path.read_text(encoding="utf-8")) if unet_config_path.exists() else {}
             vae_config = json.loads(vae_config_path.read_text(encoding="utf-8")) if vae_config_path.exists() else {}
             text_encoder_config = json.loads(text_encoder_config_path.read_text(encoding="utf-8")) if text_encoder_config_path.exists() else {}
-            
+
             # Extract architecture specifics
             unet_config.get('in_channels', 4)
             unet_layers = len(unet_config.get('down_block_types', [])) * 2 + 1  # rough estimate
             vae_config.get('latent_channels', 4)
-            
+
             return {
                 "name": model_path.name,
                 "type": "diffusion",
@@ -79,7 +80,7 @@ def build_inline_config_model(model_path):
 
     # Build model config structure matching what JavaScript expects
     model_name = effective_config.get('model_name', model_path.name)
-    
+
     # If text_config is not present, assume the root config is the text config (standard HF models)
     text_config = effective_config.get('text_config', effective_config)
     vision_config = effective_config.get('vision_config', {})
@@ -120,30 +121,30 @@ def build_inline_config_model(model_path):
             def __init__(self, d):
                 self.__dict__.update(d)
                 self.model_type = d.get('model_type', 'unknown')
-        
+
         # Use analyzer for all models to get precise parameter count and architecture details
         arch = analyzer.analyze(MockConfig(effective_config))
         total_params = int(arch.total_params)
         num_layers = arch.total_layers
         hidden_size = arch.parameters.get('hidden_size', hidden_size)
         num_experts = arch.parameters.get('num_experts', num_experts)
-        
+
         # Update effective_config so that raw JSON has these values correctly for frontend
         effective_config['num_experts'] = num_experts
         effective_config['num_hidden_layers'] = num_layers
         effective_config['hidden_size'] = hidden_size
         effective_config['total_params'] = total_params
-        
+
         # Add activated_params if available (especially for DeepSeek-V4 MoE)
         activated_params = arch.parameters.get('activated_params', 0)
         if activated_params > 0:
             effective_config['activated_params'] = activated_params
-            
+
         # Add context length
         max_position = arch.parameters.get('max_position', 0)
         if max_position > 0:
             effective_config['max_position_embeddings'] = max_position
-            
+
     except Exception as e:
         logger.debug(f"ArchitectureAnalyzer failed for inline config: {e}")
 
@@ -344,7 +345,7 @@ def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_pat
         if model_path.exists():
             config_path = model_path / 'config.json'
             model_index_path = model_path / 'model_index.json'
-            
+
             if config_path.exists() or model_index_path.exists():
                 click.echo(f"Info: Loading model config from {model_path}", err=True)
 

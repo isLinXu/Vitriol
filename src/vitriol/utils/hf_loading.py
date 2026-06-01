@@ -29,7 +29,7 @@ class RawConfig:
             self._data[key] = self._wrap(value)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RawConfig":
+    def from_dict(cls, data: Dict[str, Any]) -> RawConfig:
         return cls(dict(data))
 
     @staticmethod
@@ -83,7 +83,7 @@ class RawConfig:
 
 def _coerce_security(security: Optional[SecurityOptions | Dict[str, Any]]) -> SecurityOptions:
     if security is None:
-        default_trust_remote_code = True
+        default_trust_remote_code = False
         default_allow_network = True
         default_local_files_only = False
         return SecurityOptions(
@@ -101,7 +101,7 @@ def _coerce_security(security: Optional[SecurityOptions | Dict[str, Any]]) -> Se
         data = dict(security)
 
     return SecurityOptions(
-        trust_remote_code=bool(data.get("trust_remote_code", True)),
+        trust_remote_code=bool(data.get("trust_remote_code", False)),
         allow_network=bool(data.get("allow_network", True)),
         local_files_only=bool(data.get("local_files_only", False)),
     )
@@ -216,8 +216,9 @@ def _maybe_patch_dynamic_modules(model_id: str, *, security: Optional[SecurityOp
         if not isinstance(auto_map, dict) or not auto_map:
             return
 
-        from transformers.dynamic_module_utils import get_class_from_dynamic_module
         import sys
+
+        from transformers.dynamic_module_utils import get_class_from_dynamic_module
 
         from vitriol.patches import patch_remote_module
 
@@ -238,8 +239,9 @@ def _maybe_patch_dynamic_modules(model_id: str, *, security: Optional[SecurityOp
 
 
 def _load_config_with_patches(model_id: str, *, security: Optional[SecurityOptions | Dict[str, Any]] = None):
-    from transformers import AutoConfig
     import sys
+
+    from transformers import AutoConfig
 
     cfg = AutoConfig.from_pretrained(model_id, **hf_kwargs(security))
     try:
@@ -264,7 +266,7 @@ def load_tokenizer(model_id: str, *, security: Optional[SecurityOptions | Dict[s
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"Failed to load tokenizer normally due to unsupported model type, falling back to local files without config validation: {exc}")
-            
+
             # When AutoTokenizer fails because it tries to load AutoConfig first and fails on deepseek_v4
             # We can bypass the config validation by just passing the directory if it's local
             if Path(model_id).exists():

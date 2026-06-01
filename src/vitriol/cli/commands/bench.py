@@ -23,18 +23,19 @@ from ...bench import (
     analyze_kv_quantization,
     build_policy_plan,
     compare_long_context_preset,
-    compare_smoke,
     compare_short_suite,
+    compare_smoke,
     diff_policy_plans,
     run_long_context_preset,
     run_short_suite,
     run_smoke,
 )
+
 try:
     from ...bench import (
-        run_turboquantum_synthetic,
         compare_turboquantum_modes,
         run_turboquantum_on_model_kv,
+        run_turboquantum_synthetic,
     )
     _HAS_TURBOQUANTUM = True
 except ImportError:
@@ -1393,7 +1394,7 @@ def kv_plan(
     output: Optional[str],
 ) -> None:
     """Build or diff KV policy plans for a model without running inference."""
-    trust_remote_code = bool(ctx.obj.get("trust_remote_code", True))
+    trust_remote_code = bool(ctx.obj.get("trust_remote_code", False))
     parsed_preset_params = _parse_preset_params(preset_params)
     parsed_compare_preset_params = _parse_preset_params(compare_preset_params)
     base = build_policy_plan(

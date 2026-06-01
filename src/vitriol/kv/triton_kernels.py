@@ -21,9 +21,9 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import math
 import warnings
-import logging
 from typing import Tuple
 
 import torch
@@ -331,7 +331,10 @@ def triton_fwht(x: torch.Tensor) -> torch.Tensor:
             return _triton_fwht_impl(x)
         except Exception as e:
             if _DEBUG_MODE:
-                warnings.warn(f"Triton FWHT failed ({e}), falling back to PyTorch")
+                warnings.warn(
+                    f"Triton FWHT failed ({e}), falling back to PyTorch",
+                    stacklevel=2,
+                )
             pass
 
     # Fallback to optimized PyTorch

@@ -1,7 +1,6 @@
 """Training utilities and progress tracking."""
 
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List
 
 
 @dataclass

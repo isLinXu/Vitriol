@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Optional
 
 import click
-import logging
 
 from vitriol.telemetry.run_context import new_run_id
-
 
 logger = logging.getLogger(__name__)
 
@@ -273,10 +272,11 @@ def trace(
 
     # Lazily import heavy deps to keep `vitriol.cli.main --help` lightweight.
     import torch
+
     from vitriol.utils.hf_loading import load_causallm, load_tokenizer
 
     effective_trust_remote_code = (
-        bool(ctx.obj.get("trust_remote_code", True)) if getattr(ctx, "obj", None) else True
+        bool(ctx.obj.get("trust_remote_code", False)) if getattr(ctx, "obj", None) else False
     )
     if trust_remote_code is not None:
         effective_trust_remote_code = bool(trust_remote_code)

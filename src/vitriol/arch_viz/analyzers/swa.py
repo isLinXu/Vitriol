@@ -4,7 +4,7 @@ Sliding Window Attention (SWA) Analyzer.
 Detects and analyzes SWA-based architectures (Mistral, etc.).
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict
 
 
 class SWAAnalyzer:

@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-
 from .search_space import ArchitectureGene, LLMSearchSpace
 
 logger = logging.getLogger(__name__)
@@ -212,11 +211,11 @@ class ConstraintOptimizer:
         self.constraints = constraints or []
         self.objectives = objectives or []
 
-    def add_constraint(self, constraint: Constraint) -> "ConstraintOptimizer":
+    def add_constraint(self, constraint: Constraint) -> ConstraintOptimizer:
         self.constraints.append(constraint)
         return self
 
-    def add_objective(self, objective: OptimizationTarget) -> "ConstraintOptimizer":
+    def add_objective(self, objective: OptimizationTarget) -> ConstraintOptimizer:
         self.objectives.append(objective)
         return self
 
@@ -293,7 +292,7 @@ class MultiObjectiveOptimizer:
             ObjectiveType.MAXIMIZE_SCORE,
         ]
 
-    def add_objective(self, obj_type: ObjectiveType) -> "MultiObjectiveOptimizer":
+    def add_objective(self, obj_type: ObjectiveType) -> MultiObjectiveOptimizer:
         self.objectives.append(obj_type)
         return self
 
@@ -403,7 +402,7 @@ class DirectedMutator:
         self,
         objective: ObjectiveType,
         target_value: Optional[float] = None,
-    ) -> "DirectedMutator":
+    ) -> DirectedMutator:
         self.target_objective = objective
         self.target_value = target_value
         return self

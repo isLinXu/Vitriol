@@ -14,17 +14,17 @@ Features:
 
 __version__ = "0.3.0"
 
-from .tree_builder import EvolutionTree, ArchNode, ArchInnovation
-from .tree_visualizer import TreeVisualizer
 from .compare import ArchComparator, ComparisonReport, ComparisonResult
-from .simulator import ArchSimulator, SimulationResult, quick_estimate
 from .recommender import (
-    ArchitectureRecommender,
     ArchitectureRecommendation,
+    ArchitectureRecommender,
     RecommendationCriteria,
     UseCase,
 )
+from .simulator import ArchSimulator, SimulationResult, quick_estimate
 from .timeline import InnovationTimeline, TimelineEvent
+from .tree_builder import ArchInnovation, ArchNode, EvolutionTree
+from .tree_visualizer import TreeVisualizer
 
 __all__ = [
     # Core tree structures

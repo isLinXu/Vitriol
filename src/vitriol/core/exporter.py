@@ -2,25 +2,26 @@
 import json
 import logging
 from pathlib import Path
+
 from ..utils.hf_loading import load_config_or_raw
 
 logger = logging.getLogger(__name__)
 
 class ModelExporter:
     """Export model information and formats"""
-    
-    def __init__(self, input_dir: str, trust_remote_code: bool = True):
+
+    def __init__(self, input_dir: str, trust_remote_code: bool = False):
         self.input_dir = Path(input_dir)
         self.trust_remote_code = trust_remote_code
-    
+
     def _load_best_config(self):
         """Load the best available config: meta-config.json > config_meta.json > config.json.
-        
+
         meta-config.json contains the original unmodified HuggingFace config,
         preserving the real model architecture even when config.json is shrunk.
         """
         import tempfile
-        
+
         for meta_name in ('meta-config.json', 'config_meta.json'):
             meta_path = self.input_dir / meta_name
             if meta_path.exists():
@@ -40,7 +41,7 @@ class ModelExporter:
                         return config
                 except Exception as e:
                     logger.warning(f"Failed to load {meta_name}: {e}")
-        
+
         return load_config_or_raw(
             str(self.input_dir),
             security={
@@ -68,12 +69,12 @@ class ModelExporter:
             gguf_path = target / "model.gguf"
         gguf_path.parent.mkdir(parents=True, exist_ok=True)
         return gguf_path
-        
+
     def export_structure(self, output_file: str):
         """Export architecture details to JSON"""
         try:
             config = self._load_best_config()
-            
+
             structure = {
                 'model_type': getattr(config, 'model_type', 'unknown'),
                 'architectures': getattr(config, 'architectures', []),
@@ -87,9 +88,9 @@ class ModelExporter:
             output_path = Path(output_file)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(json.dumps(structure, indent=2), encoding="utf-8")
-                
+
             logger.info(f"Exported structure to {output_file}")
-            
+
         except Exception as e:
             logger.error(f"Failed to export structure: {e}")
             raise e
@@ -103,15 +104,15 @@ class ModelExporter:
         import sys
 
         gguf_path = self._resolve_gguf_output_path(output_target)
-        
+
         logger.info(f"Attempting GGUF export to {gguf_path}...")
-        
+
         # Try to use installed llama-cpp-python or external script
         # Assuming llama-cpp-python is installed which provides a conversion script
         # Or check for 'convert-hf-to-gguf.py' in PATH
-        
+
         cmd = [sys.executable, "-m", "llama_cpp.convert_hf_to_gguf", str(self.input_dir), "--outfile", str(gguf_path)]
-        
+
         try:
             logger.info(f"Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=True)

@@ -1,11 +1,12 @@
 
-import click
 import sys
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
+
+import click
+
 from ...config.manager import build_generation_config
 from ...utils.strategy_discovery import discover_strategy_names
-
 
 MinimalWeightGenerator = None
 
@@ -67,10 +68,10 @@ def generate(ctx, model_id, output_dir, max_shard_size, dtype, strategy, sparse,
             current_module.MinimalWeightGenerator = _MinimalWeightGenerator
         generator_cls = _MinimalWeightGenerator
 
-    trust_remote_code = bool(ctx.obj.get("trust_remote_code", True))
+    trust_remote_code = bool(ctx.obj.get("trust_remote_code", False))
     allow_network = bool(ctx.obj.get("allow_network", True))
     local_files_only = bool(ctx.obj.get("local_files_only", False))
-    
+
     # Determine CLI strategy (if any)
     cli_strategy = strategy
     if cli_strategy is None:
@@ -80,7 +81,7 @@ def generate(ctx, model_id, output_dir, max_shard_size, dtype, strategy, sparse,
             cli_strategy = "compact"
         elif sparse:
             cli_strategy = "sparse"
-        
+
     parameter_source = click.core.ParameterSource
     overrides = {
         "trust_remote_code": trust_remote_code,
@@ -111,7 +112,7 @@ def generate(ctx, model_id, output_dir, max_shard_size, dtype, strategy, sparse,
             "For safer environments, re-run with --no-trust-remote-code.",
             err=True,
         )
-        
+
     try:
         generator = generator_cls(
             model_id=model_id,
@@ -121,12 +122,12 @@ def generate(ctx, model_id, output_dir, max_shard_size, dtype, strategy, sparse,
             shrink_config=shrink
         )
         generator.generate()
-        
+
         if visualize:
             click.echo("\nGenerating visualization report...")
             # Optional dependency: visualization stack (e.g., plotly) may not be installed.
-            from ...visualization.visualizer import WeightVisualizer
             from ...visualization.utils import load_weights
+            from ...visualization.visualizer import WeightVisualizer
 
             # Load weights (limit to 50 tensors to be safe and fast)
             weights = load_weights(output_dir, limit=50)
@@ -137,7 +138,7 @@ def generate(ctx, model_id, output_dir, max_shard_size, dtype, strategy, sparse,
                 click.echo(f"Visualization report saved to {vis_out}")
             else:
                 click.echo("Failed to load weights for visualization.", err=True)
-                
+
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)

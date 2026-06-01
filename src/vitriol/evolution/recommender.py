@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-from .tree_builder import EvolutionTree, ArchNode
+from .tree_builder import ArchNode, EvolutionTree
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ class ArchitectureRecommender:
     def get_family_summary(self) -> Dict[str, Dict[str, Any]]:
         """Get summary of all families."""
         summary = {}
-        for family_name, family_data in self.tree.families.items():
+        for family_name, _family_data in self.tree.families.items():
             nodes = [n for n in self.tree.nodes.values() if n.family == family_name]
             if nodes:
                 params_list = [self._arch_cache.get(n.model_id, {}).get("params", 0) for n in nodes]

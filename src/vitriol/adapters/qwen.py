@@ -1,7 +1,9 @@
 
 import logging
 from typing import Optional, Type
-from transformers import PretrainedConfig, AutoConfig, AutoModelForCausalLM, AutoModel
+
+from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, PretrainedConfig
+
 from .base import ModelAdapter
 from .registry import AdapterRegistry
 
@@ -10,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class QwenMoeAdapter(ModelAdapter):
     """Adapter for Qwen1.5-MoE and Qwen2-MoE models."""
-    
+
     @classmethod
     def match(cls, model_id: str, config: PretrainedConfig) -> bool:
         if getattr(config, "model_type", "") == "qwen2_moe":
@@ -28,9 +30,9 @@ class QwenMoeAdapter(ModelAdapter):
 
     def register_classes(self):
         try:
-            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
             from transformers import CONFIG_MAPPING
-            
+            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
+
             if "qwen2_moe" not in CONFIG_MAPPING:
                 try:
                     AutoConfig.register("qwen2_moe", Qwen2MoeConfig)
@@ -173,16 +175,16 @@ class Qwen35MoeAdapter(ModelAdapter):
 
     def register_classes(self):
         try:
-            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
             from transformers import CONFIG_MAPPING
-            
+            from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
+
             if "qwen3_5_moe" not in CONFIG_MAPPING:
                 # Create a dynamic Config subclass with model_type = "qwen3_5_moe"
                 Qwen3_5MoeConfig = type(
                     "Qwen3_5MoeConfig", (Qwen2MoeConfig,),
                     {"model_type": "qwen3_5_moe"},
                 )
-                
+
                 # Register the config type for AutoConfig
                 try:
                     AutoConfig.register("qwen3_5_moe", Qwen3_5MoeConfig)
@@ -196,19 +198,19 @@ class Qwen35MoeAdapter(ModelAdapter):
                     "Qwen3_5MoeForCausalLM", (_OrigModel,),
                     {"config_class": Qwen3_5MoeConfig},
                 )
-                
+
                 try:
                     AutoModelForCausalLM.register(
                         Qwen3_5MoeConfig, Qwen3_5MoeForCausalLM,
                     )
                 except (AttributeError, ValueError) as e:
                     logger.debug("AutoModelForCausalLM.register failed: %s", e)
-                
+
                 try:
                     AutoModel.register(Qwen3_5MoeConfig, Qwen3_5MoeForCausalLM)
                 except (AttributeError, ValueError) as e:
                     logger.debug("AutoModel.register failed: %s", e)
-                
+
                 # Verify registration succeeded
                 from transformers.models.auto.configuration_auto import CONFIG_MAPPING as _CM
                 if "qwen3_5_moe" in _CM:

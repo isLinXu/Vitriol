@@ -5,26 +5,27 @@ Generates weights using standard random initialization, suitable for
 training and most use cases.
 """
 
-import torch
 from typing import Dict
 
-from .base import WeightGenerationStrategy, StrategyCapabilities
+import torch
+
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 
 class RandomStrategy(WeightGenerationStrategy):
     """
     Random initialization strategy.
-    
+
     Generates weights using standard normal distribution (mean=0, std=1).
     This is the closest to real model initialization and supports
     all operations including training.
-    
+
     Capabilities:
         ✅ Supports Safetensors format
         ✅ Supports gradient computation (training)
         ✅ Most realistic initialization
         ❌ No compression (full size)
-    
+
     Example:
         >>> strategy = RandomStrategy()
         >>> tensor = strategy.generate_tensor((1024, 1024), torch.float32, "weight")
@@ -33,7 +34,7 @@ class RandomStrategy(WeightGenerationStrategy):
         >>> tensor.mean()  # Should be close to 0
         tensor(0.0012)
     """
-    
+
     @property
     def capabilities(self) -> StrategyCapabilities:
         """Return Random strategy capabilities."""
@@ -47,7 +48,7 @@ class RandomStrategy(WeightGenerationStrategy):
                 "Most realistic but no compression."
             )
         )
-    
+
     def generate_tensor(
         self,
         shape: tuple,
@@ -57,21 +58,21 @@ class RandomStrategy(WeightGenerationStrategy):
     ) -> torch.Tensor:
         """
         Generate a random tensor.
-        
+
         Args:
             shape: Tensor shape
             dtype: Data type
             name: Parameter name
             **kwargs: Additional parameters (ignored)
-        
+
         Returns:
             Random tensor
         """
         dtype = self._normalize_dtype(dtype)
         self._validate_shape(shape)
-        
+
         return torch.randn(shape, dtype=dtype, device=self.device)
-    
+
     def save_shard(self, shard_data: Dict[str, torch.Tensor], path: str) -> None:
         """
         Save shard to disk.

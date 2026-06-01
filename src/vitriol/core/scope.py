@@ -18,14 +18,9 @@ Architecture:
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Type
-
-import torch  # MUST import before any transformers usage
-from transformers import AutoConfig as _AutoConfig
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from transformers import PretrainedConfig
@@ -58,32 +53,32 @@ class ModelInfo:
     n_shared_experts: int = 0
     moe_intermediate_size: int = 0
     shared_expert_intermediate_size: int = 0
-    
+
     head_dim: int = 0  # hidden_size / num_attention_heads
-    
+
     # Vitriol-specific fields
     vitriol_score: float = 0.0
     attention_diversity_score: float = 0.0
-    
+
     # Tokenizer info
     tokenizer_class: str = ""
     tokenizer_model_path: str = ""
     tokenizer_config_file: str = ""
-    
+
     class Config:
         """Pydantic-style config for ModelInfo."""
         # Prevent arbitrary fields; only allow those defined here
-        
+
         # This is the KEY fix: allow extra fields only for future-proofing,
         # but disallow them now to catch typos and invalid values.
         extra = "forbid"  # type: ignore[assignment]
-        
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a HuggingFace-friendly dict."""
         return asdict(self)
-    
+
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'ModelInfo':
+    def from_dict(cls, d: Dict[str, Any]) -> ModelInfo:
         """Deserialize from a HuggingFace-friendly dict."""
         # Explicitly pick allowed keys from the dict
         allowed = {
@@ -118,7 +113,7 @@ class Scope:
         logger.info("vocab_size=%d", info.vocab_size)
     """
 
-    def __init__(self, model_id_or_path: str, trust_remote_code: bool = True,
+    def __init__(self, model_id_or_path: str, trust_remote_code: bool = False,
                  allow_network: bool = True, local_files_only: bool = True):
         """
         Initialize Scope with model inspection capabilities.
@@ -138,7 +133,7 @@ class Scope:
         self._model = None
         self._tokenizer = None
         self._config = None
-        
+
         self._load_model_and_tokenizer()
 
     def _load_model_and_tokenizer(self):
@@ -173,12 +168,12 @@ class Scope:
                 )
             except Exception:
                 self._tokenizer = None
-                
+
         except Exception as e:
             logger.error("Failed to load model or tokenizer: %s", e)
             self._model = None
             self._tokenizer = None
-            
+
     def model_info(self) -> ModelInfo:
         """Return structured metadata about the model architecture and tokenizer.
 

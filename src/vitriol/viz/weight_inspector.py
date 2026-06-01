@@ -12,9 +12,9 @@ Capabilities:
   - Prefer meta-config.json to preserve the original HF architecture config
 """
 
-import re
 import json
 import logging
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -283,9 +283,11 @@ def _load_shard(file_path: Path, is_safetensors: bool) -> Dict[str, Any]:
             return {}
         try:
             return torch.load(str(file_path), map_location="cpu", weights_only=True)
-        except Exception:
-            # fallback for legacy format
-            return torch.load(str(file_path), map_location="cpu", weights_only=False)
+        except Exception as exc:
+            raise ValueError(
+                "Unsafe legacy PyTorch pickle fallback is disabled for "
+                f"{file_path}. Convert the shard to safetensors or regenerate it."
+            ) from exc
 
 
 def _load_selected_safetensors_tensors(

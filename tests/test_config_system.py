@@ -52,7 +52,7 @@ class TestSecurityOptions:
 
     def test_defaults(self):
         so = SecurityOptions()
-        assert so.trust_remote_code is True
+        assert so.trust_remote_code is False
         assert so.allow_network is True
         assert so.local_files_only is False
 

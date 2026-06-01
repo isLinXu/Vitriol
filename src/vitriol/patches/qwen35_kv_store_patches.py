@@ -66,7 +66,7 @@ class Qwen35KVStorePatcher:
             seq_lens = getattr(self_cache, "_vitriol_seq_lens", None)
             if seq_lens is None:
                 seq_lens = [0 for _ in range(len(getattr(self_cache, "layer_types", [])) or len(self_cache))]
-                setattr(self_cache, "_vitriol_seq_lens", seq_lens)
+                self_cache._vitriol_seq_lens = seq_lens
 
             added = int(key_states.size(-2))
             if seq_lens[layer_idx] == 0:
@@ -129,7 +129,7 @@ class Qwen35KVStorePatcher:
             value_new = value_states
 
             if past_key_values is not None:
-                setattr(past_key_values, "_vitriol_kv_store_mode", True)
+                past_key_values._vitriol_kv_store_mode = True
                 cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
                 key_states, value_states = past_key_values.update(key_states, value_states, module.layer_idx, cache_kwargs)
 
@@ -142,7 +142,7 @@ class Qwen35KVStorePatcher:
                 stores = getattr(past_key_values, "_vitriol_kv_stores", None)
                 if stores is None:
                     stores = {}
-                    setattr(past_key_values, "_vitriol_kv_stores", stores)
+                    past_key_values._vitriol_kv_stores = stores
                 store = stores.get(module.layer_idx)
                 if store is None:
                     store_cfg = replace(self.cfg.store_cfg)

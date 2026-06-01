@@ -16,10 +16,12 @@ Example:
     {-0.1, 0.0, 0.1}
 """
 
-import torch
 from typing import Dict
-from .base import WeightGenerationStrategy, StrategyCapabilities
+
+import torch
 from safetensors.torch import save_file
+
+from .base import StrategyCapabilities, WeightGenerationStrategy
 
 _TERNARY_DEFAULT_ALPHA: float = 0.1
 

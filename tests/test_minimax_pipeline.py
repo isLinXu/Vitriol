@@ -10,6 +10,7 @@ from vitriol.tools.minimax_pipeline import (
     apply_validation_runtime_patches,
     build_pipeline_plan,
     patch_config_for_validation,
+    parse_args,
 )
 
 
@@ -34,7 +35,7 @@ def test_default_pipeline_plan_contains_generate_validate_and_static_viz() -> No
         "python3",
         "-m",
         "vitriol.cli.main",
-        "--trust-remote-code",
+        "--no-trust-remote-code",
         "generate",
         "MiniMaxAI/MiniMax-M2.7",
         "--output-dir",
@@ -45,6 +46,18 @@ def test_default_pipeline_plan_contains_generate_validate_and_static_viz() -> No
         "5GB",
         "--no-shrink",
     ]
+
+
+def test_parse_args_defaults_to_no_remote_code() -> None:
+    options = parse_args(["--repo-root", "/repo"])
+
+    assert options.trust_remote_code is False
+
+
+def test_parse_args_enables_remote_code_only_when_requested() -> None:
+    options = parse_args(["--repo-root", "/repo", "--trust-remote-code"])
+
+    assert options.trust_remote_code is True
 
 
 def test_pipeline_plan_adds_interactive_viz_when_requested() -> None:
@@ -63,7 +76,7 @@ def test_pipeline_plan_adds_interactive_viz_when_requested() -> None:
         "python3",
         "-m",
         "vitriol.cli.main",
-        "--trust-remote-code",
+        "--no-trust-remote-code",
         "viz",
         "/repo/output/minimax_m2_7_ultra",
         "--port",

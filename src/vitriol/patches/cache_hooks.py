@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-import threading
 import logging
+import threading
+from dataclasses import dataclass
 from typing import Any, Callable, Optional, Type
 
 import torch
 
 from ..kv.backend import KVStoreBackend
-
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +90,7 @@ class CacheHookPatcher:
         ):
             _bump_cache_hook_stat("cache_update_calls")
             if self.cfg.auto_enable_mode and not getattr(self_cache, "_vitriol_kv_store_mode", False):
-                setattr(self_cache, "_vitriol_kv_store_mode", True)
+                self_cache._vitriol_kv_store_mode = True
             mode = getattr(self_cache, "_vitriol_kv_store_mode", False)
             if not mode:
                 return self._orig_update(self_cache, key_states, value_states, layer_idx, cache_kwargs)
@@ -108,7 +107,7 @@ class CacheHookPatcher:
             if seq_lens is None:
                 size = len(getattr(self_cache, "layer_types", [])) or (int(layer_idx) + 1)
                 seq_lens = [0 for _ in range(size)]
-                setattr(self_cache, "_vitriol_seq_lens", seq_lens)
+                self_cache._vitriol_seq_lens = seq_lens
 
             if int(layer_idx) >= len(seq_lens):
                 seq_lens.extend([0] * (int(layer_idx) - len(seq_lens) + 1))

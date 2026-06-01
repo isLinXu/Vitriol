@@ -8,6 +8,7 @@ for implementing different weight generation strategies.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict
+
 import torch
 
 
@@ -15,10 +16,10 @@ import torch
 class StrategyCapabilities:
     """
     Declare what a strategy can and cannot do.
-    
+
     This helps users understand strategy limitations and enables
     automatic format negotiation.
-    
+
     Attributes:
         supports_safetensors: Whether the strategy can save in Safetensors format
         supports_training: Whether generated weights support gradient computation
@@ -36,10 +37,10 @@ class StrategyCapabilities:
 class WeightGenerationStrategy(ABC):
     """
     Abstract base class for weight generation strategies.
-    
+
     Each strategy defines how to generate weights for a model, with
     different trade-offs between size, training support, and compatibility.
-    
+
     Example:
         >>> class RandomStrategy(WeightGenerationStrategy):
         ...     @property
@@ -53,11 +54,11 @@ class WeightGenerationStrategy(ABC):
         ...     def generate_tensor(self, shape, dtype, name):
         ...         return torch.randn(shape, dtype=dtype)
     """
-    
+
     def __init__(self, device: str = "cpu", save_dummy_config: bool = False, **kwargs):
         """
         Initialize the strategy.
-        
+
         Args:
             device: Device to generate tensors on ("cpu", "cuda", "mps")
             save_dummy_config: Whether to save dummy configuration files
@@ -65,18 +66,18 @@ class WeightGenerationStrategy(ABC):
         """
         self.device = device
         self.save_dummy_config = save_dummy_config
-    
+
     @property
     @abstractmethod
     def capabilities(self) -> StrategyCapabilities:
         """
         Return strategy capabilities.
-        
+
         Returns:
             StrategyCapabilities object describing what this strategy can do
         """
         pass
-    
+
     @abstractmethod
     def generate_tensor(
         self,
@@ -87,65 +88,65 @@ class WeightGenerationStrategy(ABC):
     ) -> torch.Tensor:
         """
         Generate a single tensor with the given shape and dtype.
-        
+
         Args:
             shape: Shape of the tensor to generate
             dtype: Data type of the tensor
             name: Name of the parameter (for logging/debugging)
             **kwargs: Additional strategy-specific parameters
-        
+
         Returns:
             Generated tensor
         """
         pass
-    
+
     @abstractmethod
     def save_shard(self, shard_data: Dict[str, torch.Tensor], path: str) -> None:
         """
         Save a shard of tensors to disk.
-        
+
         Args:
             shard_data: Dict mapping parameter names to tensors
             path: Output file path
         """
         pass
-    
+
     @property
     def storage_format(self) -> str:
         """
         Return storage format: 'safetensors' or 'pytorch'.
-        
+
         Returns:
             Storage format string
         """
         return "safetensors" if self.capabilities.supports_safetensors else "pytorch"
-    
+
     @property
     def file_extension(self) -> str:
         """
         Return file extension for saved shards.
-        
+
         Returns:
             File extension (e.g., "safetensors" or "bin")
         """
         return "safetensors" if self.storage_format == "safetensors" else "bin"
-    
+
     def get_shard_prefix(self) -> str:
         """
         Return shard filename prefix.
-        
+
         Returns:
             Filename prefix (e.g., "model" or "pytorch_model")
         """
         return "model" if self.storage_format == "safetensors" else "pytorch_model"
-    
+
     def set_storage_format(self, fmt: str):
         """
         Attempt to set storage format.
-        
+
         Args:
             fmt: Desired format ("safetensors" or "pytorch")
-        
+
         Raises:
             ValueError: If format is not supported by this strategy
         """
@@ -156,11 +157,11 @@ class WeightGenerationStrategy(ABC):
                 format=fmt,
                 reason="This strategy does not support Safetensors format"
             )
-        
+
         # Subclasses can override this to actually change format
         # Default implementation just validates
         pass
-    
+
     def _normalize_dtype(self, dtype: torch.dtype) -> torch.dtype:
         """
         Standardize dtype: float32/float64 -> bfloat16 for storage efficiency.
@@ -174,20 +175,20 @@ class WeightGenerationStrategy(ABC):
         if dtype in (torch.float32, torch.float64):
             return torch.bfloat16
         return dtype
-    
+
     def _validate_shape(self, shape: tuple) -> None:
         """
         Ensure shape dimensions are positive.
-        
+
         Args:
             shape: Shape to validate
-        
+
         Raises:
             ValueError: If shape has non-positive dimensions
         """
         if any(d <= 0 for d in shape):
             raise ValueError(f"Invalid shape: {shape}")
-    
+
     def __repr__(self) -> str:
         """Return string representation."""
         caps = self.capabilities
