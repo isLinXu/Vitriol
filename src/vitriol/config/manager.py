@@ -20,6 +20,18 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from ..utils.exceptions import ConfigValidationError
+from ..utils.optional import has as _has_optional
+from ..utils.size import parse_size_to_bytes
+
+# Single source of truth for the values the validators and the JSON Schema share.
+VALID_STRATEGIES = frozenset({
+    "random", "sparse", "compact", "ultra", "hybrid_ultra", "ternary",
+    "binary", "quantized", "lowrank", "structured_sparse",
+    "learned", "hybrid_learned", "quantum",
+})
+VALID_DTYPES = frozenset({"float16", "bfloat16", "float32", "float64"})
+
 
 def _coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
@@ -59,15 +71,30 @@ class GenerationConfig:
     def __post_init__(self):
         if self.security is None:
             self.security = SecurityOptions()
-        valid = {'random','sparse','compact','ultra','hybrid_ultra','ternary',
-                 'binary','quantized','lowrank','structured_sparse',
-                 'learned','hybrid_learned','quantum'}
-        if self.strategy not in valid:
-            raise ValueError(f"Invalid strategy: {self.strategy}")
+        if self.strategy not in VALID_STRATEGIES:
+            raise ValueError(
+                f"Invalid strategy: {self.strategy}. "
+                f"Choose one of: {', '.join(sorted(VALID_STRATEGIES))}"
+            )
+        if not isinstance(self.sparsity, (int, float)) or isinstance(self.sparsity, bool):
+            raise ValueError(f"Sparsity must be a number, got {type(self.sparsity).__name__}")
         if not (0 <= self.sparsity <= 1):
             raise ValueError("Sparsity must be in [0,1]")
+        if not isinstance(self.n_bits, int) or isinstance(self.n_bits, bool):
+            raise ValueError(f"n_bits must be an integer, got {type(self.n_bits).__name__}")
         if not (1 <= self.n_bits <= 32):
             raise ValueError("n_bits must be in [1,32]")
+        if not isinstance(self.rank, int) or isinstance(self.rank, bool) or self.rank < 1:
+            raise ValueError(f"rank must be a positive integer, got {self.rank!r}")
+        if self.dtype not in VALID_DTYPES:
+            raise ValueError(
+                f"Invalid dtype: {self.dtype!r}. "
+                f"Choose one of: {', '.join(sorted(VALID_DTYPES))}"
+            )
+        try:
+            parse_size_to_bytes(self.max_shard_size)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid max_shard_size: {self.max_shard_size!r} ({exc})") from exc
 
     @classmethod
     def from_yaml(cls, path: Path) -> 'GenerationConfig':
@@ -77,6 +104,66 @@ class GenerationConfig:
     def from_env(cls) -> 'GenerationConfig':
         """Load from environment variables."""
         return build_generation_config()
+
+
+def generation_config_schema() -> Dict[str, Any]:
+    """Return a JSON Schema (draft-07) describing the generation config dict.
+
+    The schema is the documented contract for the ``default:`` section of a
+    Vitriol YAML file and for programmatic overrides. It is dependency-free; the
+    optional ``jsonschema`` package (if installed) is used by
+    :func:`validate_generation_dict` for full structural validation.
+    """
+    return {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "VitriolGenerationConfig",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "max_shard_size": {
+                "type": "string",
+                "description": "Human-readable shard size, e.g. '5GB', '512 MB'.",
+                "pattern": r"^\s*[0-9]+(\.[0-9]+)?\s*[A-Za-z]*\s*$",
+            },
+            "dtype": {"type": "string", "enum": sorted(VALID_DTYPES)},
+            "strategy": {"type": "string", "enum": sorted(VALID_STRATEGIES)},
+            "auto_validate": {"type": "boolean"},
+            "n_bits": {"type": "integer", "minimum": 1, "maximum": 32},
+            "rank": {"type": "integer", "minimum": 1},
+            "sparsity": {"type": "number", "minimum": 0, "maximum": 1},
+            "security": {"type": "object"},
+            "security_context": {"type": "object"},
+        },
+    }
+
+
+def validate_generation_dict(data: Dict[str, Any]) -> None:
+    """Validate a raw generation-config dict against :func:`generation_config_schema`.
+
+    Always rejects unknown keys with an actionable :class:`ConfigValidationError`
+    (instead of the cryptic ``TypeError`` from ``GenerationConfig(**data)``). When
+    the optional ``jsonschema`` package is installed, full structural validation
+    (types, ranges, enums) is performed as well.
+    """
+    schema = generation_config_schema()
+    allowed = set(schema["properties"])
+    unknown = sorted(set(data) - allowed)
+    if unknown:
+        raise ConfigValidationError(
+            "generation config",
+            f"unknown key(s) {unknown}; allowed keys: {sorted(allowed)}",
+        )
+
+    if _has_optional("jsonschema"):
+        import jsonschema
+
+        try:
+            jsonschema.validate(data, schema)
+        except jsonschema.ValidationError as exc:
+            location = ".".join(str(p) for p in exc.absolute_path) or "<root>"
+            raise ConfigValidationError(
+                "generation config", f"at '{location}': {exc.message}"
+            ) from exc
 
 
 def _load_generation_dict_from_yaml(path: Path) -> Dict[str, Any]:
@@ -135,6 +222,7 @@ def build_generation_config(
     security = resolved.to_security_options()
 
     data.update({k: v for k, v in explicit.items() if v is not None})
+    validate_generation_dict(data)
     config = GenerationConfig(**data)
     config.security = security
     config.security_context = {
