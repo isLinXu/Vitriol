@@ -37,7 +37,7 @@ def _launch_kwargs(ctx, *, share, port, debug):
 @click.option("--share", is_flag=True, help="Create a public share link")
 @click.option("--debug", is_flag=True, help="Enable debug mode")
 @click.pass_context
-def launch_webui(ctx, port, share, debug):
+def launch_webui(ctx, port, share, debug) -> None:
     """
     Launch the Vitriol Web UI.
 

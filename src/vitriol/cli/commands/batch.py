@@ -6,7 +6,7 @@ import click
 
 @click.command()
 @click.argument('config_file', type=click.Path(exists=True))
-def batch(config_file):
+def batch(config_file) -> None:
     """Batch generate models from config file"""
     try:
         from ...core.batch import BatchGenerator

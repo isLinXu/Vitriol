@@ -68,7 +68,7 @@ dev = [
     "pytest-timeout>=2.0,<3.0",
     "pytest-xdist>=2.0,<4.0",
     "pytest-asyncio>=0.20,<1.0",
-    "ruff>=0.4.0,<1.0",
+    "ruff>=0.8.0,<1.0",
     "mypy>=1.0,<2.0",
     "pre-commit>=3.0,<5.0",
 ]
@@ -123,7 +123,10 @@ ignore = [
     "UP006",  # use `dict` instead of `Dict`
     "UP007",  # use `X | Y` instead of `Union[X, Y]`
     "UP035",  # `typing.Dict` is deprecated, use `dict`
-    "UP045",  # use `X | None` instead of `Optional[X]`
+    # UP045 (use `X | None` instead of `Optional[X]`) requires Python 3.10+
+    # at runtime (Pydantic, dataclasses, FastAPI introspect annotations).
+    # Re-enable when the minimum Python version bumps to 3.10.
+    # "UP045",
 ]
 
 [tool.ruff.lint.per-file-ignores]

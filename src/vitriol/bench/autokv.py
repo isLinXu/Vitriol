@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 @dataclass(frozen=True)
 class Case:
+    """Named tuple representing a benchmark test case."""
     name: str
     prompt: str
 

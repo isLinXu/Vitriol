@@ -48,7 +48,7 @@ class Plugin(ABC):
         """
         pass
 
-    def shutdown(self):  # noqa: B027  (optional hook for subclasses)
+    def shutdown(self) -> None:  # noqa: B027  (optional hook for subclasses)
         """Clean up plugin resources."""
         pass
 
@@ -199,7 +199,7 @@ class PluginManager:
             'config': {},
         }
 
-    def unload_plugin(self, name: str):
+    def unload_plugin(self, name: str) -> None:
         """Unload a plugin."""
         if name in self.plugins:
             plugin = self.plugins[name]
@@ -207,12 +207,12 @@ class PluginManager:
             del self.plugins[name]
             logger.info(f"Unloaded plugin: {name}")
 
-    def load_all(self):
+    def load_all(self) -> None:
         """Load all discovered plugins."""
         for name in self.discover_plugins():
             self.load_plugin(name)
 
-    def register_hook(self, event: str, callback: Callable):
+    def register_hook(self, event: str, callback: Callable) -> None:
         """
         Register a hook callback.
 
@@ -270,7 +270,7 @@ def get_plugin_manager() -> PluginManager:
     return _plugin_manager
 
 
-def init_plugins():
+def init_plugins() -> Any:
     """Initialize and load all plugins."""
     manager = get_plugin_manager()
     manager.load_all()

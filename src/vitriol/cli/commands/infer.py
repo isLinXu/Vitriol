@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import click
 from click.core import ParameterSource
@@ -16,13 +16,13 @@ _QWEN_CHAT_SYSTEM_PROMPT = (
 _QWEN_CHAT_ASSISTANT_PREFIX = "TurboQuant"
 
 
-def run_generate_preset(*args, **kwargs):
+def run_generate_preset(*args, **kwargs) -> Any:
     from ...bench.runner import run_generate_preset as _run_generate_preset
 
     return _run_generate_preset(*args, **kwargs)
 
 
-def run_smoke(*args, **kwargs):
+def run_smoke(*args, **kwargs) -> Any:
     from ...bench.runner import run_smoke as _run_smoke
 
     return _run_smoke(*args, **kwargs)

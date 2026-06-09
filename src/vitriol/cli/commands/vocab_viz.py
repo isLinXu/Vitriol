@@ -74,23 +74,23 @@ def _load_vocab_from_local_tokenizer_files(model_dir: str) -> tuple[dict[str, in
 
 class QuietHTTPHandler(SimpleHTTPRequestHandler):
     """HTTP handler that suppresses logging"""
-    def log_message(self, format, *args):
+    def log_message(self, format, *args) -> None:
         pass  # Suppress request logging
 
-    def end_headers(self):
+    def end_headers(self) -> None:
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
         super().end_headers()
 
-    def guess_type(self, path):
+    def guess_type(self, path) -> str:
         """Force correct content type for JSON"""
         if path.endswith('.json'):
             return 'application/json'
         return super().guess_type(path)
 
-def serve_3d_vocab(temp_dir: str):
+def serve_3d_vocab(temp_dir: str) -> None:
     port = 8780
     max_retries = 50
     for _ in range(max_retries):
@@ -133,7 +133,7 @@ def serve_3d_vocab(temp_dir: str):
 @click.option('--plot-type', '-p', type=click.Choice(["treemap", "length-hist", "first-char", "compression-radar", "unicode-sunburst", "vocab-map", "digit-coverage", "subword-fertility", "special-tokens"]), default="treemap", help="Plot type for single mode")
 @click.option('--model-id', '-m', help="Add a specific HF model/tokenizer to the visualization (Required for --type single or --3d)")
 @click.option('--3d', 'is_3d', is_flag=True, help="Launch the interactive 3D vocabulary visualizer in browser")
-def vocab_viz(output, viz_type, model_id, plot_type, is_3d):
+def vocab_viz(output, viz_type, model_id, plot_type, is_3d) -> None:
     """Visualize tokenizer vocabulary sizes."""
     if is_3d:
         from ...utils.hf_loading import load_tokenizer as hf_load_tokenizer

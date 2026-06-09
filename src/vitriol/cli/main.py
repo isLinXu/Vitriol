@@ -1,5 +1,6 @@
 import importlib
 from pathlib import Path
+from typing import List, Optional
 
 import click
 
@@ -52,10 +53,10 @@ COMMAND_SHORT_HELP = {
 class LazyGroup(click.Group):
     """Load command modules only when Click actually needs them."""
 
-    def list_commands(self, ctx):
+    def list_commands(self, ctx: click.Context) -> List[str]:
         return sorted(COMMAND_SPECS)
 
-    def format_commands(self, ctx, formatter):
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         rows = [
             (name, COMMAND_SHORT_HELP.get(name, ""))
             for name in self.list_commands(ctx)
@@ -64,7 +65,7 @@ class LazyGroup(click.Group):
             with formatter.section("Commands"):
                 formatter.write_dl(rows)
 
-    def get_command(self, ctx, name):
+    def get_command(self, ctx: click.Context, name: str) -> Optional[click.Command]:
         spec = COMMAND_SPECS.get(name)
         if spec is None:
             return None
@@ -102,7 +103,7 @@ class LazyGroup(click.Group):
     help="Alias for --no-allow-network --local-files-only.",
 )
 @click.pass_context
-def cli(ctx, log_level, config, trust_remote_code, allow_network, local_files_only, offline):
+def cli(ctx, log_level, config, trust_remote_code, allow_network, local_files_only, offline) -> None:
     """Vitriol: Unified framework for model structure visualization, compression, pruning, quantization and efficient inference."""
     setup_logging(level=log_level)
     ctx.ensure_object(dict)
@@ -114,7 +115,7 @@ def cli(ctx, log_level, config, trust_remote_code, allow_network, local_files_on
     ctx.obj["local_files_only"] = local_files_only
 
 
-def main():
+def main() -> None:
     cli()
 
 

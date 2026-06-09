@@ -40,6 +40,7 @@ def _env_offline() -> bool:
 
 @dataclass(frozen=True)
 class SecurityContext:
+    """Security context capturing origin and trust decisions."""
     trust_remote_code: bool
     allow_network: bool
     local_files_only: bool

@@ -53,6 +53,7 @@ class SecurityOptions:
 
 @dataclass
 class GenerationConfig:
+    """Configuration for weight generation runs."""
     max_shard_size: str = "5GB"
     dtype: str = "bfloat16"
     strategy: str = "random"

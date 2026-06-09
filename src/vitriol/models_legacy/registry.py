@@ -22,7 +22,7 @@ class ModelAdapter(ABC):
         """Modify config before model instantiation (e.g. fix attributes)."""
         return config
 
-    def register_classes(self):  # noqa: B027  (optional hook for subclasses)
+    def register_classes(self) -> None:  # noqa: B027  (optional hook for subclasses)
         """Register custom classes with AutoConfig/AutoModel if needed."""
         pass
 
@@ -38,10 +38,11 @@ class DefaultAdapter(ModelAdapter):
         return True
 
 class ModelRegistry:
+    """Registry for legacy model configurations."""
     _adapters: list[Type[ModelAdapter]] = []
 
     @classmethod
-    def register(cls, adapter_cls: Type[ModelAdapter]):
+    def register(cls, adapter_cls: Type[ModelAdapter]) -> None:
         cls._adapters.insert(0, adapter_cls) # LIFO priority
 
     @classmethod

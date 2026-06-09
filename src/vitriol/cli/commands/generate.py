@@ -53,7 +53,7 @@ def _validate_strategy(_ctx: click.Context, _param: click.Parameter, value: Opti
 @click.option('--shrink/--no-shrink', default=None, help='Shrink model configuration (reduce layers/heads). Defaults to True for ultra strategy, False otherwise.')
 @click.option('--visualize', is_flag=True, help='Generate visualization report after generation')
 @click.pass_context
-def generate(ctx, model_id, output_dir, max_shard_size, dtype, strategy, sparse, compact, ultra, n_bits, rank, sparsity, save_dummy_config, shrink, visualize):
+def generate(ctx, model_id, output_dir, max_shard_size, dtype, strategy, sparse, compact, ultra, n_bits, rank, sparsity, save_dummy_config, shrink, visualize) -> None:
     """Generate minimal weights for a model"""
     global MinimalWeightGenerator
     current_module = sys.modules.get(__name__)

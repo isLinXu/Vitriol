@@ -9,7 +9,7 @@ class VitriolVisualizer:
     """Visualizes PyTorch model architectures."""
 
     @staticmethod
-    def generate_diagram(model: nn.Module, output_path: str, dummy_input_shape=(1, 128)):
+    def generate_diagram(model: nn.Module, output_path: str, dummy_input_shape=(1, 128)) -> bool:
         """
         Generates a visualization of the model architecture.
         Uses pure text-based 'repr(model)' rendering to avoid heavy dependencies like graphviz.

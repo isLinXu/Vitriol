@@ -192,8 +192,8 @@ class GemmaAdapter(ModelAdapter):
                         delattr(config, "_quantization_config")
                     except AttributeError:
                         pass
-        except Exception:
-            pass
+        except (ImportError, AttributeError) as exc:
+            logger.debug("Skipped FP8 quantization_config stripping: %s", exc)
 
         if hasattr(config, "is_encoder_decoder"):
             config.is_encoder_decoder = False
@@ -204,7 +204,7 @@ class GemmaAdapter(ModelAdapter):
         if hidden_size > 0 and num_heads > 0 and not getattr(config, "head_dim", None):
             try:
                 config.head_dim = hidden_size // num_heads
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 pass
 
         # ── Vision config handling for multimodal Gemma models ─────────
@@ -214,7 +214,7 @@ class GemmaAdapter(ModelAdapter):
 
         return config
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         """Register Gemma-4 type aliases if needed."""
         try:
             from transformers import CONFIG_MAPPING

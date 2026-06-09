@@ -244,7 +244,7 @@ class ModelInfoCache:
         arch_type: str,
         features: list,
         **kwargs
-    ):
+    ) -> None:
         """
         Cache model information.
 

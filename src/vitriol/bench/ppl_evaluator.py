@@ -585,7 +585,8 @@ class PPLEvaluator:
         try:
             stats = backend.stats(None) if hasattr(backend, 'stats') else {}
             return int(stats.get("estimated_kv_bytes", 0) or 0)
-        except Exception:
+        except Exception as exc:
+            logger.debug("KV memory stats query failed, using estimate: %s", exc)
             # Estimate based on compression ratio
             return int(self._estimate_kv_memory() * 0.25)  # Rough 4× estimate
 

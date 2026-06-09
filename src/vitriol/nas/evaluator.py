@@ -3,7 +3,7 @@ import logging
 import math
 import shutil
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -353,7 +353,7 @@ class HybridEvaluator:
 
         self.dataset_cache = {}
 
-    def load_dataset(self, dataset_name: str, config_name: str = None, split: str = "train", n_samples: int = 100):
+    def load_dataset(self, dataset_name: str, config_name: str = None, split: str = "train", n_samples: int = 100) -> Optional[Any]:
         """Load and cache a dataset."""
         key = f"{dataset_name}_{config_name}_{split}_{n_samples}"
         if key in self.dataset_cache:

@@ -15,7 +15,7 @@ class BatchGenerator:
         with open(config_file) as f:
             self.config = yaml.safe_load(f)
 
-    def generate_all(self):
+    def generate_all(self) -> None:
         """Execute batch generation"""
         models = self.config.get('models', [])
         logger.info(f"Starting batch generation for {len(models)} models")

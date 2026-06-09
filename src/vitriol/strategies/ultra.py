@@ -93,7 +93,7 @@ class UltraStrategy(WeightGenerationStrategy):
         """Always return 'pytorch' for Ultra strategy."""
         return "pytorch"
 
-    def set_storage_format(self, fmt: str):
+    def set_storage_format(self, fmt: str) -> None:
         """
         Ultra strategy only supports PyTorch format.
 

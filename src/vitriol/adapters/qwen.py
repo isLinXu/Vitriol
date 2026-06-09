@@ -28,7 +28,7 @@ class QwenMoeAdapter(ModelAdapter):
             delattr(config, "generation_config")
         return config
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         try:
             from transformers import CONFIG_MAPPING
             from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
@@ -162,7 +162,7 @@ class Qwen35MoeAdapter(ModelAdapter):
                 try:
                     setattr(config, k, v)
                     promoted += 1
-                except Exception:
+                except (AttributeError, TypeError, ValueError):
                     pass
 
         if promoted:
@@ -173,7 +173,7 @@ class Qwen35MoeAdapter(ModelAdapter):
 
     # ── Class registration ───────────────────────────────────────────────
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         try:
             from transformers import CONFIG_MAPPING
             from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM

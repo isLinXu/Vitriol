@@ -22,7 +22,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 from ..utils.exceptions import MissingOptionalDependencyError
 from ..utils.experimental import experimental
@@ -63,7 +63,7 @@ class LogStreamQueue(logging.Handler):
         self._queue: deque = deque(maxlen=maxlen)
         self._lock = threading.Lock()
 
-    def emit(self, record: logging.LogRecord):
+    def emit(self, record: logging.LogRecord) -> None:
         """Add a log record to the stream queue."""
         try:
             log_entry = {
@@ -315,7 +315,7 @@ _rate_limiter = RateLimiter()
 
 
 @app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
+async def rate_limit_middleware(request: Request, call_next) -> StreamingResponse:
     """Apply rate limiting to all requests."""
     try:
         _rate_limiter.check(request)
@@ -347,7 +347,7 @@ def verify_api_key(
     api_key: Optional[str] = Query(None, description="Deprecated: API key query parameter"),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     authorization: Optional[str] = Header(None),
-):
+) -> Optional[str]:
     """Verify API key from X-API-Key, Bearer token, or legacy query parameter."""
     config = get_config()
     if config.get("security.api_key_required"):
@@ -362,7 +362,7 @@ def verify_api_key(
 # Routes
 
 @app.get("/", response_model=Dict[str, str])
-async def root():
+async def root() -> Dict[str, str]:
     """Root endpoint."""
     return {
         "name": "Vitriol API",
@@ -373,13 +373,13 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> Dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/status", response_model=SystemStatus)
-async def get_status(_api_key: Optional[str] = Depends(verify_api_key)):
+async def get_status(_api_key: Optional[str] = Depends(verify_api_key)) -> SystemStatus:
     """Get system status."""
     import psutil
 
@@ -405,7 +405,7 @@ async def generate_weights(
     request: GenerateRequest,
     background_tasks: BackgroundTasks,
     _api_key: Optional[str] = Depends(verify_api_key)
-):
+) -> GenerateResponse:
     """
     Generate model weights.
 
@@ -441,7 +441,7 @@ async def generate_weights(
 
 
 @app.get("/jobs/{job_id}")
-async def get_job_status(job_id: str, _api_key: Optional[str] = Depends(verify_api_key)):
+async def get_job_status(job_id: str, _api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """Get job status."""
     if job_id not in active_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -454,7 +454,7 @@ async def list_jobs(
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(10, ge=1, le=100),
     _api_key: Optional[str] = Depends(verify_api_key),
-):
+) -> Dict[str, Any]:
     """List all jobs."""
     jobs = list(active_jobs.values())
 
@@ -471,7 +471,7 @@ async def start_nas_search(
     request: NASRequest,
     background_tasks: BackgroundTasks,
     _api_key: Optional[str] = Depends(verify_api_key)
-):
+) -> Dict[str, Any]:
     """Start architecture search."""
     job_id = str(uuid.uuid4())
 
@@ -497,7 +497,7 @@ async def start_nas_search(
 
 
 @app.get("/models")
-async def list_supported_models(_api_key: Optional[str] = Depends(verify_api_key)):
+async def list_supported_models(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List supported model families, adapters, and known models.
 
     Dynamically generated from Vitriol's internal data sources:
@@ -565,7 +565,7 @@ async def list_supported_models(_api_key: Optional[str] = Depends(verify_api_key
 
 
 @app.get("/models/families")
-async def list_model_families(_api_key: Optional[str] = Depends(verify_api_key)):
+async def list_model_families(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List model architecture families from the evolution tree."""
     from ..evolution.tree_builder import DEFAULT_FAMILIES
 
@@ -588,7 +588,7 @@ async def list_model_families(_api_key: Optional[str] = Depends(verify_api_key))
 
 
 @app.get("/models/adapters")
-async def list_model_adapters(_api_key: Optional[str] = Depends(verify_api_key)):
+async def list_model_adapters(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List registered model adapters and their capabilities."""
     from ..adapters.registry import AdapterRegistry
     adapters = AdapterRegistry.discover_builtin_adapter_metadata()
@@ -597,7 +597,7 @@ async def list_model_adapters(_api_key: Optional[str] = Depends(verify_api_key))
 
 
 @app.get("/strategies")
-async def list_strategies(_api_key: Optional[str] = Depends(verify_api_key)):
+async def list_strategies(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List available generation strategies."""
     from ..strategies import STRATEGY_REGISTRY
 
@@ -620,14 +620,14 @@ async def list_strategies(_api_key: Optional[str] = Depends(verify_api_key)):
 async def stream_logs(
     since: Optional[str] = Query(None, description="ISO timestamp to get logs since"),
     _api_key: Optional[str] = Depends(verify_api_key),
-):
+) -> StreamingResponse:
     """
     Stream logs in real-time using the LogStreamQueue handler.
 
     This endpoint streams all log messages captured by the LogStreamQueue handler,
     which is attached to the root logger to capture all logs from the application.
     """
-    async def log_generator():
+    async def log_generator() -> Generator[str, None, None]:
         # Send initial batch of recent logs
         recent_logs = _log_stream_handler.get_logs(since_timestamp=since)
         for log_entry in recent_logs:
@@ -696,7 +696,7 @@ async def start_batch_generation(
     request: BatchGenerateRequest,
     background_tasks: BackgroundTasks,
     _api_key: Optional[str] = Depends(verify_api_key)
-):
+) -> BatchJobStatus:
     """
     Start a batch generation job.
 
@@ -734,7 +734,7 @@ async def start_batch_generation(
 
 
 @app.get("/batch/{batch_id}", response_model=BatchJobStatus)
-async def get_batch_status(batch_id: str, _api_key: Optional[str] = Depends(verify_api_key)):
+async def get_batch_status(batch_id: str, _api_key: Optional[str] = Depends(verify_api_key)) -> BatchJobStatus:
     """Get the status of a batch generation job."""
     if batch_id not in active_jobs:
         raise HTTPException(status_code=404, detail="Batch job not found")
@@ -750,7 +750,7 @@ async def get_batch_status(batch_id: str, _api_key: Optional[str] = Depends(veri
     )
 
 
-async def process_batch_job(batch_id: str, request: BatchGenerateRequest):
+async def process_batch_job(batch_id: str, request: BatchGenerateRequest) -> None:
     """Process a batch generation job."""
     job = active_jobs.get(batch_id)
     if not job:
@@ -837,7 +837,7 @@ async def process_batch_job(batch_id: str, request: BatchGenerateRequest):
 
 # Background job processing
 
-async def process_generation_job(job_id: str):
+async def process_generation_job(job_id: str) -> None:
     """Process a generation job."""
     job = active_jobs.get(job_id)
     if not job:
@@ -889,7 +889,7 @@ async def process_generation_job(job_id: str):
         logger.error(f"Generation job failed: {job_id}", exc_info=e)
 
 
-async def process_nas_job(job_id: str):
+async def process_nas_job(job_id: str) -> None:
     """Process a NAS job."""
     job = active_jobs.get(job_id)
     if not job:
@@ -975,7 +975,7 @@ async def process_nas_job(job_id: str):
 # CLI entry point
 
 @experimental("the Vitriol REST API server", detail="Install with `pip install 'vitriol[api]'`.")
-def main():
+def main() -> None:
     """Run API server."""
     config = get_config()
     host = os.environ.get("VITRIOL_API_HOST", "127.0.0.1")

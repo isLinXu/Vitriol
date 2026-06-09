@@ -36,11 +36,11 @@ class PhiAdapter(ModelAdapter):
         if not getattr(config, "num_key_value_heads", None):
             try:
                 config.num_key_value_heads = getattr(config, "num_attention_heads", 1)
-            except Exception:
+            except (AttributeError, TypeError):
                 pass
         return config
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         try:
             from transformers import CONFIG_MAPPING
             # phi4 → phi3 alias if phi4 not available

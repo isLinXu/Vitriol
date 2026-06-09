@@ -1,9 +1,12 @@
 """Main content and per-column architecture rendering."""
 
+from typing import Any
+
 from ..core import Architecture
 
 
 class _HtmlColumnsMixin:
+    """Mixin providing HTML column rendering for architecture visualization."""
     def _render_main_content(self, arch: Architecture) -> str:
         svg_defs = """
         <svg id="svg-connections">
@@ -596,7 +599,7 @@ class _HtmlColumnsMixin:
         def _o(v): return f'<span class="dna-val ok">{v}</span>'
         def _n(v): return f'<span class="dna-val">{v}</span>'
 
-        def row(k, v_html):
+        def row(k, v_html) -> Any:
             return f'<div class="dna-row"><span class="dna-key">{k}</span>{v_html}</div>'
 
         # Structural dimension card
@@ -646,9 +649,9 @@ class _HtmlColumnsMixin:
         )
 
         # Architecture comparison table
-        def chk(cond):  return '<span class="cell-yes">✔</span>' if cond else '<span class="cell-no">–</span>'
-        def act_cell(cond): return f'<td class="cell-active">{chk(cond)}</td>'
-        def nrm_cell(cond): return f'<td>{chk(cond)}</td>'
+        def chk(cond) -> str:  return '<span class="cell-yes">✔</span>' if cond else '<span class="cell-no">–</span>'
+        def act_cell(cond) -> str: return f'<td class="cell-active">{chk(cond)}</td>'
+        def nrm_cell(cond) -> str: return f'<td>{chk(cond)}</td>'
 
         is_dec = at == "decoder-only"
         is_enc = at == "encoder-only"

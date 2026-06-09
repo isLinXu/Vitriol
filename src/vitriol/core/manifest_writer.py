@@ -151,6 +151,7 @@ def _check_loadability(
                 break
             except Exception as e:
                 last_err = e
+                logger.debug("Loadability check with %s failed: %s", name, e)
                 err_str = str(e).lower()
                 # Retry with ignore_mismatched_sizes for shape mismatches.
                 if "size mismatch" in err_str or "mismatch" in err_str:
@@ -165,6 +166,7 @@ def _check_loadability(
                         break
                     except Exception as e2:
                         last_err = e2
+                        logger.debug("Loadability retry with %s (ignore_mismatched) also failed: %s", name, e2)
         if loadability["ok"] is not True:
             loadability["ok"] = False
             loadability["error"] = str(last_err)[:500] if last_err else "unknown"

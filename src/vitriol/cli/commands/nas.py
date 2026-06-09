@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
               default='maximize-efficiency', help='Optimization objective')
 @click.pass_context
 def nas(ctx, algorithm, iterations, generations, episodes, population, output_dir, resume, device,
-        dataset, dataset_config, dataset_split, n_samples, target_vram, target_params, objective):
+        dataset, dataset_config, dataset_split, n_samples, target_vram, target_params, objective) -> None:
     """Run Neural Architecture Search (NAS)
 
     Examples:

@@ -8,6 +8,7 @@ from ...config.manager import GenerationConfig
 
 @dataclass
 class GenerationContext:
+    """Shared context passed between pipeline steps."""
     model_id: str
     output_dir: str
     config: GenerationConfig

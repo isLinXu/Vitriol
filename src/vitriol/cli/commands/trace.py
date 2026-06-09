@@ -267,7 +267,7 @@ def trace(
     out: Path,
     device: str,
     trust_remote_code: Optional[bool],
-) -> None:
+) -> Any:
     """Run a single offline greedy decode and export a trace.v1 JSON for offline playback."""
 
     # Lazily import heavy deps to keep `vitriol.cli.main --help` lightweight.

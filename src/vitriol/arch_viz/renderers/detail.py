@@ -8,7 +8,7 @@ from ..core import Architecture
 class DetailRenderer:
     """Renders a detailed list of layers using pandas styling."""
 
-    def render(self, architecture: Architecture, output_path: str):
+    def render(self, architecture: Architecture, output_path: str) -> None:
         # Prepare data
         data = []
         for layer in architecture.layers:

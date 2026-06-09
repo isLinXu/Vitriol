@@ -412,7 +412,7 @@ class FingerprintEngine:
 
         return float(np.mean(similarities)) if similarities else 0.0
 
-    def save_fingerprint(self, fingerprint: ModelFingerprint, path: str):
+    def save_fingerprint(self, fingerprint: ModelFingerprint, path: str) -> None:
         """Save fingerprint to file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)

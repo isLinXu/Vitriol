@@ -4,6 +4,7 @@ from typing import Dict
 
 
 class _HtmlScriptsMixin:
+    """Mixin providing script generation for architecture visualization."""
     def _render_export_libs(self) -> str:
         return """
     <!-- ── Export Libraries (loaded async, export buttons wait for them) ── -->

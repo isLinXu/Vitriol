@@ -667,7 +667,7 @@ class LearnedWeightStrategy(WeightGenerationStrategy):
         except Exception as e:
             logger.warning("Failed to load generator from %s: %s", path, e)
 
-    def save_generator(self, path: str):
+    def save_generator(self, path: str) -> None:
         """Save trained generator."""
         torch.save(self.generator.state_dict(), path)
         logger.info("Saved generator to %s", path)

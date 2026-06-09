@@ -29,7 +29,8 @@ def _cfg_items(obj: Any):
     if hasattr(obj, "to_dict"):
         try:
             return obj.to_dict().items()
-        except Exception:
+        except Exception as exc:
+            logger.debug("to_dict() failed on %s: %s", type(obj).__name__, exc)
             return []
     if hasattr(obj, "__dict__"):
         return vars(obj).items()

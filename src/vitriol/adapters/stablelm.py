@@ -34,7 +34,7 @@ class StableLMAdapter(ModelAdapter):
                 logger.debug("Failed to set num_key_value_heads in StableLM config")
         return config
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         try:
             from transformers import CONFIG_MAPPING
             if "stablelm_epoch" not in CONFIG_MAPPING and "stablelm" in CONFIG_MAPPING:

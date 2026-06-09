@@ -30,7 +30,7 @@ class QwenMoeAdapter(ModelAdapter):
                 delattr(config, "generation_config")
         return config
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         # Ensure Qwen2Moe classes are registered if transformers version is old
         try:
             from transformers import CONFIG_MAPPING
@@ -67,7 +67,7 @@ class Qwen35MoeAdapter(ModelAdapter):
 
         return False
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         try:
             from transformers import CONFIG_MAPPING
             from transformers.models.qwen2_moe import Qwen2MoeConfig, Qwen2MoeForCausalLM
@@ -76,6 +76,7 @@ class Qwen35MoeAdapter(ModelAdapter):
             # But usually registering Qwen2Moe classes for "qwen3_5_moe" key is enough
             if "qwen3_5_moe" not in CONFIG_MAPPING:
                 class Qwen3_5MoeConfig(Qwen2MoeConfig):
+                    """Configuration for Qwen 3.5 MoE models."""
                     model_type = "qwen3_5_moe"
 
                 try:

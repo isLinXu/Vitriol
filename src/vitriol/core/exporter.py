@@ -70,7 +70,7 @@ class ModelExporter:
         gguf_path.parent.mkdir(parents=True, exist_ok=True)
         return gguf_path
 
-    def export_structure(self, output_file: str):
+    def export_structure(self, output_file: str) -> None:
         """Export architecture details to JSON"""
         try:
             config = self._load_best_config()
@@ -95,7 +95,7 @@ class ModelExporter:
             logger.error(f"Failed to export structure: {e}")
             raise e
 
-    def export_gguf_prep(self, output_target: str):
+    def export_gguf_prep(self, output_target: str) -> None:
         """Run GGUF conversion using llama.cpp if available.
 
         ``output_target`` may be either a final ``.gguf`` file path or a directory.

@@ -1,4 +1,6 @@
 
+from typing import Any
+
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 
@@ -34,7 +36,7 @@ class BlockRenderer:
             self.edge_color = '#E0E0E0'
             self.text_color = '#333333'
 
-    def render(self, architecture: Architecture, output_path: str):
+    def render(self, architecture: Architecture, output_path: str) -> Any:
         fig, ax = plt.subplots(figsize=(10, 16))
         ax.set_axis_off()
 
@@ -55,7 +57,7 @@ class BlockRenderer:
         y_pos -= 2.0
 
         # Helper to decide text color based on background
-        def get_text_color(bg_color):
+        def get_text_color(bg_color) -> Any:
             return self.text_color
 
         # Draw Input

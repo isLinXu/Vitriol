@@ -47,6 +47,6 @@ class Architecture:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
-    def to_json(self, path: str):
+    def to_json(self, path: str) -> None:
         with open(path, 'w') as f:
             json.dump(self.to_dict(), f, indent=2, default=str)

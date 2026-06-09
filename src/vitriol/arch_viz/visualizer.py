@@ -41,22 +41,22 @@ class ArchitectureVisualizer:
         self.architecture = analyzer.analyze(self.config)
         logger.info(f"Analyzed architecture: {self.architecture.model_type} ({self.architecture.total_params/1e9:.2f}B params)")
 
-    def generate_block_diagram(self, output_path: str):
+    def generate_block_diagram(self, output_path: str) -> None:
         renderer = BlockRenderer(style=self.style)
         renderer.render(self.architecture, output_path)
         logger.info(f"Generated block diagram: {output_path}")
 
-    def generate_detailed_diagram(self, output_path: str):
+    def generate_detailed_diagram(self, output_path: str) -> None:
         renderer = DetailRenderer()
         renderer.render(self.architecture, output_path)
         logger.info(f"Generated detailed diagram: {output_path}")
 
-    def generate_interactive_html(self, output_path: str):
+    def generate_interactive_html(self, output_path: str) -> None:
         renderer = HTMLRenderer()
         renderer.render(self.architecture, output_path)
         logger.info(f"Generated HTML report: {output_path}")
 
-    def generate_all(self, output_dir: str):
+    def generate_all(self, output_dir: str) -> None:
         path = Path(output_dir)
         path.mkdir(parents=True, exist_ok=True)
 

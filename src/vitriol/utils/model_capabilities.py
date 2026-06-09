@@ -143,6 +143,7 @@ def infer_kv_layer_types(config: Any) -> list[str]:
 
 @dataclass(frozen=True)
 class ModelCapabilities:
+    """Capability descriptor for supported model features."""
     model_type: str
     architecture_kind: str
     supports_kv_cache: bool

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Final
 
-
 _SIZE_UNITS: Final[tuple[tuple[str, int], ...]] = (
     ("TB", 1 << 40),
     ("GB", 1 << 30),

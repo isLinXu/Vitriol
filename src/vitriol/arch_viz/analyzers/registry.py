@@ -40,6 +40,7 @@ from .sequence_mixer import SequenceMixerAnalyzer
 
 
 class AnalyzerRegistry:
+    """Registry for architecture analyzers with key resolution."""
     _analyzers = {
         "default": TransformerAnalyzer(),
         "bert": BertAnalyzer(),

@@ -58,7 +58,7 @@ class RawConfig:
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
 
-    def items(self):
+    def items(self) -> Any:
         return self._data.items()
 
     def __contains__(self, key: object) -> bool:
@@ -136,7 +136,7 @@ def hf_kwargs(
     return kwargs
 
 
-def load_config(model_id: str, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any):
+def load_config(model_id: str, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any) -> Any:
     from transformers import AutoConfig
 
     return AutoConfig.from_pretrained(model_id, **hf_kwargs(security, extra=kwargs))
@@ -174,7 +174,7 @@ def load_raw_config_dict(
     return json.loads(Path(config_path).read_text(encoding="utf-8"))
 
 
-def build_config_object(config_dict: Dict[str, Any]):
+def build_config_object(config_dict: Dict[str, Any]) -> Any:
     try:
         from transformers import PretrainedConfig
     except Exception:
@@ -190,7 +190,7 @@ def load_config_or_raw(
     *,
     security: Optional[SecurityOptions | Dict[str, Any]] = None,
     **kwargs: Any,
-):
+) -> Any:
     try:
         return load_config(model_id, security=security, **kwargs)
     except Exception as exc:
@@ -255,7 +255,7 @@ def _load_config_with_patches(model_id: str, *, security: Optional[SecurityOptio
     return cfg
 
 
-def load_tokenizer(model_id: str, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any):
+def load_tokenizer(model_id: str, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any) -> Any:
     from transformers import AutoTokenizer
 
     try:
@@ -279,7 +279,7 @@ def load_tokenizer(model_id: str, *, security: Optional[SecurityOptions | Dict[s
         raise
 
 
-def load_model(model_id: str, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any):
+def load_model(model_id: str, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any) -> Any:
     """Generic AutoModel.from_pretrained wrapper."""
     from transformers import AutoModel
 
@@ -300,7 +300,7 @@ def load_causallm(
     torch_dtype: Any = None,
     device: Any = None,
     **kwargs: Any,
-):
+) -> Any:
     from transformers import AutoModelForCausalLM
 
     extra = dict(kwargs)
@@ -321,7 +321,7 @@ def load_causallm(
     return model
 
 
-def load_model_from_config(config: Any, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any):
+def load_model_from_config(config: Any, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any) -> Any:
     from transformers import AutoModel
 
     extra = hf_kwargs(security, extra=kwargs)
@@ -331,7 +331,7 @@ def load_model_from_config(config: Any, *, security: Optional[SecurityOptions | 
 
 def load_causallm_from_config(
     config: Any, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, device: Any = None, **kwargs: Any
-):
+) -> Any:
     from transformers import AutoModelForCausalLM
 
     extra = hf_kwargs(security, extra=kwargs)

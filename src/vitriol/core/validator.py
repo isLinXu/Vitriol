@@ -16,6 +16,7 @@ AutoModelForSeq2SeqLM = None
 
 @dataclass
 class ValidationReport:
+    """Report summarizing validation findings."""
     success: bool
     model_loadable: bool
     tokenizer_loadable: bool

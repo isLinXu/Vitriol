@@ -16,6 +16,7 @@ PORT_STRIDE = 2
 
 @dataclass(frozen=True)
 class DemoOptions:
+    """Configuration options for model demonstrations."""
     repo_root: Path
     output_dir: Path
     python_bin: str = "python3"
@@ -41,6 +42,7 @@ class DemoOptions:
 
 @dataclass(frozen=True)
 class DemoStep:
+    """Single step definition in a model demo."""
     name: str
     command: list[str] | None = None
 

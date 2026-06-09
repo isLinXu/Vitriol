@@ -140,7 +140,7 @@ class WeightGenerationStrategy(ABC):
         """
         return "model" if self.storage_format == "safetensors" else "pytorch_model"
 
-    def set_storage_format(self, fmt: str):
+    def set_storage_format(self, fmt: str) -> None:
         """
         Attempt to set storage format.
 

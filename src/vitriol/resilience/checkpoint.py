@@ -174,7 +174,7 @@ class CheckpointManager:
                             'torch._utils': ('_rebuild_tensor_v2',),
                         }
 
-                        def find_class(self, module, name):
+                        def find_class(self, module, name) -> Any:
                             if module in self.ALLOWED_CLASSES and name in self.ALLOWED_CLASSES[module]:
                                 return super().find_class(module, name)
                             raise pickle.UnpicklingError(
@@ -236,7 +236,7 @@ class CheckpointManager:
 
         return checkpoints
 
-    def delete_checkpoint(self, checkpoint_id: str):
+    def delete_checkpoint(self, checkpoint_id: str) -> None:
         """Delete a checkpoint."""
         checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.json"
         state_path = self.checkpoint_dir / f"{checkpoint_id}_state.pkl"
@@ -268,7 +268,7 @@ class CheckpointManager:
         operation: str,
         get_state_fn: Callable[[], Dict[str, Any]],
         metadata: Optional[Dict] = None
-    ):
+    ) -> Any:
         """
         Context manager for automatic checkpointing.
 
@@ -439,6 +439,6 @@ class RecoveryManager:
         """Get retry count for an operation."""
         return self._retry_count.get(operation_id, 0)
 
-    def reset_retry_count(self, operation_id: str):
+    def reset_retry_count(self, operation_id: str) -> None:
         """Reset retry count for an operation."""
         self._retry_count[operation_id] = 0

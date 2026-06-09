@@ -5,7 +5,7 @@ import click
 @click.command()
 @click.argument('model_id')
 @click.pass_context
-def analyze(ctx, model_id):
+def analyze(ctx, model_id) -> None:
     """Analyze a model architecture"""
     from ...core.analyzer import ModelAnalyzer
 

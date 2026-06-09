@@ -9,7 +9,7 @@ def setup_logging(
     level: str = "INFO",
     log_file: Optional[Path] = None,
     format_string: Optional[str] = None
-):
+) -> None:
     """Configure the logging subsystem."""
     if format_string is None:
         format_string = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'

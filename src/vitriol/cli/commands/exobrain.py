@@ -19,7 +19,7 @@ import click
 
 
 @click.group("exobrain")
-def exobrain_group():
+def exobrain_group() -> None:
     """ExoBrain: External brain inference and knowledge distillation for shell models."""
     pass
 
@@ -61,7 +61,7 @@ def infer_cmd(
     local_files_only,
     head_dim_projection,
     fmt,
-):
+) -> None:
     """Run ExoBrain inference on a shell model with optional teacher KV injection."""
     from ...kv.exobrain_inference import ExoBrainInferencePipeline
 
@@ -169,7 +169,7 @@ def distill_cmd(
     save_format,
     gradient_clip,
     head_dim_projection,
-):
+) -> None:
     """Distill teacher knowledge into shell model weights via ExoBrain KV injection."""
     from ...kv.exobrain_inference import ExoBrainInferencePipeline, KnowledgeDistiller
 

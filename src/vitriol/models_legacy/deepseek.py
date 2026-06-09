@@ -39,7 +39,7 @@ class DeepSeekAdapter(ModelAdapter):
 
         return config
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         # DeepSeek models rely heavily on remote code, so standard registration might not be needed
         # unless we want to patch specific classes.
         # However, for V2/V3, sometimes local code is safer if remote code fails.

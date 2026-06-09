@@ -287,7 +287,7 @@ class ConfigManager:
 
         return self
 
-    def save_to_file(self, path: str, format: str = "yaml"):
+    def save_to_file(self, path: str, format: str = "yaml") -> None:
         """
         Save current configuration to file.
 
@@ -320,11 +320,11 @@ class ConfigManager:
             "custom": self._config.custom,
         }
 
-    def watch(self, callback: callable):
+    def watch(self, callback: callable) -> None:
         """Register a config change watcher."""
         self._watchers.append(callback)
 
-    def unwatch(self, callback: callable):
+    def unwatch(self, callback: callable) -> None:
         """Unregister a watcher."""
         if callback in self._watchers:
             self._watchers.remove(callback)

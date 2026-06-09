@@ -166,7 +166,8 @@ class Scope:
                     self.model_id_or_path,
                     **security_kwargs,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.debug("Tokenizer not available for %s: %s", self.model_id_or_path, exc)
                 self._tokenizer = None
 
         except Exception as e:

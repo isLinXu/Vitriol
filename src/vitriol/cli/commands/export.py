@@ -6,7 +6,7 @@ import click
 @click.argument('input_dir', type=click.Path(exists=True))
 @click.option('--output', '-o', required=True, help='Output file path')
 @click.option('--format', type=click.Choice(['json', 'gguf']), default='json', help='Export format')
-def export(input_dir, output, format):
+def export(input_dir, output, format) -> None:
     """Export model structure or convert format"""
     from ...core.exporter import ModelExporter
 

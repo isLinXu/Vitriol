@@ -13,7 +13,7 @@ class IncrementalGenerator:
         self.output_dir = output_dir
         self.checkpoint_file = Path(output_dir) / '.vitriol_checkpoint.json'
 
-    def save_checkpoint(self, state: Dict[str, Any]):
+    def save_checkpoint(self, state: Dict[str, Any]) -> None:
         """Save generation progress"""
         try:
             self.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
@@ -33,7 +33,7 @@ class IncrementalGenerator:
                 return None
         return None
 
-    def clear_checkpoint(self):
+    def clear_checkpoint(self) -> None:
         """Remove checkpoint file after completion"""
         if self.checkpoint_file.exists():
             try:

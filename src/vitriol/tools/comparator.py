@@ -229,7 +229,7 @@ class ModelComparator:
 
         logger.info(f"Diff report saved to {output_path}")
 
-    def print_summary(self):
+    def print_summary(self) -> None:
         """Print a summary to console."""
         self.console.print(
             Panel.fit(

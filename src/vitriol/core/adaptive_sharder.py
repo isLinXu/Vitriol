@@ -429,7 +429,7 @@ class StreamingShardWriter:
 
         return min(buffer, self.shard_manager.max_shard_bytes)
 
-    def write_tensor(self, name: str, tensor: torch.Tensor):
+    def write_tensor(self, name: str, tensor: torch.Tensor) -> None:
         """
         Write a tensor to the stream.
 
@@ -471,7 +471,7 @@ class StreamingShardWriter:
         self.current_buffer_size = 0
         self.shard_count += 1
 
-    def close(self):
+    def close(self) -> None:
         """Close writer and flush remaining buffer."""
         self._flush_buffer()
         logger.info(f"StreamingShardWriter: wrote {self.shard_count} shards")

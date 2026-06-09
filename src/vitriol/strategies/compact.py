@@ -105,7 +105,7 @@ class CompactStrategy(WeightGenerationStrategy):
 
         return tensor
 
-    def save_shard(self, shard_data: Dict[str, torch.Tensor], path: str):
+    def save_shard(self, shard_data: Dict[str, torch.Tensor], path: str) -> None:
         """
         Save shard to disk.
 
@@ -147,6 +147,6 @@ class CompactStrategy(WeightGenerationStrategy):
         else:
             torch.save(shard_data, path)
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Clear the tensor cache to free memory."""
         self._cache.clear()

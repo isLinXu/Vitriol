@@ -116,6 +116,7 @@ def _custom_repo_file_size_limit(file_name: str) -> int:
 
 @dataclass
 class GenerationResult:
+    """Result container for a weight generation run."""
     output_dir: str
     manifest_path: Optional[str]
     index_path: Optional[str]
@@ -466,7 +467,8 @@ class MinimalWeightGenerator:
                 # Some configs omit qk_head_dim initially, so we force-populate it.
                 try:
                     qk_total = int(getattr(config, "qk_nope_head_dim", 0) or 0) + int(getattr(config, "qk_rope_head_dim", 0) or 0)
-                except Exception:
+                except (ValueError, TypeError) as exc:
+                    logger.debug("GLM qk_total calculation failed, using derived_head_dim: %s", exc)
                     qk_total = int(derived_head_dim)
                 _set_force(config, "qk_head_dim", qk_total)
                 _set(config, "v_head_dim", derived_head_dim)
@@ -1533,7 +1535,7 @@ class MinimalWeightGenerator:
     # Config / tokenizer save
     # ──────────────────────────────────────────────────────────────────────
 
-    def _save_configs(self, hf_config) -> None:
+    def _save_configs(self, hf_config) -> bool:
         logger.info("Saving config…")
 
         # ── Always save original HF config as meta-config.json ──────────
@@ -1606,7 +1608,7 @@ class MinimalWeightGenerator:
                 try:
                     AutoConfig.for_model(model_type)
                     return True
-                except Exception:
+                except (KeyError, ValueError, OSError, AttributeError):
                     return False
 
             # --- Align model_type and architectures with original meta-config ---

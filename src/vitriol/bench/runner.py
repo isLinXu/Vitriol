@@ -14,6 +14,7 @@ and CLI formatting.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Tuple
@@ -73,6 +74,8 @@ from ._planning import _select_preset as _select_preset
 from ._planning import build_policy_plan as build_policy_plan
 from ._planning import diff_policy_plans as diff_policy_plans
 from .autokv import default_prompt_suite, prefix_match_tokens
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -409,9 +412,9 @@ def _peak_device_bytes(device: torch.device) -> int | None:
             vals = [fn() for fn in (current, driver) if callable(fn)]
             if vals:
                 return int(max(vals))
-    except Exception:
+    except Exception as exc:
+        logger.debug("GPU memory query failed: %s", exc)
         return None
-    return None
 
 
 def _benchmark_memory_stats(run_out: Dict[str, Any], backend: KVStoreBackend | None, device: torch.device) -> Dict[str, Any]:
@@ -863,6 +866,7 @@ def run_smoke(
             device=device,
         )
     except Exception as e:
+        logger.warning("Model load failed for %s: %s", model_id, e)
         return {
             "run_id": run_id,
             "model_id": model_id,
@@ -980,6 +984,7 @@ def run_generate_preset(
             device=device,
         )
     except Exception as e:
+        logger.warning("Model/tokenizer load failed for %s: %s", model_id, e)
         return {
             "run_id": run_id,
             "model_id": model_id,
@@ -1206,6 +1211,7 @@ def compare_turboquantum_modes(
                 seq_len=seq_len, head_dim=head_dim, mode=mode, seed=seed)
             results[mode] = r
         except Exception as e:
+            logger.warning("TurboQuantum mode '%s' failed: %s", mode, e)
             results[mode] = {"ok": False, "error": str(e)}
 
     comparison = []
@@ -1255,6 +1261,7 @@ def run_turboquantum_on_model_kv(
             device=device,
         )
     except Exception as e:
+        logger.warning("Model load failed for %s: %s", model_id, e)
         return {"ok": False, "error": f"Model load failed: {e}", "model_id": model_id}
     prompt = build_long_prompt(tokenizer, min_tokens=prompt_tokens)
     past = _prefill_cache(model, tokenizer, prompt, device)

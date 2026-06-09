@@ -100,7 +100,7 @@ class DistributedCoordinator:
 
         logger.info(f"Coordinator initialized on {host}:{port}")
 
-    async def start(self):
+    async def start(self) -> None:
         """Start the coordinator."""
         self.running = True
 
@@ -111,7 +111,7 @@ class DistributedCoordinator:
 
         logger.info("Coordinator started")
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the coordinator."""
         self.running = False
         logger.info("Coordinator stopped")
@@ -152,7 +152,7 @@ class DistributedCoordinator:
         logger.info(f"Worker registered: {worker_id} at {host}:{port}")
         return True
 
-    def unregister_worker(self, worker_id: str):
+    def unregister_worker(self, worker_id: str) -> None:
         """Unregister a worker."""
         if worker_id in self.workers:
             worker = self.workers[worker_id]
@@ -169,7 +169,7 @@ class DistributedCoordinator:
             del self.workers[worker_id]
             logger.info(f"Worker unregistered: {worker_id}")
 
-    def update_heartbeat(self, worker_id: str):
+    def update_heartbeat(self, worker_id: str) -> None:
         """Update worker heartbeat."""
         if worker_id in self.workers:
             self.workers[worker_id].last_heartbeat = time.time()
@@ -429,7 +429,7 @@ class WorkerNode:
             "strategies": ["compact", "random", "ultra"]
         }
 
-    async def start(self):
+    async def start(self) -> None:
         """Start worker node."""
         self.running = True
 
@@ -443,7 +443,7 @@ class WorkerNode:
         # Start task processor
         asyncio.create_task(self._task_processor())
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop worker node."""
         self.running = False
         logger.info(f"Worker {self.worker_id} stopped")

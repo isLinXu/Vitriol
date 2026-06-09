@@ -24,7 +24,7 @@ def _visualizer_kwargs(ctx, style):
 @click.option('--html', is_flag=True, help='Generate interactive HTML')
 @click.option('--style', default='default', help='Visualization style')
 @click.pass_context
-def arch_viz(ctx, model_id, output, generate_all, block, detail, html, style):
+def arch_viz(ctx, model_id, output, generate_all, block, detail, html, style) -> None:
     """Visualize model architecture from config"""
     from ...arch_viz.visualizer import ArchitectureVisualizer
 

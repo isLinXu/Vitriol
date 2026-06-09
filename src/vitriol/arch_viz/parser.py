@@ -55,7 +55,8 @@ class ConfigParser:
                                         "local_files_only": True,
                                     },
                                 )
-                            except Exception:
+                            except Exception as exc:
+                                logger.debug("Config load from %s failed, falling back: %s", meta_name, exc)
                                 return build_config_object(meta_dict)
                     except Exception as e:
                         logger.warning(f"Failed to load {meta_name}, falling back: {e}")

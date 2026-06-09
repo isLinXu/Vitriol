@@ -28,6 +28,7 @@ else:
 logger = logging.getLogger(__name__)
 
 class AdapterRegistry:
+    """Registry for model adapters with auto-discovery."""
     _adapters: List[Type[ModelAdapter]] = []
     _loaded = False
 
@@ -79,7 +80,7 @@ class AdapterRegistry:
         return adapters
 
     @classmethod
-    def register(cls, adapter_cls: Type[ModelAdapter]):
+    def register(cls, adapter_cls: Type[ModelAdapter]) -> None:
         """Register a new adapter class."""
         if adapter_cls not in cls._adapters:
             cls._adapters.insert(0, adapter_cls) # LIFO priority

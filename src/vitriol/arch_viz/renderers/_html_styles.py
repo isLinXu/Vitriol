@@ -1,6 +1,7 @@
 """Theme CSS + web-font helpers for HTMLRenderer."""
 
 class _HtmlStylesMixin:
+    """Mixin providing CSS/font styles for architecture visualization."""
     def _get_fonts(self) -> str:
         return """
     <link rel="preconnect" href="https://fonts.googleapis.com">

@@ -36,7 +36,12 @@ def __getattr__(name: str):
         from .config.manager import GenerationConfig as _GenerationConfig
         return _GenerationConfig
     else:
-        raise AttributeError(f"module 'vitriol' has no attribute '{name}'")
+        # Allow submodule access (needed for unittest.mock.patch paths)
+        import importlib
+        try:
+            return importlib.import_module(f".{name}", __name__)
+        except ImportError:
+            raise AttributeError(f"module 'vitriol' has no attribute '{name}'")
 
 
 def __dir__():

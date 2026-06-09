@@ -23,24 +23,24 @@ logger = logging.getLogger(__name__)
 
 class QuietHTTPHandler(SimpleHTTPRequestHandler):
     """HTTP handler that suppresses logging"""
-    def log_message(self, format, *args):
+    def log_message(self, format, *args) -> None:
         pass
 
-    def end_headers(self):
+    def end_headers(self) -> None:
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
         super().end_headers()
 
-    def guess_type(self, path):
+    def guess_type(self, path) -> str:
         """Force correct content type for JSON"""
         if path.endswith('.json'):
             return 'application/json'
         return super().guess_type(path)
 
 
-def serve_3d_weights(temp_dir: str, port: int = 8781, no_open: bool = False):
+def serve_3d_weights(temp_dir: str, port: int = 8781, no_open: bool = False) -> None:
     max_retries = 50
     for _ in range(max_retries):
         try:
@@ -276,7 +276,7 @@ def _build_layer_data_from_config(model_path: Path, max_layers: int = 12) -> Dic
               help="Maximum number of Transformer layers to visualize (default: 12)")
 @click.option('--seed', default=42, type=int, show_default=True,
               help="Random seed for sampling weight statistics (deterministic)")
-def weight_viz(model_path, port, no_open, config_only, max_layers, seed):
+def weight_viz(model_path, port, no_open, config_only, max_layers, seed) -> None:
     """Visualize model weights in a 3D digital matrix style.
 
     When real weight files (.safetensors/.bin) are present in the model directory,

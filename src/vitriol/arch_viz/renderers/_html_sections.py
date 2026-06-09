@@ -6,6 +6,7 @@ from ..core import Architecture
 
 
 class _HtmlSectionsMixin:
+    """Mixin providing HTML section rendering for architecture visualization."""
     def _render_header(self, arch: Architecture, stats: Dict) -> str:
         theme_buttons = " ".join(
             f'<button class="theme-btn{" active" if tid == self.theme else ""}" '

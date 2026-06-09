@@ -579,7 +579,7 @@ class RLSearcher:
             f"Buffer: {len(self.buffer)}"
         )
 
-    def save(self, path: str):
+    def save(self, path: str) -> None:
         """Save searcher state."""
         torch.save({
             "encoder": self.encoder.state_dict(),
@@ -591,7 +591,7 @@ class RLSearcher:
         }, path)
         logger.info(f"Saved RL searcher to {path}")
 
-    def load(self, path: str):
+    def load(self, path: str) -> None:
         """Load searcher state."""
         checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.encoder.load_state_dict(checkpoint["encoder"])

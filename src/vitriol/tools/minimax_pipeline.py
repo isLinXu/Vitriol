@@ -8,6 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..adapters.registry import AdapterRegistry
 from ..patches import PatchRegistry, apply_all_patches
@@ -21,6 +22,7 @@ NESTED_CONFIG_KEYS = ("text_config", "vision_config", "encoder_config", "decoder
 
 @dataclass(frozen=True)
 class PipelineOptions:
+    """Configuration options for the MiniMax pipeline."""
     repo_root: Path
     output_dir: Path
     python_bin: str = "python3"
@@ -36,6 +38,7 @@ class PipelineOptions:
 
 @dataclass(frozen=True)
 class PipelineStep:
+    """Single step definition in the MiniMax pipeline."""
     name: str
     command: list[str] | None = None
 
@@ -143,7 +146,7 @@ def apply_validation_runtime_patches() -> None:
     apply_all_patches()
 
 
-def patch_config_for_validation(config, model_id_or_path: str):
+def patch_config_for_validation(config, model_id_or_path: str) -> Any:
     PatchRegistry.apply(config, model_id_or_path)
     adapter = AdapterRegistry.get_adapter(model_id_or_path, config)
     if adapter:

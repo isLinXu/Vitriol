@@ -35,7 +35,7 @@ class CohereAdapter(ModelAdapter):
         if not getattr(config, "rope_theta", None):
             try:
                 config.rope_theta = 8000000.0  # Cohere default
-            except Exception:
+            except (AttributeError, TypeError):
                 pass
         # head_dim derivation
         hidden_size = getattr(config, "hidden_size", 0) or 0
@@ -43,11 +43,11 @@ class CohereAdapter(ModelAdapter):
         if hidden_size > 0 and num_heads > 0 and not getattr(config, "head_dim", None):
             try:
                 config.head_dim = hidden_size // num_heads
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 pass
         return config
 
-    def register_classes(self):
+    def register_classes(self) -> None:
         try:
             from transformers import CONFIG_MAPPING
             # cohere2 → cohere alias if cohere2 not available

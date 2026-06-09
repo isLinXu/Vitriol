@@ -431,6 +431,7 @@ def _preset_to_kv_cfg(preset: KVPolicyPreset) -> Tuple[KVCacheStoreConfig, int, 
 
 
 class _LayerTypeHandle:
+    """Descriptor for a layer type's handling characteristics in benchmark planning."""
     def __init__(self, layer_types: List[str]) -> None:
         self.layer_types = list(layer_types)
 

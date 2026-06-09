@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 @click.group(name="evolve")
-def evolve_group():
+def evolve_group() -> None:
     """Evolution: Architecture Tree, Compare, and Simulation commands."""
     pass
 
@@ -35,7 +35,7 @@ def evolve_group():
               help="Title for the visualization")
 @click.option("--build/--no-build", default=True,
               help="Build the complete tree with all models")
-def build_tree(models, output_path, title, build):
+def build_tree(models, output_path, title, build) -> None:
     """Build and visualize architecture evolution tree.
 
     Examples:
@@ -90,7 +90,7 @@ def build_tree(models, output_path, title, build):
               help="Output file path (optional)")
 @click.option("--format", "output_format", type=click.Choice(["markdown", "json", "html"]),
               default="markdown", help="Output format")
-def compare_models(model1, model2, output_path, output_format):
+def compare_models(model1, model2, output_path, output_format) -> None:
     """Compare two model architectures.
 
     Examples:
@@ -156,7 +156,7 @@ def compare_models(model1, model2, output_path, output_format):
 @click.option("--gpu", default="A100", help="GPU model for estimation")
 @click.option("-o", "--output", "output_path", default=None,
               help="Output JSON file path")
-def simulate_model(model, config_path, batch_size, seq_length, dtype, gpu, output_path):
+def simulate_model(model, config_path, batch_size, seq_length, dtype, gpu, output_path) -> None:
     """Simulate performance metrics for a model architecture.
 
     Examples:
@@ -227,7 +227,7 @@ def simulate_model(model, config_path, batch_size, seq_length, dtype, gpu, outpu
 
 
 @evolve_group.command(name="families")
-def list_families():
+def list_families() -> None:
     """List all known model families."""
     families = EvolutionTree().families
 
@@ -246,7 +246,7 @@ def list_families():
               help="Output HTML path for visualization")
 @click.option("--title", default="LLM Architecture Innovation Timeline",
               help="Title for the visualization")
-def show_timeline(output_path, title):
+def show_timeline(output_path, title) -> None:
     """Show the timeline of architecture innovations.
 
     Examples:
@@ -280,7 +280,7 @@ def show_timeline(output_path, title):
 @click.option("--require-gqa", is_flag=True, help="Require GQA support")
 @click.option("--require-long-context", is_flag=True, help="Require 128K+ context")
 @click.option("--families", help="Comma-separated list of preferred families")
-def recommend_arch(max_params, max_vram, use_case, prefer_moe, require_gqa, require_long_context, families):
+def recommend_arch(max_params, max_vram, use_case, prefer_moe, require_gqa, require_long_context, families) -> None:
     """Recommend architectures based on requirements.
 
     Examples:
@@ -326,6 +326,6 @@ def recommend_arch(max_params, max_vram, use_case, prefer_moe, require_gqa, requ
         click.echo()
 
 
-def register(cli_group):
+def register(cli_group) -> None:
     """Register evolution commands with CLI."""
     cli_group.add_command(evolve_group)

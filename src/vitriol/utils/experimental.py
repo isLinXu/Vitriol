@@ -15,7 +15,7 @@ from __future__ import annotations
 import functools
 import os
 import warnings
-from typing import Callable, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 
 __all__ = ["ExperimentalWarning", "experimental", "is_experimental"]
 
@@ -57,7 +57,7 @@ def experimental(
     ``__vitriol_experimental__`` attribute (see :func:`is_experimental`).
     """
 
-    def decorate(obj):
+    def decorate(obj) -> Any:
         name = feature if isinstance(feature, str) else getattr(
             obj, "__qualname__", getattr(obj, "__name__", repr(obj))
         )
@@ -82,7 +82,7 @@ def experimental(
             return obj
 
         @functools.wraps(obj)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args, **kwargs) -> Any:
             _warn()
             return obj(*args, **kwargs)
 

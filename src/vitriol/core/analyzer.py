@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Dict, List
 
 from ..utils.hf_loading import load_config_or_raw
 from ..utils.hf_loading import load_model_from_config as hf_load_model_from_config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -86,8 +89,8 @@ class ModelAnalyzer:
                     },
                 )
             return model.num_parameters()
-        except Exception:
-            # Fallback to heuristic
+        except Exception as exc:
+            logger.debug("Model parameter count failed, falling back to heuristic: %s", exc)
             hidden_size = getattr(self.config, 'hidden_size', 4096)
             num_layers = getattr(self.config, 'num_hidden_layers', 32)
             vocab_size = getattr(self.config, 'vocab_size', 32000)

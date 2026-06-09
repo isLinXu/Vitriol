@@ -8,7 +8,7 @@ import click
 @click.argument('output_dir', type=click.Path(exists=True))
 @click.option('--run-inference/--no-inference', default=True, help='Run inference test')
 @click.pass_context
-def validate(ctx, output_dir, run_inference):
+def validate(ctx, output_dir, run_inference) -> None:
     """Validate a generated model"""
     from ...core.validator import ModelValidator
 

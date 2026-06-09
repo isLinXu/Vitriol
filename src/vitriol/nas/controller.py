@@ -29,7 +29,7 @@ class NASController:
         searcher = None
 
         # Define checkpoint callback
-        def checkpoint_cb():
+        def checkpoint_cb() -> None:
             if searcher:
                 self._save_checkpoint(searcher)
 

@@ -18,7 +18,7 @@ def _missing_viz_dependency(exc: Exception) -> click.ClickException:
 @click.option('--output-dir', '-o', default=None, help='Output directory for report (default: model_dir/visualization)')
 @click.option('--layer-pattern', '-p', default=None, help='Regex pattern to filter layers (e.g. "layers.0")')
 @click.option('--limit', '-l', type=int, default=None, help='Limit number of tensors to load')
-def visualize(model_dir, output_dir, layer_pattern, limit):
+def visualize(model_dir, output_dir, layer_pattern, limit) -> None:
     """Generate visualization report for model weights"""
     try:
         from ...visualization.utils import load_weights
