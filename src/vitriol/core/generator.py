@@ -10,247 +10,49 @@ import shutil
 import sys
 import tempfile
 import traceback
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
-
-# ---------------------------------------------------------------------------
-# Constants — shrink_config defaults for the ultra (compact) test model
-# ---------------------------------------------------------------------------
-_SHRINK_HIDDEN_LAYERS: int = 2
-_SHRINK_HIDDEN_SIZE: int = 256
-_SHRINK_NUM_ATTENTION_HEADS: int = 2
-_SHRINK_NUM_KEY_VALUE_HEADS: int = 2
-_SHRINK_INTERMEDIATE_SIZE: int = 512
-_SHRINK_NUM_EXPERTS: int = 8
-_SHRINK_NUM_EXPERTS_PER_TOK: int = 2
-_SHRINK_MOE_INTERMEDIATE_SIZE: int = 64
-_SHRINK_SHARED_EXPERT_INTERMEDIATE_SIZE: int = 64
-_SHRINK_D_STATE: int = 4   # Mamba
-_SHRINK_D_CONV: int = 2
 
 import torch  # noqa: E402
 from accelerate import init_empty_weights  # noqa: E402
 from tqdm import tqdm  # noqa: E402
-from transformers import (  # noqa: E402
-    AutoConfig,
-)
+from transformers import AutoConfig  # noqa: E402
 from transformers.utils import cached_file  # noqa: E402
 
 from ..patches import PatchRegistry, apply_all_patches, patch_remote_module  # noqa: E402
+
+from ._generator_utils import (  # noqa: E402
+    GenerationResult,
+    _ROPE_DEFAULTS,
+    _SAFE_KEYS,
+    _BLOCKED_CUSTOM_ASSET_EXTENSIONS,
+    _CUSTOM_ASSET_EXTENSIONS,
+    _CUSTOM_CODE_PREFIXES,
+    _CUSTOM_CODE_MAX_FILES_ENV,
+    _CUSTOM_CODE_MAX_PY_BYTES_ENV,
+    _CUSTOM_CODE_MAX_ASSET_BYTES_ENV,
+    _CUSTOM_CODE_DEFAULT_MAX_FILES,
+    _CUSTOM_CODE_DEFAULT_MAX_PY_BYTES,
+    _CUSTOM_CODE_DEFAULT_MAX_ASSET_BYTES,
+    positive_int_env,
+    custom_repo_file_size_limit,
+    set_missing,
+    inject_recursive,
+    copy_safe_attrs,
+    build_fallback_config,
+    extract_shard_id,
+    find_best_alias,
+    extract_auto_map_modules,
+    custom_code_file_matches_auto_map,
+    is_allowed_custom_repo_file,
+)
+from .shrinker import ConfigShrinker  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logger — must exist before any module-level patch references it
 # ─────────────────────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 
-
-_ROPE_DEFAULTS: Dict[str, Any] = {
-    "rope_type": "default",
-    "rope_theta": 10000.0,
-}
-
-_CUSTOM_CODE_PREFIXES = (
-    "configuration_",
-    "modeling_",
-    "tokenization_",
-    "processing_",
-    "image_processing_",
-    "feature_extraction_",
-)
-_CUSTOM_ASSET_EXTENSIONS = (
-    ".json",
-    ".txt",
-    ".model",
-    ".spm",
-    ".tiktoken",
-    ".tokens",
-    ".vocab",
-    ".merges",
-    ".yaml",
-    ".yml",
-)
-_BLOCKED_CUSTOM_ASSET_EXTENSIONS = (
-    ".bin",
-    ".safetensors",
-    ".pt",
-    ".pth",
-    ".msgpack",
-    ".h5",
-    ".pkl",
-    ".pickle",
-    ".so",
-    ".dylib",
-    ".dll",
-    ".sh",
-    ".bash",
-    ".zsh",
-)
-_CUSTOM_CODE_MAX_FILES_ENV = "VITRIOL_CUSTOM_CODE_MAX_FILES"
-_CUSTOM_CODE_MAX_PY_BYTES_ENV = "VITRIOL_CUSTOM_CODE_MAX_PY_BYTES"
-_CUSTOM_CODE_MAX_ASSET_BYTES_ENV = "VITRIOL_CUSTOM_CODE_MAX_ASSET_BYTES"
-_CUSTOM_CODE_DEFAULT_MAX_FILES = 32
-_CUSTOM_CODE_DEFAULT_MAX_PY_BYTES = 1 * 1024 * 1024
-_CUSTOM_CODE_DEFAULT_MAX_ASSET_BYTES = 50 * 1024 * 1024
-
-
-def _positive_int_env(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
-        return default
-    if value <= 0:
-        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
-        return default
-    return value
-
-
-def _custom_repo_file_size_limit(file_name: str) -> int:
-    if file_name.lower().endswith(".py"):
-        return _positive_int_env(_CUSTOM_CODE_MAX_PY_BYTES_ENV, _CUSTOM_CODE_DEFAULT_MAX_PY_BYTES)
-    return _positive_int_env(_CUSTOM_CODE_MAX_ASSET_BYTES_ENV, _CUSTOM_CODE_DEFAULT_MAX_ASSET_BYTES)
-
-
-@dataclass
-class GenerationResult:
-    """Result container for a weight generation run."""
-    output_dir: str
-    manifest_path: Optional[str]
-    index_path: Optional[str]
-    total_size: int
-    generated_at: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "output_dir": self.output_dir,
-            "manifest_path": self.manifest_path,
-            "index_path": self.index_path,
-            "total_size": self.total_size,
-            "generated_at": self.generated_at,
-        }
-
-
-def _set_missing(obj, **kv) -> None:
-    for k, v in kv.items():
-        if not hasattr(obj, k):
-            try:
-                setattr(obj, k, v)
-            except (AttributeError, TypeError) as e:
-                logger.debug("Could not set missing attribute %s on %s: %s", k, type(obj).__name__, e)
-
-
 apply_all_patches()
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# § 2  HELPERS
-# ═════════════════════════════════════════════════════════════════════════════
-
-# [N2 fix] regex compiled once at module level
-_SHARD_ID_RE  = re.compile(r"[-_](\d{5})(?:-of-|\.)")   # matches 5-digit shard index
-_SHARD_NUM_RE = re.compile(r"[-_](\d+)(?:-of-|\.)")     # fallback for non-padded ids
-
-_SAFE_KEYS = [
-    "vocab_size", "hidden_size", "num_hidden_layers",
-    "num_attention_heads", "intermediate_size",
-    "num_key_value_heads", "max_position_embeddings",
-    "num_experts", "num_experts_per_tok", "n_routed_experts", "n_shared_experts",
-    "moe_intermediate_size", "shared_expert_intermediate_size",
-    "first_k_dense_replace", "qk_nope_head_dim", "qk_rope_head_dim",
-    "qk_head_dim", "v_head_dim", "head_dim"
-]
-
-# Ordered fallback chain used when Auto* loaders fail
-_FALLBACK_CHAIN: List[Tuple[str, str]] = [
-    ("LlamaConfig",   "LlamaForCausalLM"),
-    ("Qwen2Config",   "Qwen2ForCausalLM"),
-    ("MistralConfig", "MistralForCausalLM"),
-    ("PhiConfig",     "PhiForCausalLM"),
-    ("GemmaConfig",   "GemmaForCausalLM"),
-]
-
-_MOE_FALLBACK_CHAIN: List[Tuple[str, str]] = [
-    ("DeepseekV3Config", "DeepseekV3ForCausalLM"),
-    ("DeepseekV2Config", "DeepseekV2ForCausalLM"),
-    ("Qwen2MoeConfig",   "Qwen2MoeForCausalLM"),
-    ("MixtralConfig",    "MixtralForCausalLM"),
-]
-
-
-def _inject_recursive(obj, attr: str, val: Any,
-                       _seen: Optional[Set[int]] = None) -> None:
-    """[B4 fix] Set attr=val on obj if absent; recurse into sub-configs with cycle guard."""
-    if _seen is None:
-        _seen = set()
-    oid = id(obj)
-    if oid in _seen:
-        return
-    _seen.add(oid)
-
-    if not hasattr(obj, attr):
-        try:
-            setattr(obj, attr, val)
-        except (AttributeError, TypeError) as e:
-            logger.debug("Could not inject attribute %s on %s: %s", attr, type(obj).__name__, e)
-
-    if not hasattr(obj, "__dict__"):
-        return
-    for v in obj.__dict__.values():
-        if isinstance(v, (str, int, float, bool, type(None))):
-            continue
-        if isinstance(v, (list, tuple)):
-            continue
-        if id(v) in _seen:
-            continue
-        if hasattr(v, "to_dict") or isinstance(v, dict):
-            _inject_recursive(v, attr, val, _seen)
-
-
-def _copy_safe_attrs(src, dst) -> None:
-    """Copy scalar architecture attrs from src → dst, sanitising list values."""
-    for key in _SAFE_KEYS:
-        val = getattr(src, key, None)
-        if val is None:
-            continue
-        if isinstance(val, (list, tuple)):
-            val = val[0] if val else None
-        if val is not None:
-            try:
-                setattr(dst, key, val)
-            except (AttributeError, TypeError) as e:
-                logger.debug("Could not copy safe attr %s to %s: %s", key, type(dst).__name__, e)
-
-
-def _build_fallback_config(cfg_name: str, cls_name: str, hf_config):
-    """[A2] Generic fallback: fresh config, copy safe attrs, return model instance."""
-    import transformers as _tf
-    cfg_cls = getattr(_tf, cfg_name)
-    mdl_cls = getattr(_tf, cls_name)
-    fb = cfg_cls()
-    _copy_safe_attrs(hf_config, fb)
-    fb.rope_theta   = 10000.0
-    fb.rope_scaling = None
-    if not getattr(fb, "rope_parameters", None):
-        fb.rope_parameters = dict(_ROPE_DEFAULTS)
-    logger.info("Fallback: initialising %s", cls_name)
-    return mdl_cls(fb)
-
-
-def _extract_shard_id(filename: str, fallback_idx: int) -> int:
-    """[N1 fix] Robustly extract the numeric shard index from a weight filename."""
-    # Try anchored 5-digit pattern first
-    m = _SHARD_ID_RE.search(filename)
-    if m:
-        return int(m.group(1))
-    # Try any digit run after a separator
-    m = _SHARD_NUM_RE.search(filename)
-    if m:
-        return int(m.group(1))
-    return fallback_idx
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # § 3  LATE IMPORTS (project-internal; after patches)
@@ -374,173 +176,6 @@ class MinimalWeightGenerator:
 
     # VLM vision tower uses larger min dims to avoid dimension mismatch
     # when the model class expects vision weights with specific shapes.
-    _SHRINK_VISION_HIDDEN_SIZE: int = 64
-    _SHRINK_VISION_NUM_ATTENTION_HEADS: int = 4
-    _SHRINK_VISION_INTERMEDIATE_SIZE: int = 128
-    _SHRINK_VISION_NUM_HIDDEN_LAYERS: int = 2
-    _SHRINK_VISION_IMAGE_SIZE: int = 14
-    _SHRINK_VISION_PATCH_SIZE: int = 2
-
-    def _shrink_config(self, config, _is_vision_sub: bool = False) -> None:
-        """Shrink config to minimal dimensions for ultra-compact dummy models.
-
-        This aggressively reduces all size-related attributes to tiny values.
-        Uses _set which only modifies attributes that already exist on the
-        config object, so model-specific attributes that aren't present are
-        safely skipped.
-
-        When ``_is_vision_sub`` is True, we apply VLM-compatible minimum
-        dimensions for the vision tower to prevent dimension-mismatch errors
-        when ``from_pretrained()`` loads the model (Gemma-4, Qwen2-VL, etc.).
-        """
-        def _set(obj, attr, val):
-            if hasattr(obj, attr):
-                setattr(obj, attr, val)
-
-        def _set_force(obj, attr, val):
-            """Set even if attribute doesn't exist — for important overrides."""
-            try:
-                setattr(obj, attr, val)
-            except Exception as e:
-                logger.debug("Could not _set %s on %s: %s", attr, type(obj).__name__, e)
-
-        # Choose dims based on whether this is a vision sub-config
-        if _is_vision_sub:
-            _hidden = self._SHRINK_VISION_HIDDEN_SIZE
-            _n_heads = self._SHRINK_VISION_NUM_ATTENTION_HEADS
-            _n_kv_heads = self._SHRINK_VISION_NUM_ATTENTION_HEADS
-            _inter = self._SHRINK_VISION_INTERMEDIATE_SIZE
-            _n_layers = self._SHRINK_VISION_NUM_HIDDEN_LAYERS
-        else:
-            _hidden = _SHRINK_HIDDEN_SIZE
-            _n_heads = _SHRINK_NUM_ATTENTION_HEADS
-            _n_kv_heads = _SHRINK_NUM_KEY_VALUE_HEADS
-            _inter = _SHRINK_INTERMEDIATE_SIZE
-            _n_layers = _SHRINK_HIDDEN_LAYERS
-
-        _set(config, "num_hidden_layers", _n_layers)
-        _set(config, "num_layers",        _n_layers)
-        _set(config, "hidden_size",       _hidden)
-        _set(config, "num_attention_heads", _n_heads)
-        _set(config, "num_key_value_heads", _n_kv_heads)
-        _set(config, "intermediate_size",  _inter)
-        # Force-set intermediate_size even if None/missing — many models
-        # compute it dynamically but LlamaForCausalLM fallback needs it
-        _set_force(config, "intermediate_size", _inter)
-
-        if not _is_vision_sub:
-            _set(config, "num_experts",        _SHRINK_NUM_EXPERTS)
-            _set(config, "num_experts_per_tok", _SHRINK_NUM_EXPERTS_PER_TOK)
-            _set(config, "n_routed_experts",   _SHRINK_NUM_EXPERTS)
-            _set(config, "moe_intermediate_size", _SHRINK_MOE_INTERMEDIATE_SIZE)
-            _set(config, "shared_expert_intermediate_size", _SHRINK_SHARED_EXPERT_INTERMEDIATE_SIZE)
-            _set(config, "expert_intermediate_size", _SHRINK_MOE_INTERMEDIATE_SIZE)
-            _set(config, "d_state", _SHRINK_D_STATE)   # Mamba
-            _set(config, "d_conv",  _SHRINK_D_CONV)
-
-        # Derive head dims from hidden_size / num_attention_heads so that
-        # model construction does not fail on constraint checks.
-        n_heads = getattr(config, "num_attention_heads", 0) or 0
-        h_size = getattr(config, "hidden_size", 0) or 0
-        if n_heads > 0 and h_size > 0:
-            derived_head_dim = h_size // n_heads
-            _set(config, "head_dim", derived_head_dim)
-            _set(config, "global_head_dim", derived_head_dim)
-            # GQA / MLA specific head dims
-            if getattr(config, "model_type", None) == "glm_moe_dsa":
-                original_qk_nope = getattr(config, "qk_nope_head_dim", 0) or 0
-                original_qk_rope = getattr(config, "qk_rope_head_dim", 0) or 0
-                original_qk_total = original_qk_nope + original_qk_rope
-                rope_ratio = (
-                    float(original_qk_rope) / float(original_qk_total)
-                    if original_qk_total > 0 else 0.25
-                )
-                rope_dim = int(round(derived_head_dim * rope_ratio))
-                rope_dim = max(1, rope_dim)
-                if rope_dim % 2:
-                    rope_dim = max(2, rope_dim - 1)
-                rope_dim = min(rope_dim, max(derived_head_dim - 1, 1))
-                nope_dim = max(derived_head_dim - rope_dim, 1)
-                _set(config, "qk_rope_head_dim", rope_dim)
-                _set(config, "qk_nope_head_dim", nope_dim)
-                # GLM constraint: qk_head_dim == qk_nope_head_dim + qk_rope_head_dim
-                # Some configs omit qk_head_dim initially, so we force-populate it.
-                try:
-                    qk_total = int(getattr(config, "qk_nope_head_dim", 0) or 0) + int(getattr(config, "qk_rope_head_dim", 0) or 0)
-                except (ValueError, TypeError) as exc:
-                    logger.debug("GLM qk_total calculation failed, using derived_head_dim: %s", exc)
-                    qk_total = int(derived_head_dim)
-                _set_force(config, "qk_head_dim", qk_total)
-                _set(config, "v_head_dim", derived_head_dim)
-            else:
-                _set(config, "qk_nope_head_dim", derived_head_dim)
-                _set(config, "qk_rope_head_dim", max(derived_head_dim // 4, 4))
-                _set(config, "qk_head_dim", derived_head_dim)
-                _set(config, "v_head_dim", derived_head_dim)
-            # Lora ranks — keep ≤ hidden_size
-            for lr_attr in ("kv_lora_rank", "q_lora_rank"):
-                if hasattr(config, lr_attr):
-                    old = getattr(config, lr_attr, h_size)
-                    _set(config, lr_attr, min(old or h_size, h_size))
-            # Linear attention dims
-            _set(config, "linear_key_head_dim", derived_head_dim)
-            _set(config, "linear_value_head_dim", derived_head_dim)
-            _set(config, "linear_num_key_heads", _n_heads)
-            _set(config, "linear_num_value_heads", _n_heads)
-
-        # GQA heads
-        _set(config, "num_global_key_value_heads", _n_kv_heads)
-        _set(config, "num_kv_shared_layers", 0)
-
-        # VLM / multimodal dims
-        _set(config, "vision_soft_tokens_per_image", 1)
-        _set(config, "depth", _n_layers)
-
-        # Vision-specific fields (only relevant for vision sub-configs)
-        if _is_vision_sub:
-            _set(config, "image_size", self._SHRINK_VISION_IMAGE_SIZE)
-            _set(config, "patch_size", self._SHRINK_VISION_PATCH_SIZE)
-            _set(config, "num_channels", 3)
-            _set(config, "num_positions", (self._SHRINK_VISION_IMAGE_SIZE // self._SHRINK_VISION_PATCH_SIZE) ** 2 + 1)
-
-        # Sliding window / positional
-        _set(config, "max_position_embeddings", 4096)
-        # sliding_window: Some configs (Gemma-4, etc.) validate this as int and
-        # reject None.  Only set if the attribute already exists and is an int.
-        sw = getattr(config, "sliding_window", None)
-        if sw is not None and isinstance(sw, int):
-            _set(config, "sliding_window", 4096)
-        elif hasattr(config, "sliding_window"):
-            # Attribute exists but is None or non-int — leave it alone
-            pass
-
-        # Recurse into sub-configs — use _is_vision_sub=True for vision tower
-        for sub in ("text_config", "encoder", "decoder",
-                     "audio_config", "ngram_config", "decoder_config"):
-            sub_cfg = getattr(config, sub, None)
-            if sub_cfg is not None:
-                self._shrink_config(sub_cfg, _is_vision_sub=False)
-
-        # Vision sub-config gets special treatment
-        for sub in ("vision_config",):
-            sub_cfg = getattr(config, sub, None)
-            if sub_cfg is not None:
-                self._shrink_config(sub_cfg, _is_vision_sub=True)
-
-        # Truncate layer_types list to match num_hidden_layers
-        lt = getattr(config, "layer_types", None)
-        if isinstance(lt, list):
-            config.layer_types = lt[:_n_layers]
-
-        for attr in ("hybrid_layer_pattern", "moe_layer_freq"):
-            seq = getattr(config, attr, None)
-            if not isinstance(seq, list):
-                continue
-            if len(seq) >= _n_layers:
-                setattr(config, attr, seq[:_n_layers])
-            else:
-                setattr(config, attr, seq + [0] * (_n_layers - len(seq)))
-
     # ──────────────────────────────────────────────────────────────────────
     # Shard map utilities
     # ──────────────────────────────────────────────────────────────────────
@@ -716,9 +351,9 @@ class MinimalWeightGenerator:
                     setattr(hf_config, attr, "eager")
                 except Exception as e:
                     logger.debug("Could not set %s='eager': %s", attr, e)
-            _inject_recursive(hf_config, "use_flash_attention_2", False)
-            _inject_recursive(hf_config, "use_flash_attn",        False)
-            _inject_recursive(hf_config, "use_deterministic_attn", False)
+            inject_recursive(hf_config, "use_flash_attention_2", False)
+            inject_recursive(hf_config, "use_flash_attn",        False)
+            inject_recursive(hf_config, "use_deterministic_attn", False)
 
         # 3. Family-specific patches
         PatchRegistry.apply(hf_config, self.model_id)
@@ -844,7 +479,7 @@ class MinimalWeightGenerator:
             chain = _MOE_FALLBACK_CHAIN + _FALLBACK_CHAIN if num_experts > 0 else _FALLBACK_CHAIN
         for cfg_name, cls_name in chain:
             try:
-                return _build_fallback_config(cfg_name, cls_name, hf_config)
+                return build_fallback_config(cfg_name, cls_name, hf_config)
             except Exception as e:
                 logger.debug("%s fallback: %s", cls_name, e)
 
@@ -857,61 +492,6 @@ class MinimalWeightGenerator:
     # ──────────────────────────────────────────────────────────────────────
     # Config loading with type-alias fallback
     # ──────────────────────────────────────────────────────────────────────
-
-    # Known type-alias map for model types that are NOT yet in
-    # transformers CONFIG_MAPPING but whose config is compatible
-    # with an existing registered type.
-    _TYPE_ALIAS_MAP: Dict[str, str] = {
-        "gemma4": "gemma3",
-        "gemma4_text": "gemma3_text",
-        "deepseek_v4": "deepseek_v3",
-        "deepseek_v3": "deepseek_v2",
-        "hy3": "llama",
-        "hy_v3": "llama",
-        "hunyuan": "llama",
-    }
-
-    @classmethod
-    def _find_best_alias(cls, original_type: str) -> List[str]:
-        """Find the best alias(es) for an unknown model_type.
-
-        Strategy:
-        1. Check explicit _TYPE_ALIAS_MAP first.
-        2. Strip trailing version digits and try prefix match in CONFIG_MAPPING
-           (e.g. "llama4" → "llama3" → "llama").
-        3. Fall back to generic base types.
-        """
-        aliases: List[str] = []
-
-        # 1. Explicit map
-        if original_type in cls._TYPE_ALIAS_MAP:
-            aliases.append(cls._TYPE_ALIAS_MAP[original_type])
-
-        # 2. Auto-detect by stripping version suffixes
-        #    e.g. "gemma4" → try "gemma3", "gemma2", "gemma"
-        #         "qwen3_5_moe" → try "qwen3_moe", "qwen2_moe"
-        try:
-            import re
-
-            from transformers.models.auto.configuration_auto import CONFIG_MAPPING
-            # Try progressively shorter version suffixes
-            base = re.sub(r'[\d_.]+$', '', original_type)  # "gemma4" → "gemma"
-            if base and base != original_type:
-                # Try numbered variants descending
-                nums = re.findall(r'\d+', original_type)
-                if nums:
-                    max_ver = int(nums[-1])
-                    for v in range(max_ver - 1, 0, -1):
-                        candidate = re.sub(r'\d+(?=[^0-9]*$)', str(v), original_type, count=1)
-                        if candidate in CONFIG_MAPPING and candidate not in aliases:
-                            aliases.append(candidate)
-                # Try base without any numbers
-                if base in CONFIG_MAPPING and base not in aliases:
-                    aliases.append(base)
-        except Exception as e:
-            logger.debug("Alias discovery failed: %s", e)
-
-        return aliases
 
     def _load_hf_config(self):
         local_files_only = bool(
@@ -986,7 +566,7 @@ class MinimalWeightGenerator:
                 logger.debug("CONFIG_MAPPING construction failed for '%s': %s", original_type, e)
 
             # 2c. Auto-discover best alias
-            aliases = self._find_best_alias(original_type)
+            aliases = find_best_alias(original_type)
             for alias in aliases:
                 try:
                     logger.info("Retrying as alias '%s'…", alias)
@@ -1066,7 +646,7 @@ class MinimalWeightGenerator:
 
         if self.shrink_config:
             logger.info("Shrinking config for compact mode…")
-            self._shrink_config(hf_config)
+            ConfigShrinker().shrink(hf_config)
 
         # ── 2. Model ────────────────────────────────────────────────────
         model = self._initialize_model(hf_config, adapter=adapter)
@@ -1290,11 +870,11 @@ class MinimalWeightGenerator:
             # Filter for known HuggingFace custom-code module names and small tokenizer/config assets.
             target_files = []
             for f in files:
-                if self._is_allowed_custom_repo_file(f):
+                if is_allowed_custom_repo_file(f):
                     if (
                         f.lower().endswith(".py")
                         and auto_map_modules is not None
-                        and not self._custom_code_file_matches_auto_map(f, auto_map_modules)
+                        and not custom_code_file_matches_auto_map(f, auto_map_modules)
                     ):
                         logger.warning("Skipping custom Python file not referenced by auto_map: %s", f)
                         continue
@@ -1304,7 +884,7 @@ class MinimalWeightGenerator:
 
             if not target_files:
                 return
-            max_files = _positive_int_env(_CUSTOM_CODE_MAX_FILES_ENV, _CUSTOM_CODE_DEFAULT_MAX_FILES)
+            max_files = positive_int_env(_CUSTOM_CODE_MAX_FILES_ENV, _CUSTOM_CODE_DEFAULT_MAX_FILES)
             if len(target_files) > max_files:
                 logger.warning(
                     "Refusing to sync all custom-code files: %d allowed files exceeds limit %d; "
@@ -1330,7 +910,7 @@ class MinimalWeightGenerator:
                         continue
                     file_path = hf_hub_download(repo_id=repo_id, filename=file_name)
                     file_size = os.path.getsize(file_path)
-                    max_file_size = _custom_repo_file_size_limit(file_name)
+                    max_file_size = custom_repo_file_size_limit(file_name)
                     if file_size > max_file_size:
                         logger.warning(
                             "Skipping oversized custom-code file %s (%d bytes > %d bytes)",
@@ -1369,65 +949,10 @@ class MinimalWeightGenerator:
             except (OSError, json.JSONDecodeError) as e:
                 logger.debug("Could not inspect %s for auto_map custom code: %s", config_path, e)
                 continue
-            modules = self._extract_auto_map_modules(config_data.get("auto_map"))
+            modules = extract_auto_map_modules(config_data.get("auto_map"))
             if modules:
                 return modules
         return None
-
-    @staticmethod
-    def _extract_auto_map_modules(auto_map: Any) -> Set[str]:
-        """Extract importable module names from HuggingFace ``auto_map`` metadata."""
-        modules: Set[str] = set()
-
-        def visit(value: Any) -> None:
-            if isinstance(value, str):
-                ref = value.strip()
-                if "." not in ref:
-                    return
-                module_name = ref.rsplit(".", 1)[0].replace("\\", ".").replace("/", ".").strip(".")
-                if module_name and all(part and part != ".." for part in module_name.split(".")):
-                    modules.add(module_name)
-                return
-            if isinstance(value, dict):
-                for item in value.values():
-                    visit(item)
-                return
-            if isinstance(value, (list, tuple, set)):
-                for item in value:
-                    visit(item)
-
-        visit(auto_map)
-        return modules
-
-    @staticmethod
-    def _custom_code_file_matches_auto_map(file_name: str, auto_map_modules: Set[str]) -> bool:
-        normalized = file_name.replace("\\", "/")
-        if not normalized.lower().endswith(".py"):
-            return False
-        module_path = normalized[:-3].replace("/", ".").strip(".")
-        module_basenames = {module.rsplit(".", 1)[-1] for module in auto_map_modules}
-        return module_path in auto_map_modules or module_path.rsplit(".", 1)[-1] in module_basenames
-
-    @staticmethod
-    def _is_allowed_custom_repo_file(file_name: str) -> bool:
-        """Return whether a repo file is safe enough to mirror into output_dir."""
-        normalized = file_name.replace("\\", "/")
-        if os.path.isabs(file_name):
-            return False
-        parts = normalized.split("/")
-        if not parts or any(part in {"", ".."} for part in parts):
-            return False
-
-        base_name = parts[-1]
-        lower_name = base_name.lower()
-        if lower_name.endswith(".py"):
-            return base_name.startswith(_CUSTOM_CODE_PREFIXES)
-
-        if "/" not in normalized:
-            return False
-        if lower_name.endswith(_BLOCKED_CUSTOM_ASSET_EXTENSIONS):
-            return False
-        return lower_name.endswith(_CUSTOM_ASSET_EXTENSIONS)
 
     # ──────────────────────────────────────────────────────────────────────
     # Shard I/O
