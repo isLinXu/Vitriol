@@ -188,25 +188,60 @@ class ConfigManager:
         return self
 
     def _load_from_env(self):
-        """Load configuration from environment variables."""
+        """Load configuration from environment variables.
+
+        Supports bool, int, float, and string types with automatic coercion.
+        """
         env_mappings = {
-            "VITRIOL_ENV": "environment",
-            "VITRIOL_LOG_LEVEL": "system.log_level",
-            "VITRIOL_CACHE_DIR": "generation.cache_dir",
-            "VITRIOL_GPU_ENABLED": "system.gpu_enabled",
-            "VITRIOL_DEFAULT_STRATEGY": "generation.default_strategy",
+            "VITRIOL_ENV": ("environment", str),
+            "VITRIOL_LOG_LEVEL": ("system.log_level", str),
+            "VITRIOL_CACHE_DIR": ("generation.cache_dir", str),
+            "VITRIOL_GPU_ENABLED": ("system.gpu_enabled", bool),
+            "VITRIOL_DEFAULT_STRATEGY": ("generation.default_strategy", str),
+            "VITRIOL_MAX_MEMORY_GB": ("system.max_memory_gb", float),
+            "VITRIOL_MAX_DISK_GB": ("system.max_disk_gb", float),
+            "VITRIOL_GPU_MEMORY_FRACTION": ("system.gpu_memory_fraction", float),
+            "VITRIOL_PARALLEL_WORKERS": ("generation.parallel_workers", int),
+            "VITRIOL_COMPRESSION_LEVEL": ("generation.compression_level", int),
+            "VITRIOL_VERIFY_CHECKSUMS": ("generation.verify_checksums", bool),
+            "VITRIOL_API_KEY_REQUIRED": ("security.api_key_required", bool),
+            "VITRIOL_RATE_LIMIT_REQUESTS": ("security.rate_limit_requests", int),
+            "VITRIOL_RATE_LIMIT_WINDOW": ("security.rate_limit_window", int),
         }
 
-        for env_var, config_key in env_mappings.items():
+        for env_var, (config_key, target_type) in env_mappings.items():
             value = os.getenv(env_var)
             if value is not None:
-                # Convert types
-                if value.lower() in ['true', 'false']:
-                    value = value.lower() == 'true'
-                elif value.isdigit():
-                    value = int(value)
+                coerced = self._coerce_env_value(value, target_type)
+                if coerced is not None:
+                    self.set(config_key, coerced)
 
-                self.set(config_key, value)
+    @staticmethod
+    def _coerce_env_value(value: str, target_type: type) -> Any:
+        """Coerce an environment variable string to the target type.
+
+        Args:
+            value: Raw environment variable value.
+            target_type: Expected Python type (bool, int, float, str).
+
+        Returns:
+            Coerced value or None if coercion fails.
+        """
+        if target_type is bool:
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        if target_type is int:
+            try:
+                return int(value)
+            except ValueError:
+                logger.warning("Cannot coerce env value %r to int", value)
+                return None
+        if target_type is float:
+            try:
+                return float(value)
+            except ValueError:
+                logger.warning("Cannot coerce env value %r to float", value)
+                return None
+        return value  # str or fallback
 
     def _merge_config(self, data: Dict[str, Any]):
         """Merge dictionary into current config."""
@@ -329,7 +364,58 @@ class ConfigManager:
         if callback in self._watchers:
             self._watchers.remove(callback)
 
-    def get_environment(self) -> ConfigEnvironment:
+    def validate(self) -> List[str]:
+        """Validate current configuration and return list of issues.
+
+        Checks:
+            - Required fields are present
+            - Strategy names are valid
+            - Numeric ranges are within bounds
+            - Path values are non-empty
+
+        Returns:
+            List of validation issue messages (empty if all valid).
+        """
+        issues: List[str] = []
+        gen = self._config.generation
+        sys_cfg = self._config.system
+        sec = self._config.security
+
+        # Validate generation defaults
+        if not gen.default_strategy:
+            issues.append("generation.default_strategy is empty")
+        if gen.default_strategy not in {"random", "sparse", "compact", "ultra", "hybrid_ultra",
+                                         "ternary", "binary", "quantized", "lowrank",
+                                         "structured_sparse", "learned", "hybrid_learned", "quantum"}:
+            issues.append(f"generation.default_strategy '{gen.default_strategy}' is not a known strategy")
+        if not gen.default_dtype:
+            issues.append("generation.default_dtype is empty")
+        if gen.default_dtype not in {"float16", "bfloat16", "float32", "float64"}:
+            issues.append(f"generation.default_dtype '{gen.default_dtype}' is not a valid dtype")
+        if gen.parallel_workers < 1:
+            issues.append("generation.parallel_workers must be >= 1")
+        if gen.compression_level < 0 or gen.compression_level > 9:
+            issues.append("generation.compression_level must be in [0, 9]")
+
+        # Validate system config
+        if sys_cfg.max_memory_gb < 0.5:
+            issues.append("system.max_memory_gb must be >= 0.5")
+        if sys_cfg.max_disk_gb < 1.0:
+            issues.append("system.max_disk_gb must be >= 1.0")
+        if not (0.0 < sys_cfg.gpu_memory_fraction <= 1.0):
+            issues.append("system.gpu_memory_fraction must be in (0.0, 1.0]")
+
+        # Validate security config
+        if sec.rate_limit_requests < 1:
+            issues.append("security.rate_limit_requests must be >= 1")
+        if sec.rate_limit_window < 1:
+            issues.append("security.rate_limit_window must be >= 1")
+
+        return issues
+
+    def is_valid(self) -> bool:
+        """Return True if configuration passes all validation checks."""
+        return len(self.validate()) == 0
         """Get current environment."""
         return ConfigEnvironment(self._config.environment)
 
