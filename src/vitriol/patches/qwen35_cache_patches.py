@@ -25,19 +25,21 @@ def _levels_for_kv_format(fmt: str) -> int:
 
 @dataclass(frozen=True)
 class Qwen35CachePatchConfig:
+    """Configuration for Qwen 3.5 cache patching."""
     enable_kv_quant: bool = True
     kv_format: str = "turbo3"
     block_size: int = 32
 
 
 class Qwen35CachePatcher:
+    """Patcher that modifies Qwen 3.5 cache behavior."""
     def __init__(self, cfg: Qwen35CachePatchConfig) -> None:
         self.cfg = cfg
         self._orig_update: Optional[Callable[..., Any]] = None
         self._calls_total: int = 0
         self._calls_quantized: int = 0
 
-    def apply(self) -> None:
+    def apply(self) -> Any:
         import transformers.models.qwen3_5.modeling_qwen3_5 as m
 
         if getattr(m.Qwen3_5DynamicCache.update, "_vitriol_qwen35_cache_patched", False):
@@ -47,7 +49,7 @@ class Qwen35CachePatcher:
         levels = _levels_for_kv_format(self.cfg.kv_format)
         bs = int(self.cfg.block_size)
 
-        def wrapped(self_cache, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, cache_kwargs: Optional[dict[str, Any]] = None):
+        def wrapped(self_cache, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, cache_kwargs: Optional[dict[str, Any]] = None) -> Any:
             self._calls_total += 1
 
             if not self.cfg.enable_kv_quant:

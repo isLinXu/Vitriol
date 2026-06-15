@@ -153,6 +153,10 @@ class PluginManager:
         Returns:
             Plugin instance or None if failed
         """
+        if name in self.plugins:
+            logger.debug("Plugin %s is already loaded; returning existing instance.", name)
+            return self.plugins[name]
+
         try:
             module = importlib.import_module(name)
 
@@ -167,50 +171,58 @@ class PluginManager:
                     break
 
             if plugin_class is None:
-                logger.error(f"No Plugin class found in {name}")
+                logger.error("No Plugin class found in %s", name)
                 return None
 
             # Instantiate
             plugin = plugin_class()
 
+            # Validate metadata
+            if not plugin.name:
+                plugin.name = name
+            if not plugin.version:
+                plugin.version = "0.0.0"
+
             # Initialize
             context = self._create_context()
             if plugin.initialize(context):
                 self.plugins[name] = plugin
-                logger.info(f"Loaded plugin: {name} v{plugin.version}")
+                logger.info("Loaded plugin: %s v%s (%s)", name, plugin.version, plugin.description or "no description")
                 return plugin
             else:
-                logger.error(f"Plugin {name} failed to initialize")
+                logger.error("Plugin %s failed to initialize", name)
                 return None
 
         except Exception as e:
-            logger.error(f"Failed to load plugin {name}: {e}")
+            logger.error("Failed to load plugin %s: %s", name, e)
             return None
 
-    def _create_context(self) -> Dict[str, Any]:
-        """Create application context for plugins."""
-        from ..adapters import register_adapter
-        from ..strategies import register_strategy
+    def load_all(self) -> Dict[str, Any]:
+        """Load all discovered plugins.
 
-        return {
-            'register_strategy': register_strategy,
-            'register_adapter': register_adapter,
-            'register_hook': self.register_hook,
-            'config': {},
+        Returns:
+            Summary dict with 'loaded', 'failed', and 'total' counts.
+        """
+        discovered = self.discover_plugins()
+        loaded: List[str] = []
+        failed: List[str] = []
+
+        for name in discovered:
+            result = self.load_plugin(name)
+            if result is not None:
+                loaded.append(name)
+            else:
+                failed.append(name)
+
+        summary = {
+            "total_discovered": len(discovered),
+            "loaded": len(loaded),
+            "failed": len(failed),
+            "loaded_names": loaded,
+            "failed_names": failed,
         }
-
-    def unload_plugin(self, name: str) -> None:
-        """Unload a plugin."""
-        if name in self.plugins:
-            plugin = self.plugins[name]
-            plugin.shutdown()
-            del self.plugins[name]
-            logger.info(f"Unloaded plugin: {name}")
-
-    def load_all(self) -> None:
-        """Load all discovered plugins."""
-        for name in self.discover_plugins():
-            self.load_plugin(name)
+        logger.info("Plugin loading complete: %(loaded)d/%(total_discovered)d succeeded", summary)
+        return summary
 
     def register_hook(self, event: str, callback: Callable) -> None:
         """

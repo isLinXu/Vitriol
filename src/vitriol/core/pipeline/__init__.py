@@ -1,10 +1,16 @@
-"""Generator pipeline internals (experimental).
+"""Generator pipeline internals.
 
-This package provides an internal pipeline abstraction used by the weight generator.
-Public API remains `vitriol.core.generator.MinimalWeightGenerator`.
+This package provides the internal pipeline abstraction used by
+:class:`~vitriol.core.generator.MinimalWeightGenerator`.
 
-.. warning::
-   This package is experimental and may change or be removed in future versions.
+The pipeline decouples generation into discrete, testable steps:
+
+1. :class:`BootstrapStep` — initialise context, load config, resolve adapter
+2. :class:`LegacyGenerateStep` — run the legacy shard-generation loop
+
+Public API remains ``vitriol.core.generator.MinimalWeightGenerator``;
+classes exported here are intended for advanced users who wish to
+compose or extend the generation pipeline.
 """
 
 from .steps.bootstrap import BootstrapStep

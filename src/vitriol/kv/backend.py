@@ -10,12 +10,14 @@ from .cache_store import KVCacheStore, KVCacheStoreConfig
 
 @dataclass(frozen=True)
 class KVMeta:
+    """Metadata descriptor for a KV cache entry."""
     model_id: str
     device: str
     dtype: str
 
 
 class KVBackend(Protocol):
+    """Protocol defining the KV cache backend interface."""
     def write_kv(self, handle: Any, layer_idx: int, key_new: torch.Tensor, value_new: torch.Tensor, info: Dict[str, Any]) -> None: ...
 
     def read_attention(
@@ -34,6 +36,7 @@ class KVBackend(Protocol):
 
 @dataclass
 class KVStoreBackend:
+    """Concrete KV store backend with persistence support."""
     store_cfg: KVCacheStoreConfig
     store_cfg_factory: Optional[Callable[[Any, int], KVCacheStoreConfig]] = None
 

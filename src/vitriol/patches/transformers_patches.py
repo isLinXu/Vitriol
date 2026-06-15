@@ -28,6 +28,7 @@ def patch_transformers_generic() -> None:
 
         if not hasattr(generic, "OutputRecorder"):
             class OutputRecorder:
+                """Context manager that records transformer outputs."""
                 def __init__(self, *args: Any, **kwargs: Any):
                     pass
 
@@ -64,7 +65,7 @@ def patch_fx_available() -> None:
         transformers.utils.import_utils.is_torch_fx_available = lambda: True
 
 
-def patch_pretrained_init() -> None:
+def patch_pretrained_init() -> Any:
     """
     Force eager attention when flash_attn is absent.
 

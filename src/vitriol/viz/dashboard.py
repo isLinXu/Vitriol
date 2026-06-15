@@ -95,7 +95,7 @@ class DashboardDataStore:
         # Callbacks for real-time updates
         self.subscribers: List[callable] = []
 
-    def add_event(self, event: DashboardEvent):
+    def add_event(self, event: DashboardEvent) -> None:
         """Add event to store."""
         with self.lock:
             self.events.append(event)
@@ -109,7 +109,7 @@ class DashboardDataStore:
             except Exception as e:
                 logger.debug("Dashboard event subscriber callback failed: %s", e)
 
-    def update_generation_metrics(self, metrics: GenerationMetrics):
+    def update_generation_metrics(self, metrics: GenerationMetrics) -> None:
         """Update generation metrics."""
         with self.lock:
             self.generation_metrics = metrics
@@ -120,7 +120,7 @@ class DashboardDataStore:
             data={"type": "generation", "metrics": metrics.to_dict()}
         ))
 
-    def update_nas_metrics(self, metrics: NASMetrics):
+    def update_nas_metrics(self, metrics: NASMetrics) -> None:
         """Update NAS metrics."""
         with self.lock:
             self.nas_metrics = metrics
@@ -131,7 +131,7 @@ class DashboardDataStore:
             data={"type": "nas", "metrics": metrics.to_dict()}
         ))
 
-    def add_log(self, message: str, level: str = "info"):
+    def add_log(self, message: str, level: str = "info") -> None:
         """Add log message."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] [{level.upper()}] {message}"
@@ -147,7 +147,7 @@ class DashboardDataStore:
             data={"message": log_entry, "level": level}
         ))
 
-    def set_active_operation(self, operation: Optional[str]):
+    def set_active_operation(self, operation: Optional[str]) -> None:
         """Set currently active operation."""
         with self.lock:
             self.active_operation = operation
@@ -159,7 +159,7 @@ class DashboardDataStore:
                 data={"operation": operation, "status": "started"}
             ))
 
-    def set_run_id(self, run_id: Optional[str]):
+    def set_run_id(self, run_id: Optional[str]) -> None:
         """Set the current run id (thread-safe).
 
         Backward compatible: does not affect existing state keys, only adds a new one.
@@ -188,11 +188,11 @@ class DashboardDataStore:
                 "events": [e.to_dict() for e in self.events[-50:]]  # Last 50 events
             }
 
-    def subscribe(self, callback: callable):
+    def subscribe(self, callback: callable) -> None:
         """Subscribe to real-time updates."""
         self.subscribers.append(callback)
 
-    def unsubscribe(self, callback: callable):
+    def unsubscribe(self, callback: callable) -> None:
         """Unsubscribe from updates."""
         if callback in self.subscribers:
             self.subscribers.remove(callback)
@@ -203,11 +203,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     data_store: Optional[DashboardDataStore] = None
 
-    def log_message(self, format, *args):
+    def log_message(self, format, *args) -> None:
         # Suppress default logging
         pass
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         """Handle GET requests."""
         if self.path == '/':
             self._serve_dashboard()
@@ -256,7 +256,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         # Queue for this connection
         event_queue = queue.Queue()
 
-        def on_event(event: DashboardEvent):
+        def on_event(event: DashboardEvent) -> None:
             event_queue.put(event)
 
         self.data_store.subscribe(on_event)
@@ -600,14 +600,19 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 opEl.className = 'status-badge status-idle';
             }
 
-            // Update logs
+            // Update logs — use createElement + textContent to avoid XSS
             if (state.logs && state.logs.length > 0) {
                 const logsEl = document.getElementById('logs');
-                logsEl.innerHTML = state.logs.map(log => {
+                // Clear safely
+                while (logsEl.firstChild) logsEl.removeChild(logsEl.firstChild);
+                for (const log of state.logs) {
                     const level = log.includes('[ERROR]') ? 'error' :
                                  log.includes('[WARNING]') ? 'warning' : 'info';
-                    return `<div class="log-entry ${level}">${escapeHtml(log)}</div>`;
-                }).join('');
+                    const entry = document.createElement('div');
+                    entry.className = `log-entry ${level}`;
+                    entry.textContent = log;
+                    logsEl.appendChild(entry);
+                }
                 logsEl.scrollTop = logsEl.scrollHeight;
             }
         }
@@ -628,12 +633,6 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 return `${hours}h ${mins % 60}m`;
             }
             return `${mins}m ${secs.toString().padStart(2, '0')}s`;
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
         }
 
         // Poll for updates
@@ -674,7 +673,7 @@ class DashboardServer:
         # Set data store on handler class
         DashboardRequestHandler.data_store = data_store
 
-    def start(self, blocking: bool = False):
+    def start(self, blocking: bool = False) -> None:
         """Start the dashboard server."""
         if self.server:
             logger.warning("Server already running")
@@ -698,7 +697,7 @@ class DashboardServer:
             else:
                 raise
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the dashboard server."""
         if self.server:
             self.server.shutdown()
@@ -724,31 +723,31 @@ class VitriolDashboard:
         self.server = DashboardServer(self.data_store, port)
         self._started = False
 
-    def start(self):
+    def start(self) -> None:
         """Start the dashboard."""
         if not self._started:
             self.server.start(blocking=False)
             self._started = True
             self.data_store.add_log("Dashboard started", "info")
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the dashboard."""
         self.server.stop()
         self._started = False
 
-    def update_generation(self, metrics: GenerationMetrics):
+    def update_generation(self, metrics: GenerationMetrics) -> None:
         """Update generation metrics."""
         self.data_store.update_generation_metrics(metrics)
 
-    def update_nas(self, metrics: NASMetrics):
+    def update_nas(self, metrics: NASMetrics) -> None:
         """Update NAS metrics."""
         self.data_store.update_nas_metrics(metrics)
 
-    def log(self, message: str, level: str = "info"):
+    def log(self, message: str, level: str = "info") -> None:
         """Add log message."""
         self.data_store.add_log(message, level)
 
-    def set_operation(self, operation: Optional[str]):
+    def set_operation(self, operation: Optional[str]) -> None:
         """Set active operation."""
         self.data_store.set_active_operation(operation)
 

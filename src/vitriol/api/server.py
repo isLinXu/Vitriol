@@ -210,13 +210,22 @@ class SystemStatus(BaseModel):
 active_jobs: Dict[str, Dict[str, Any]] = {}
 job_queue: asyncio.Queue = asyncio.Queue()
 
-# Create FastAPI app
+# Create FastAPI app with organized tags
 app = FastAPI(
     title="Vitriol API",
     description="REST API for Vitriol model generation, NAS search, job tracking, and batch generation.",
     version=__version__,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "System", "description": "Health checks, status, and system information"},
+        {"name": "Generation", "description": "Weight generation and batch processing"},
+        {"name": "NAS", "description": "Neural Architecture Search"},
+        {"name": "Jobs", "description": "Job status tracking and management"},
+        {"name": "Models", "description": "Model discovery, families, and adapters"},
+        {"name": "Strategies", "description": "Weight generation strategies"},
+        {"name": "Streaming", "description": "Real-time log streaming"},
+    ],
 )
 
 # CORS middleware — default restricts to localhost; set VITRIOL_API_CORS_ORIGINS=* for open access
@@ -361,7 +370,7 @@ def verify_api_key(
 
 # Routes
 
-@app.get("/", response_model=Dict[str, str])
+@app.get("/", response_model=Dict[str, str], tags=["System"])
 async def root() -> Dict[str, str]:
     """Root endpoint."""
     return {
@@ -372,13 +381,13 @@ async def root() -> Dict[str, str]:
     }
 
 
-@app.get("/health")
+@app.get("/health", tags=["System"])
 async def health_check() -> Dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
-@app.get("/status", response_model=SystemStatus)
+@app.get("/status", response_model=SystemStatus, tags=["System"])
 async def get_status(_api_key: Optional[str] = Depends(verify_api_key)) -> SystemStatus:
     """Get system status."""
     import psutil
@@ -400,7 +409,7 @@ async def get_status(_api_key: Optional[str] = Depends(verify_api_key)) -> Syste
     )
 
 
-@app.post("/generate", response_model=GenerateResponse)
+@app.post("/generate", response_model=GenerateResponse, tags=["Generation"])
 async def generate_weights(
     request: GenerateRequest,
     background_tasks: BackgroundTasks,
@@ -440,7 +449,7 @@ async def generate_weights(
     )
 
 
-@app.get("/jobs/{job_id}")
+@app.get("/jobs/{job_id}", tags=["Jobs"])
 async def get_job_status(job_id: str, _api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """Get job status."""
     if job_id not in active_jobs:
@@ -449,7 +458,7 @@ async def get_job_status(job_id: str, _api_key: Optional[str] = Depends(verify_a
     return active_jobs[job_id]
 
 
-@app.get("/jobs")
+@app.get("/jobs", tags=["Jobs"])
 async def list_jobs(
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(10, ge=1, le=100),
@@ -466,7 +475,7 @@ async def list_jobs(
     return {"jobs": jobs[:limit], "total": len(active_jobs)}
 
 
-@app.post("/nas/search")
+@app.post("/nas/search", tags=["NAS"])
 async def start_nas_search(
     request: NASRequest,
     background_tasks: BackgroundTasks,
@@ -496,7 +505,7 @@ async def start_nas_search(
     }
 
 
-@app.get("/models")
+@app.get("/models", tags=["Models"])
 async def list_supported_models(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List supported model families, adapters, and known models.
 
@@ -564,7 +573,7 @@ async def list_supported_models(_api_key: Optional[str] = Depends(verify_api_key
     }
 
 
-@app.get("/models/families")
+@app.get("/models/families", tags=["Models"])
 async def list_model_families(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List model architecture families from the evolution tree."""
     from ..evolution.tree_builder import DEFAULT_FAMILIES
@@ -587,7 +596,7 @@ async def list_model_families(_api_key: Optional[str] = Depends(verify_api_key))
     return {"families": families, "total": len(families)}
 
 
-@app.get("/models/adapters")
+@app.get("/models/adapters", tags=["Models"])
 async def list_model_adapters(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List registered model adapters and their capabilities."""
     from ..adapters.registry import AdapterRegistry
@@ -596,7 +605,7 @@ async def list_model_adapters(_api_key: Optional[str] = Depends(verify_api_key))
     return {"adapters": adapters, "total": len(adapters)}
 
 
-@app.get("/strategies")
+@app.get("/strategies", tags=["Strategies"])
 async def list_strategies(_api_key: Optional[str] = Depends(verify_api_key)) -> Dict[str, Any]:
     """List available generation strategies."""
     from ..strategies import STRATEGY_REGISTRY
@@ -616,7 +625,7 @@ async def list_strategies(_api_key: Optional[str] = Depends(verify_api_key)) -> 
     return {"strategies": strategies}
 
 
-@app.get("/stream/logs")
+@app.get("/stream/logs", tags=["Streaming"])
 async def stream_logs(
     since: Optional[str] = Query(None, description="ISO timestamp to get logs since"),
     _api_key: Optional[str] = Depends(verify_api_key),
@@ -691,7 +700,7 @@ class BatchJobStatus(BaseModel):
     results: List[Dict[str, Any]]
 
 
-@app.post("/batch/generate", response_model=BatchJobStatus)
+@app.post("/batch/generate", response_model=BatchJobStatus, tags=["Generation"])
 async def start_batch_generation(
     request: BatchGenerateRequest,
     background_tasks: BackgroundTasks,
@@ -733,7 +742,7 @@ async def start_batch_generation(
     )
 
 
-@app.get("/batch/{batch_id}", response_model=BatchJobStatus)
+@app.get("/batch/{batch_id}", response_model=BatchJobStatus, tags=["Jobs"])
 async def get_batch_status(batch_id: str, _api_key: Optional[str] = Depends(verify_api_key)) -> BatchJobStatus:
     """Get the status of a batch generation job."""
     if batch_id not in active_jobs:
@@ -974,9 +983,16 @@ async def process_nas_job(job_id: str) -> None:
 
 # CLI entry point
 
-@experimental("the Vitriol REST API server", detail="Install with `pip install 'vitriol[api]'`.")
 def main() -> None:
-    """Run API server."""
+    """Run the Vitriol REST API server.
+
+    Environment variables:
+        VITRIOL_API_HOST: Bind host (default: 127.0.0.1)
+        VITRIOL_API_PORT: Bind port (default: 8000)
+        VITRIOL_API_CORS_ORIGINS: CORS origins comma-separated, or * for all
+        VITRIOL_API_RATE_LIMIT: Rate limit spec, e.g. 60/minute
+        VITRIOL_API_TRUST_PROXY_HEADERS: Trust X-Forwarded-For / X-Real-IP
+    """
     config = get_config()
     host = os.environ.get("VITRIOL_API_HOST", "127.0.0.1")
     port = int(os.environ.get("VITRIOL_API_PORT", "8000"))

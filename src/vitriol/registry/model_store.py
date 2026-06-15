@@ -306,7 +306,7 @@ class ModelRegistry:
 
         return results
 
-    def increment_stat(self, model_id: str, stat: str):
+    def increment_stat(self, model_id: str, stat: str) -> None:
         """Increment model statistic."""
         if model_id in self.models:
             if stat not in self.models[model_id].stats:
@@ -314,7 +314,7 @@ class ModelRegistry:
             self.models[model_id].stats[stat] += 1
             self._save_registry()
 
-    def delete_model(self, model_id: str):
+    def delete_model(self, model_id: str) -> None:
         """Delete model from registry."""
         if model_id in self.models:
             # Remove files

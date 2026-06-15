@@ -32,6 +32,7 @@ def _is_full_attention_layer(past_key_values: Any, layer_idx: int) -> bool:
 
 @dataclass(frozen=True)
 class Qwen35KVStorePatchConfig:
+    """Configuration for Qwen 3.5 KV store patching."""
     decode_only: bool = True
     decode_query_len: int = 1
     store_cfg: KVCacheStoreConfig = field(default_factory=KVCacheStoreConfig)
@@ -41,6 +42,7 @@ class Qwen35KVStorePatchConfig:
 
 
 class Qwen35KVStorePatcher:
+    """Patcher that modifies Qwen 3.5 KV store behavior."""
     def __init__(self, cfg: Qwen35KVStorePatchConfig) -> None:
         self.cfg = cfg
         self._orig_attn_forward: Optional[Callable[..., Any]] = None
@@ -48,7 +50,7 @@ class Qwen35KVStorePatcher:
         self._calls_bypassed: int = 0
         self._calls_store: int = 0
 
-    def apply(self) -> None:
+    def apply(self) -> int:
         import transformers.models.qwen3_5.modeling_qwen3_5 as m
 
         if getattr(m.Qwen3_5Attention.forward, "_vitriol_qwen35_kv_store_patched", False):
@@ -58,7 +60,7 @@ class Qwen35KVStorePatcher:
         orig_cache_update = m.Qwen3_5DynamicCache.update
         orig_cache_get_seq_length = m.Qwen3_5DynamicCache.get_seq_length
 
-        def cache_update_wrapped(self_cache, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, cache_kwargs: Optional[dict[str, Any]] = None):
+        def cache_update_wrapped(self_cache, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int, cache_kwargs: Optional[dict[str, Any]] = None) -> Any:
             mode = getattr(self_cache, "_vitriol_kv_store_mode", False)
             if not mode:
                 return orig_cache_update(self_cache, key_states, value_states, layer_idx, cache_kwargs)
@@ -107,7 +109,7 @@ class Qwen35KVStorePatcher:
             past_key_values: Any = None,
             cache_position: Optional[torch.LongTensor] = None,
             **kwargs: Any,
-        ):
+        ) -> Any:
             self._calls_total += 1
 
             input_shape = hidden_states.shape[:-1]

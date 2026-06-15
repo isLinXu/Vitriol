@@ -741,6 +741,14 @@
         // INLINE_CONFIG_MARKER
         // INLINE_ARCH_MARKER
 
+        // ── XSS-safe HTML escaping utility ──────────────────────────
+        function _esc(str) {
+            if (str == null) return '';
+            const d = document.createElement('div');
+            d.textContent = String(str);
+            return d.innerHTML;
+        }
+
         // ============================================
         // Model Parser (same as 3D version)
         // ============================================
@@ -1802,7 +1810,14 @@
             if (!stack) return;
             const toast = document.createElement('div');
             toast.className = `toast toast-${level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'success'}`;
-            toast.innerHTML = `<div class="toast-title">${title}</div><div class="toast-body">${message}</div>`;
+            const titleEl = document.createElement('div');
+            titleEl.className = 'toast-title';
+            titleEl.textContent = title;
+            const bodyEl = document.createElement('div');
+            bodyEl.className = 'toast-body';
+            bodyEl.textContent = message;
+            toast.appendChild(titleEl);
+            toast.appendChild(bodyEl);
             stack.appendChild(toast);
             window.setTimeout(() => {
                 toast.style.opacity = '0';
@@ -1964,15 +1979,15 @@
             content.innerHTML = `
                 <div class="details-row">
                     <span class="details-label">Trace ID</span>
-                    <span class="details-value">${layer.trace_id || layer.id || 'unknown'}</span>
+                    <span class="details-value">${_esc(layer.trace_id || layer.id || 'unknown')}</span>
                 </div>
                 <div class="details-row">
                     <span class="details-label">Parent Layer</span>
-                    <span class="details-value">${layer.parent_name || '—'}</span>
+                    <span class="details-value">${_esc(layer.parent_name || '—')}</span>
                 </div>
                 <div class="details-row">
                     <span class="details-label">Type</span>
-                    <span class="details-value">${layer.type}</span>
+                    <span class="details-value">${_esc(layer.type)}</span>
                 </div>
                 <div class="details-row">
                     <span class="details-label">Parameters</span>
@@ -1980,7 +1995,7 @@
                 </div>
                 <div class="details-row">
                     <span class="details-label">Description</span>
-                    <span class="details-value">${layer.description}</span>
+                    <span class="details-value">${_esc(layer.description)}</span>
                 </div>
                 <div class="details-note">
                     This 2D view is a structural explanation layer. Parameter values come from backend injection when available; otherwise the page labels frontend estimates explicitly.

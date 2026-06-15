@@ -2,7 +2,7 @@
 import logging
 import math
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,6 +15,7 @@ from scipy.stats import entropy
 logger = logging.getLogger(__name__)
 
 class WeightVisualizer:
+    """Visualization tool for model weight distributions."""
     def __init__(
         self,
         figsize: Tuple[int, int] = (12, 8),
@@ -85,7 +86,7 @@ class WeightVisualizer:
 
         return flattened
 
-    def visualize_weight_distribution(self, weights: Dict[str, torch.Tensor], title: str = "Weight Distribution"):
+    def visualize_weight_distribution(self, weights: Dict[str, torch.Tensor], title: str = "Weight Distribution") -> Optional[Any]:
         """1. Weight Distribution Histogram"""
         flat_weights = self._flatten_weights(weights)
         if flat_weights.size == 0:
@@ -105,7 +106,7 @@ class WeightVisualizer:
 
         return fig
 
-    def visualize_weight_heatmap(self, weights: Dict[str, torch.Tensor], layer_name: Optional[str] = None):
+    def visualize_weight_heatmap(self, weights: Dict[str, torch.Tensor], layer_name: Optional[str] = None) -> Optional[Any]:
         """2. Weight Matrix Heatmap"""
         # Select a representative layer (2D)
         target_w = None
@@ -140,7 +141,7 @@ class WeightVisualizer:
 
         return fig
 
-    def visualize_sparsity_pattern(self, weights: Dict[str, torch.Tensor], layer_name: Optional[str] = None):
+    def visualize_sparsity_pattern(self, weights: Dict[str, torch.Tensor], layer_name: Optional[str] = None) -> Optional[Any]:
         """3. Sparsity Pattern"""
         # Similar selection logic as heatmap
         target_w = None
@@ -177,7 +178,7 @@ class WeightVisualizer:
 
         return fig
 
-    def visualize_value_frequency(self, weights: Dict[str, torch.Tensor], top_k: int = 20):
+    def visualize_value_frequency(self, weights: Dict[str, torch.Tensor], top_k: int = 20) -> Optional[Any]:
         """4. Value Frequency Analysis"""
         flat_weights = self._flatten_weights(weights)
         if flat_weights.size == 0:
@@ -212,7 +213,7 @@ class WeightVisualizer:
 
         return fig
 
-    def visualize_statistical_comparison(self, weights_dict: Dict[str, Dict[str, torch.Tensor]]):
+    def visualize_statistical_comparison(self, weights_dict: Dict[str, Dict[str, torch.Tensor]]) -> Any:
         """5. Statistical Comparison (Boxplot etc.) for multiple strategies"""
         stats_data = []
 
@@ -250,7 +251,7 @@ class WeightVisualizer:
         plt.tight_layout()
         return fig
 
-    def visualize_compression_potential(self, weights: Dict[str, torch.Tensor]):
+    def visualize_compression_potential(self, weights: Dict[str, torch.Tensor]) -> Optional[Any]:
         """6. Compression Potential Analysis"""
         flat = self._flatten_weights(weights)
         if flat.size == 0:
@@ -291,7 +292,7 @@ Estimated Compression Ratio (vs FP32): {est_ratio:.2f}x
         ax.text(0.1, 0.5, text, fontsize=14, family='monospace')
         return fig
 
-    def visualize_3d_structure(self, weights: Dict[str, torch.Tensor], layer_name: Optional[str] = None):
+    def visualize_3d_structure(self, weights: Dict[str, torch.Tensor], layer_name: Optional[str] = None) -> Optional[Any]:
         """7. Interactive 3D Visualization using PCA"""
         # Select layer
         target_w = None
@@ -334,7 +335,7 @@ Estimated Compression Ratio (vs FP32): {est_ratio:.2f}x
             logger.warning(f"PCA failed: {e}")
             return None
 
-    def generate_comprehensive_report(self, weights: Dict[str, torch.Tensor], output_dir: str):
+    def generate_comprehensive_report(self, weights: Dict[str, torch.Tensor], output_dir: str) -> None:
         """Generate all plots and save to directory"""
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)

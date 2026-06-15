@@ -59,7 +59,7 @@ def test_model_3d_visualizer_parameter_display_shows_source() -> None:
 
 def test_model_3d_visualizer_exposes_weight_stats_provenance_markers() -> None:
     html = Path("src/vitriol/viz/model_3d_visualizer.html").read_text(encoding="utf-8")
-    assert "Params ${weightStats.params_source}" in html
+    assert "Params ${_esc(weightStats.params_source)}" in html
     assert "Sample ${Number(weightStats.sampling.sample_size).toLocaleString()}" in html
     assert "Search filters visible modules only" in html
     assert "Header-only metadata" in html

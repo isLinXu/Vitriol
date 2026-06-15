@@ -464,7 +464,7 @@ class AttentionGatedKVCompressed:
     def storage_nbytes(self) -> int:
         """Estimate storage in bytes."""
         # Per-tier: quantized data + scales + mins
-        def tier_bytes(q, scales, mins, levels):
+        def tier_bytes(q, scales, mins, levels) -> Any:
             bits = math.ceil(math.log2(max(2, levels)))
             data = q.numel() * bits // 8
             meta = (scales.numel() + mins.numel()) * 4

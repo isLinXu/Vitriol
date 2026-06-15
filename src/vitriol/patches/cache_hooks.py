@@ -56,12 +56,14 @@ def _cache_position_query_len(cache_position: Any) -> int:
 
 @dataclass(frozen=True)
 class CacheHookConfig:
+    """Configuration for cache hook patching."""
     enabled: bool = True
     passthrough_update: bool = False
     auto_enable_mode: bool = False
 
 
 class CacheHookPatcher:
+    """Patcher that injects cache hooks into model layers."""
     def __init__(self, cfg: CacheHookConfig, backend: KVStoreBackend) -> None:
         self.cfg = cfg
         self.backend = backend
@@ -70,7 +72,7 @@ class CacheHookPatcher:
         self._orig_get_mask_sizes: Optional[Callable[..., Any]] = None
         self._target_cls: Optional[Type[Any]] = None
 
-    def apply_to_class(self, cache_cls: Type[Any]) -> None:
+    def apply_to_class(self, cache_cls: Type[Any]) -> int:
         if not self.cfg.enabled:
             return
         if getattr(cache_cls.update, "_vitriol_cache_hook_patched", False):
@@ -87,7 +89,7 @@ class CacheHookPatcher:
             value_states: torch.Tensor,
             layer_idx: int,
             cache_kwargs: Optional[dict[str, Any]] = None,
-        ):
+        ) -> Any:
             _bump_cache_hook_stat("cache_update_calls")
             if self.cfg.auto_enable_mode and not getattr(self_cache, "_vitriol_kv_store_mode", False):
                 self_cache._vitriol_kv_store_mode = True
@@ -182,6 +184,7 @@ class CacheHookPatcher:
 
 
 class UniversalAttentionPatcher:
+    """Patcher that intercepts attention computations universally."""
     def __init__(self, backend: KVStoreBackend) -> None:
         self.backend = backend
         import transformers.modeling_utils as mu
@@ -191,7 +194,7 @@ class UniversalAttentionPatcher:
         self._patched = False
         self._warned_unsupported = False
 
-    def apply(self) -> None:
+    def apply(self) -> Any:
         if not self._supported:
             _bump_cache_hook_stat("attention_hook_unsupported")
             if not self._warned_unsupported:
@@ -205,10 +208,10 @@ class UniversalAttentionPatcher:
 
         import transformers.modeling_utils as mu
 
-        def custom_get_interface(config_attn_implementation, eager_attention_forward):
+        def custom_get_interface(config_attn_implementation, eager_attention_forward) -> Any:
             orig_interface = self.orig_get_interface(config_attn_implementation, eager_attention_forward)
 
-            def custom_attention_forward(module, query_states, key_states, value_states, attention_mask, **kwargs):
+            def custom_attention_forward(module, query_states, key_states, value_states, attention_mask, **kwargs) -> Any:
                 cache = getattr(_thread_local, "current_cache", None)
                 q_len = query_states.size(-2)
                 if cache is not None and q_len == 1 and getattr(cache, "_vitriol_kv_store_mode", False):

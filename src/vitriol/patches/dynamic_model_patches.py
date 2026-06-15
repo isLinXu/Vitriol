@@ -9,7 +9,7 @@ focused on orchestration instead of monkey-patch implementation details.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +53,10 @@ def patch_moon_vit(module: Any) -> None:
     logger.info("Patched MoonViT3dEncoder.__init__")
 
 
-def patch_tie_weights_loop(module: Any) -> None:
+def patch_tie_weights_loop(module: Any) -> Any:
     """Strip unsupported tie_weights kwargs from dynamic model classes."""
 
-    def make_patch(original: Any):
+    def make_patch(original: Any) -> Any:
         def patched(self, *args: Any, **kwargs: Any) -> Any:
             kwargs.pop("recompute_mapping", None)
             return original(self, *args, **kwargs)
@@ -77,7 +77,7 @@ def patch_tie_weights_loop(module: Any) -> None:
         logger.info("Patched %s.tie_weights (closure-safe)", name)
 
 
-def patch_deepseek_lm(module: Any) -> None:
+def patch_deepseek_lm(module: Any) -> Optional[Any]:
     cls = getattr(module, "DeepseekV3ForCausalLM", None)
     if cls is None or getattr(cls, "_vitriol_lm_patched", False):
         return
@@ -85,16 +85,17 @@ def patch_deepseek_lm(module: Any) -> None:
     original_init = cls.__init__
 
     class DummyLM:
-        def tie_weights(self, *args: Any, **kwargs: Any) -> None:
+        """Dummy language model for testing dynamic patching."""
+        def tie_weights(self, *args: Any, **kwargs: Any) -> Optional[Any]:
             return None
 
-        def get_input_embeddings(self) -> None:
+        def get_input_embeddings(self) -> Optional[Any]:
             return None
 
-        def set_input_embeddings(self, value: Any) -> None:
+        def set_input_embeddings(self, value: Any) -> Optional[Any]:
             return None
 
-        def __call__(self, *args: Any, **kwargs: Any) -> None:
+        def __call__(self, *args: Any, **kwargs: Any) -> Optional[Any]:
             return None
 
     def patched_init(self, *args: Any, **kwargs: Any) -> None:

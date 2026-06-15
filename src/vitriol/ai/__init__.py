@@ -1,2 +1,17 @@
-# ⚠️ EXPERIMENTAL: This module is under development and may change without notice.
-# Not yet integrated with the core Vitriol pipeline.
+"""
+Vitriol AI-Powered Features Module
+===================================
+
+Provides AI-driven recommendations and intelligent assistance for
+model architecture selection and optimization.
+
+Example::
+
+    from vitriol.ai import VitriolRecommender
+"""
+
+from .recommender import VitriolRecommender
+
+__all__ = [
+    "VitriolRecommender",
+]

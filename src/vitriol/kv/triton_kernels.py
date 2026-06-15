@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import math
 import warnings
-from typing import Tuple
+from typing import Any, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -426,7 +426,7 @@ def triton_pack_blockwise(
     levels: int,
     block_size: int,
     bit_width: int,
-):
+) -> Any:
     """
     Bit-pack blockwise quantized tensor.
 
@@ -436,7 +436,7 @@ def triton_pack_blockwise(
     return pack_blockwise_tensor(x, levels=levels, block_size=block_size, bit_width=bit_width)
 
 
-def set_debug_mode(enabled: bool = True):
+def set_debug_mode(enabled: bool = True) -> None:
     """Enable/disable debug logging for kernel selection."""
     global _DEBUG_MODE
     _DEBUG_MODE = enabled

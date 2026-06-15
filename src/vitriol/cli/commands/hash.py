@@ -6,7 +6,7 @@ import click
 @click.command(name="hash")
 @click.argument('model_path', type=click.Path(exists=True, path_type=Path))
 @click.option('--fast', is_flag=True, help='Only compute architecture hash (skip weights)')
-def hash_model(model_path, fast):
+def hash_model(model_path, fast) -> None:
     """
     Generate a cryptographic fingerprint for a model.
     """

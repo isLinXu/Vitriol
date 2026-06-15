@@ -1,5 +1,18 @@
-# ⚠️ EXPERIMENTAL: This module is under development and may change without notice.
-# Not yet integrated with the core Vitriol pipeline.
+"""
+Vitriol REST API Module
+========================
+
+Provides HTTP endpoints for model generation, architecture search,
+job status tracking, and batch generation.
+
+Install via: ``pip install "vitriol[api]"``
+
+Example::
+
+    from vitriol.api import app
+    # or launch directly:
+    # python -m vitriol.api.server
+"""
 
 from .server import app
 

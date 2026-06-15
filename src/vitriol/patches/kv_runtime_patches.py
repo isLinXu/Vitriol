@@ -14,6 +14,7 @@ from .turboquant import resolve_turbo_kv_formats, sparse_v_attention, turbo_quan
 
 @dataclass(frozen=True)
 class KVRuntimePatchConfig:
+    """Configuration for KV runtime patching."""
     decode_only: bool = True
     decode_query_len: int = 1
     enable_sparse_v: bool = False
@@ -82,6 +83,7 @@ class KVRuntimePatchConfig:
 
 
 class KVRuntimePatcher:
+    """Patcher that modifies KV cache behavior at runtime."""
     def __init__(self, cfg: KVRuntimePatchConfig) -> None:
         self.cfg = cfg
         self._original: Optional[Callable[..., Any]] = None
@@ -93,12 +95,12 @@ class KVRuntimePatcher:
         self._cache_misses: int = 0
         self._cache_evictions: int = 0
 
-    def apply(self) -> None:
+    def apply(self) -> Any:
         if getattr(F.scaled_dot_product_attention, "_vitriol_kv_patched", False):
             return
         self._original = F.scaled_dot_product_attention
 
-        def patched(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, *args: Any, **kwargs: Any):
+        def patched(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
             self._calls_total += 1
             attn_mask = kwargs.get("attn_mask", None)
             dropout_p = float(kwargs.get("dropout_p", 0.0))

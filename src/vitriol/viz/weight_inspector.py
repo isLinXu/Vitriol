@@ -819,6 +819,7 @@ def generate_viz_data(
         from vitriol.arch_viz.analyzer import ArchitectureAnalyzer
         analyzer = ArchitectureAnalyzer()
         class MockConfig:
+            """Mock configuration for weight inspector testing."""
             def __init__(self, d):
                 self.__dict__.update(d)
                 self.model_type = d.get('model_type', 'unknown')
@@ -849,8 +850,8 @@ def generate_viz_data(
                 idx_data = json.loads(idx_path.read_text(encoding="utf-8"))
                 weight_map = idx_data.get("weight_map", {})
                 break
-            except Exception:
-                pass
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+                logger.warning("Failed to parse weight index %s: %s", idx_path, exc)
 
     # If no index file is present, scan weight files directly
     tensor_shapes: Dict[str, Tuple[int, ...]] = {}

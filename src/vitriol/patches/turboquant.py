@@ -37,7 +37,7 @@ import logging
 import math
 import time
 from functools import cache
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -499,7 +499,7 @@ def turbo_quantize(
     return restored.to(dtype=orig_dtype)
 
 
-def sparse_v_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, threshold=0.01, scaling=None):
+def sparse_v_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, threshold=0.01, scaling=None) -> Any:
     L, S = query.size(-2), key.size(-2)
     scale_factor = float(scaling) if scaling is not None else (1 / math.sqrt(query.size(-1)))
     attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
@@ -529,8 +529,9 @@ def sparse_v_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_caus
 
 
 class TurboQuantPatch:
+    """Patcher that applies TurboQuant optimizations."""
     @staticmethod
-    def patch_attention(model, use_sparse_v=True, kv_quant_format="turbo3"):
+    def patch_attention(model, use_sparse_v=True, kv_quant_format="turbo3") -> Any:
         logger.info("[TurboQuant] Patching model with KV format: %s", kv_quant_format)
         if use_sparse_v:
             logger.info("[TurboQuant] Enabling Sparse V (Attention-gated KV decoding)")

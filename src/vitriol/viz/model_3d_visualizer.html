@@ -704,6 +704,15 @@
     <script>
         // INLINE_TRACE_MARKER
         // window.__VITRIOL_TRACE__ = {...} injected by the CLI
+
+        // ── XSS-safe HTML escaping utility ──────────────────────────
+        function _esc(str) {
+            if (str == null) return '';
+            const d = document.createElement('div');
+            d.textContent = String(str);
+            return d.innerHTML;
+        }
+
         // Colors
         const colors = {
             input: 0x3b82f6, embedding: 0x3b82f6, attention: 0x06b6d4, moe: 0xf59e0b,
@@ -3092,7 +3101,7 @@
                     <span class="text-sky-400" title="Average sparsity">Sparse ${(avgSparsity * 100).toFixed(1)}%</span>
                     <span class="text-gray-500">|</span>
                     <span class="text-green-400" title="Average compression">Compression ${avgCompression.toFixed(1)}×</span>
-                    ${weightStats.params_source ? `<span class="text-gray-500">|</span><span class="text-violet-300" title="Parameter provenance">Params ${weightStats.params_source}</span>` : ''}
+                    ${weightStats.params_source ? `<span class="text-gray-500">|</span><span class="text-violet-300" title="Parameter provenance">Params ${_esc(weightStats.params_source)}</span>` : ''}
                     ${weightStats.sampling?.sample_size ? `<span class="text-gray-500">|</span><span class="text-slate-300" title="Sampling metadata">Sample ${Number(weightStats.sampling.sample_size).toLocaleString()}</span>` : ''}
                 </div>
             `;
@@ -3600,7 +3609,7 @@
                     unavailable: 'Unavailable',
                     estimated_js: 'Frontend estimate'
                 };
-                const sourceText = sourceMap[cfg.paramsSource] || cfg.paramsSource || 'Unknown source';
+                const sourceText = sourceMap[cfg.paramsSource] || _esc(cfg.paramsSource) || 'Unknown source';
                 totalParamsStr += ` <span style="font-size:10px; color:#94a3b8; display:block; margin-top:2px;">Source: ${sourceText}</span>`;
                 if (cfg.displayParamsEstimate > 0 && cfg.modelTotalParams > 0 && cfg.displayParamsEstimate !== cfg.modelTotalParams) {
                     totalParamsStr += ` <span style="font-size:10px; color:#94a3b8; display:block; margin-top:2px;">Displayed slice: ${formatParams(cfg.displayParamsEstimate)}</span>`;
@@ -3626,7 +3635,7 @@
                                 </div>
                                 <div class="bg-black/30 rounded p-2">
                                     <div class="text-gray-400">Variant</div>
-                                    <div class="text-white font-mono">${cfg.name}</div>
+                                    <div class="text-white font-mono">${_esc(cfg.name)}</div>
                                 </div>
                             </div>
                         </div>
@@ -3664,7 +3673,7 @@
                             </div>
                             <div class="bg-black/30 rounded p-2">
                                 <div class="text-gray-400">Variant</div>
-                                <div class="text-white font-mono">${cfg.name}</div>
+                                <div class="text-white font-mono">${_esc(cfg.name)}</div>
                             </div>
                         </div>
                     </div>
@@ -3736,7 +3745,7 @@
                             <div class="text-[11px] text-slate-400 mt-2">Model total: ${formatParams(cfg.modelTotalParams)} · Display slice: ${formatParams(cfg.displayParamsEstimate)}</div>
                             ` : ''}
                             ${cfg.sampling?.sample_size ? `
-                            <div class="text-[11px] text-slate-400 mt-1">Sampling: ${cfg.sampling.method || 'unknown'} · ${Number(cfg.sampling.sample_size).toLocaleString()} samples · seed ${cfg.sampling.seed ?? '-'}</div>
+                            <div class="text-[11px] text-slate-400 mt-1">Sampling: ${_esc(cfg.sampling.method || 'unknown')} · ${Number(cfg.sampling.sample_size).toLocaleString()} samples · seed ${cfg.sampling.seed ?? '-'}</div>
                             ` : ''}
                             <div class="text-[11px] text-slate-500 mt-2">Visualization uses topology-first summaries; hover tooltips reveal module-level metadata and any injected real-weight stats.</div>
                         </div>
@@ -3810,9 +3819,9 @@
                 let colorHex = layerColor.toString(16).padStart(6, '0');
                 
                 item.innerHTML = `
-                    <span class="text-gray-400 cursor-pointer" onclick="toggleLayer('${layer.name}')">${isCollapsed ? '▶' : '▼'}</span>
+                    <span class="text-gray-400 cursor-pointer" onclick="toggleLayer('${_esc(layer.name)}')">${isCollapsed ? '▶' : '▼'}</span>
                     <div class="type-indicator" style="background:#${colorHex}"></div>
-                    <span class="text-white flex-1">${layer.name}</span>
+                    <span class="text-white flex-1">${_esc(layer.name)}</span>
                     <span class="text-gray-500 text-xs">${layer.modules ? layer.modules.length : 0}</span>
                 `;
                 item.onclick = (e) => {
@@ -3843,8 +3852,8 @@
                         
                         subItem.innerHTML = `
                             <div class="type-indicator" style="background:#${mColorHex}"></div>
-                            <span class="text-gray-300 flex-1">${m.name}</span>
-                            ${m.data?.params ? `<span class="text-gray-500">${m.data.params}</span>` : ''}
+                            <span class="text-gray-300 flex-1">${_esc(m.name)}</span>
+                            ${m.data?.params ? `<span class="text-gray-500">${_esc(m.data.params)}</span>` : ''}
                         `;
                         subItem.onclick = (e) => {
                             e.stopPropagation();
@@ -3886,7 +3895,7 @@
                 <div class="space-y-3">
                     <div class="stat-card">
                         <div class="stat-label">Type</div>
-                        <div class="stat-value text-base">${(layer.type || 'unknown').toUpperCase()}</div>
+                        <div class="stat-value text-base">${_esc((layer.type || 'unknown')).toUpperCase()}</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Modules</div>
@@ -3941,36 +3950,36 @@
             let content = '<div class="space-y-3">';
             
             if (data.desc) {
-                content += `<div class="text-sm text-gray-300">${data.desc}</div>`;
+                content += `<div class="text-sm text-gray-300">${_esc(data.desc)}</div>`;
             }
             
             content += '<div class="grid grid-cols-2 gap-2 text-xs">';
             if (data.shape) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Shape</div><div class="text-blue-400 font-mono">${data.shape}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Shape</div><div class="text-blue-400 font-mono">${_esc(data.shape)}</div></div>`;
             }
             if (data.params) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Params</div><div class="text-blue-400 font-mono">${data.params}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Params</div><div class="text-blue-400 font-mono">${_esc(data.params)}</div></div>`;
             }
             if (data.dtype) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Dtype</div><div class="text-purple-400 font-mono">${data.dtype}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Dtype</div><div class="text-purple-400 font-mono">${_esc(data.dtype)}</div></div>`;
             }
             if (data.heads) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Heads</div><div class="text-cyan-400 font-mono">${data.heads}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Heads</div><div class="text-cyan-400 font-mono">${_esc(data.heads)}</div></div>`;
             }
             if (data.head_dim) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Head Dim</div><div class="text-cyan-400 font-mono">${data.head_dim}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Head Dim</div><div class="text-cyan-400 font-mono">${_esc(data.head_dim)}</div></div>`;
             }
             if (data.activation) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Activation</div><div class="text-green-400 font-mono">${data.activation}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Activation</div><div class="text-green-400 font-mono">${_esc(data.activation)}</div></div>`;
             }
             if (data.eps) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Epsilon</div><div class="text-gray-400 font-mono">${data.eps}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Epsilon</div><div class="text-gray-400 font-mono">${_esc(data.eps)}</div></div>`;
             }
             if (data.top_k !== undefined) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Top-K</div><div class="text-amber-400 font-mono">${data.top_k}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Top-K</div><div class="text-amber-400 font-mono">${_esc(data.top_k)}</div></div>`;
             }
             if (data.intermediate) {
-                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Intermediate</div><div class="text-orange-400 font-mono">${data.intermediate}</div></div>`;
+                content += `<div class="bg-black/30 rounded p-2"><div class="text-gray-500">Intermediate</div><div class="text-orange-400 font-mono">${_esc(data.intermediate)}</div></div>`;
             }
             content += '</div>';
             content += '<div class="text-[11px] text-slate-400 mt-3 pt-3 border-t border-white/10">This panel shows structural metadata first. Real-weight statistics appear only when the CLI injected them.</div>';
@@ -4035,7 +4044,14 @@
             if (!stack) return;
             const toast = document.createElement('div');
             toast.className = `toast toast-${level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'success'}`;
-            toast.innerHTML = `<div class="toast-title">${title}</div><div class="toast-body">${message}</div>`;
+            const titleEl = document.createElement('div');
+            titleEl.className = 'toast-title';
+            titleEl.textContent = title;
+            const bodyEl = document.createElement('div');
+            bodyEl.className = 'toast-body';
+            bodyEl.textContent = message;
+            toast.appendChild(titleEl);
+            toast.appendChild(bodyEl);
             stack.appendChild(toast);
             setTimeout(() => {
                 toast.style.opacity = '0';

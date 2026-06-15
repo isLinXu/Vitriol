@@ -273,7 +273,7 @@ class ExoBrainAttentionPatcher:
             self._supported = False
             self._registry = None
 
-    def apply(self) -> None:
+    def apply(self) -> Any:
         """Apply the ExoBrain attention patch."""
         if not self._supported:
             return
@@ -288,10 +288,10 @@ class ExoBrainAttentionPatcher:
         self._orig_get_interface = orig_get_interface
         backend = self.backend
 
-        def exobrain_get_interface(config_attn_implementation, eager_attention_forward):
+        def exobrain_get_interface(config_attn_implementation, eager_attention_forward) -> Any:
             orig_interface = orig_get_interface(config_attn_implementation, eager_attention_forward)
 
-            def exobrain_attention_forward(module, query_states, key_states, value_states, attention_mask, **kwargs):
+            def exobrain_attention_forward(module, query_states, key_states, value_states, attention_mask, **kwargs) -> Any:
                 cache = getattr(_thread_local, "current_cache", None)
                 query_states.size(-2)
 

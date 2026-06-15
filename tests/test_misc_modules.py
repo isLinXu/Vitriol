@@ -1,14 +1,22 @@
 """Tests for remaining modules: vocab_viz, webui, models_legacy, resilience."""
 
+import pytest
 
-from vitriol.vocab_viz.core import VocabVisualizer
 from vitriol.resilience.checkpoint import CheckpointManager
+
+# vocab_viz requires plotly (optional [viz] extra); skip gracefully when absent
+try:
+    from vitriol.vocab_viz.core import VocabVisualizer
+    HAS_PLOTLY = True
+except Exception:
+    HAS_PLOTLY = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # vocab_viz tests
 # ─────────────────────────────────────────────────────────────────────────────
 
+@pytest.mark.skipif(not HAS_PLOTLY, reason="plotly not installed")
 class TestVocabVisualizer:
     def test_init(self):
         viz = VocabVisualizer()

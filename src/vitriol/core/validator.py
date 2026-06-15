@@ -16,7 +16,17 @@ AutoModelForSeq2SeqLM = None
 
 @dataclass
 class ValidationReport:
-    """Report summarizing validation findings."""
+    """Report summarizing validation findings for a generated model.
+
+    Attributes:
+        success: Overall validation passed (no critical errors).
+        model_loadable: Model can be loaded via transformers.
+        tokenizer_loadable: Tokenizer can be loaded and encode text.
+        inference_test: A forward pass produces valid output shapes.
+        memory_usage_gb: Peak memory usage during validation, if available.
+        errors: List of critical error messages.
+        warnings: List of non-critical warning messages.
+    """
     success: bool
     model_loadable: bool
     tokenizer_loadable: bool
@@ -26,6 +36,7 @@ class ValidationReport:
     warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize the report to a dictionary."""
         return {
             'success': self.success,
             'model_loadable': self.model_loadable,
@@ -36,8 +47,29 @@ class ValidationReport:
             'warnings': self.warnings
         }
 
+
 class ModelValidator:
-    """Validate generated models"""
+    """Validate generated minimal-weight models.
+
+    Performs a four-stage validation pipeline:
+
+    1. **Model Loading**: Attempts to load the model via the appropriate
+       AutoModel class (causal LM, seq2seq, or generic).
+    2. **Tokenizer Loading**: Loads the tokenizer and verifies it can encode
+       sample text.
+    3. **Inference Test**: Runs a single forward pass to confirm output
+       shapes are valid.
+    4. **Memory Audit**: Records peak memory usage (RAM or VRAM).
+
+    Low-memory adaptation: if available RAM < 8 GB, automatically constrains
+    ``max_memory`` and enables disk offloading.
+
+    Example::
+
+        validator = ModelValidator("output/qwen-mini", trust_remote_code=True)
+        report = validator.validate(run_inference=True)
+        print(report.to_dict())
+    """
 
     def __init__(self, output_dir: str, trust_remote_code: bool = False):
         self.output_dir = output_dir
@@ -50,8 +82,18 @@ class ModelValidator:
         )
 
     def validate(self, run_inference: bool = True, task_type: str = "causal_lm") -> ValidationReport:
-        """Run validation"""
-        logger.info(f"Validating model in {self.output_dir}...")
+        """Run the full validation pipeline.
+
+        Args:
+            run_inference: If False, skips tokenizer loading and forward-pass
+                tests (useful for pure load-testing scenarios).
+            task_type: Model task type — ``"causal_lm"``, ``"seq2seq"``,
+                or ``"generic"``.
+
+        Returns:
+            A :class:`ValidationReport` with detailed results.
+        """
+        logger.info("Validating model in %s...", self.output_dir)
         try:
             # 1. Validate Model Loading
             model = self._validate_model_loading(task_type=task_type)
@@ -73,7 +115,7 @@ class ModelValidator:
         except Exception as e:
             self.report.success = False
             self.report.errors.append(f"Validation critical failure: {str(e)}")
-            logger.error(f"Validation failed: {e}")
+            logger.error("Validation failed: %s", e)
 
         return self.report
 

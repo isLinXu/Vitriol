@@ -10,12 +10,12 @@ import logging
 import sys
 from importlib.machinery import ModuleSpec
 from types import ModuleType
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def mock_detectron2() -> None:
+def mock_detectron2() -> Optional[Any]:
     """
     Prevent segfaults from multimodal models that import detectron2.
 
@@ -31,14 +31,15 @@ def mock_detectron2() -> None:
         return
 
     try:
-        def _noop(*args: Any, **kwargs: Any) -> None:
+        def _noop(*args: Any, **kwargs: Any) -> Optional[Any]:
             return None
 
         class _Stub:
+            """Stub object that raises ImportError on attribute access."""
             def __init__(self, *args: Any, **kwargs: Any):
                 pass
 
-            def __call__(self, *args: Any, **kwargs: Any) -> None:
+            def __call__(self, *args: Any, **kwargs: Any) -> Optional[Any]:
                 return None
 
         # Create root module

@@ -17,14 +17,28 @@ def new_run_id() -> str:
     return str(uuid.uuid4())
 
 
-@dataclass(frozen=True, slots=True)
-class RunContext:
-    """
-    Minimal context shared across a single "run" (bench/trace/etc).
+import sys
 
-    Keep this small and serializable: we primarily use it to propagate run_id.
-    """
+if sys.version_info >= (3, 10):
+    @dataclass(frozen=True, slots=True)
+    class RunContext:
+        """
+        Minimal context shared across a single "run" (bench/trace/etc).
 
-    run_id: str = field(default_factory=new_run_id)
-    created_at_s: float = field(default_factory=time.time)
+        Keep this small and serializable: we primarily use it to propagate run_id.
+        """
+
+        run_id: str = field(default_factory=new_run_id)
+        created_at_s: float = field(default_factory=time.time)
+else:
+    @dataclass(frozen=True)
+    class RunContext:
+        """
+        Minimal context shared across a single "run" (bench/trace/etc).
+
+        Keep this small and serializable: we primarily use it to propagate run_id.
+        """
+
+        run_id: str = field(default_factory=new_run_id)
+        created_at_s: float = field(default_factory=time.time)
 

@@ -1,11 +1,13 @@
-# ⚠️ EXPERIMENTAL: This module is under development and may change without notice.
-# Not yet integrated with the core Vitriol pipeline.
-
 """
-Tools module for Vitriol.
+Vitriol Tools Module
+===================
 
-This module provides utility tools for model comparison, analysis,
+Provides standalone utility tools for model comparison, architecture analysis,
 and batch processing.
+
+Example::
+
+    from vitriol.tools import ModelComparator, format_params
 """
 
 from .comparator import ModelComparator, format_params

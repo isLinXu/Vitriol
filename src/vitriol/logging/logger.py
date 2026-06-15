@@ -21,7 +21,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # Context variables for contextual logging
 _request_id: ContextVar[Optional[str]] = ContextVar('request_id', default=None)
@@ -93,7 +93,7 @@ class AsyncLogHandler(logging.Handler):
         self.thread = threading.Thread(target=self._process_logs, daemon=True)
         self.thread.start()
 
-    def emit(self, record: logging.LogRecord):
+    def emit(self, record: logging.LogRecord) -> None:
         """Queue log record for async processing."""
         try:
             self.queue.put_nowait(record)
@@ -120,11 +120,11 @@ class PerformanceTracker:
         self.logger = logger
         self.metrics: Dict[str, List[float]] = {}
 
-    def track(self, operation: str):
+    def track(self, operation: str) -> Any:
         """Decorator to track operation performance."""
-        def decorator(func):
+        def decorator(func) -> Any:
             @wraps(func)
-            def wrapper(*args, **kwargs):
+            def wrapper(*args, **kwargs) -> Any:
                 start = time.time()
                 try:
                     result = func(*args, **kwargs)
@@ -207,7 +207,7 @@ class VitriolLogger:
         max_bytes: int = 10 * 1024 * 1024,  # 10MB
         backup_count: int = 5,
         structured: bool = True
-    ):
+    ) -> None:
         """
         Add rotating file handler.
 
@@ -237,12 +237,12 @@ class VitriolLogger:
 
         self.logger.addHandler(handler)
 
-    def add_async_handler(self, target_handler: logging.Handler):
+    def add_async_handler(self, target_handler: logging.Handler) -> None:
         """Add async wrapper to handler."""
         async_handler = AsyncLogHandler(target_handler)
         self.logger.addHandler(async_handler)
 
-    def set_context(self, request_id: Optional[str] = None, operation: Optional[str] = None, user_id: Optional[str] = None):
+    def set_context(self, request_id: Optional[str] = None, operation: Optional[str] = None, user_id: Optional[str] = None) -> None:
         """Set logging context."""
         if request_id:
             _request_id.set(request_id)
@@ -251,33 +251,33 @@ class VitriolLogger:
         if user_id:
             _user_id.set(user_id)
 
-    def clear_context(self):
+    def clear_context(self) -> None:
         """Clear logging context."""
         _request_id.set(None)
         _operation.set(None)
         _user_id.set(None)
 
-    def debug(self, message: str, **extra):
+    def debug(self, message: str, **extra) -> None:
         """Log debug message."""
         self.logger.debug(message, extra={'extra_data': extra} if extra else {})
 
-    def info(self, message: str, **extra):
+    def info(self, message: str, **extra) -> None:
         """Log info message."""
         self.logger.info(message, extra={'extra_data': extra} if extra else {})
 
-    def warning(self, message: str, **extra):
+    def warning(self, message: str, **extra) -> None:
         """Log warning message."""
         self.logger.warning(message, extra={'extra_data': extra} if extra else {})
 
-    def error(self, message: str, **extra):
+    def error(self, message: str, **extra) -> None:
         """Log error message."""
         self.logger.error(message, extra={'extra_data': extra} if extra else {})
 
-    def critical(self, message: str, **extra):
+    def critical(self, message: str, **extra) -> None:
         """Log critical message."""
         self.logger.critical(message, extra={'extra_data': extra} if extra else {})
 
-    def track_performance(self, operation: str):
+    def track_performance(self, operation: str) -> Any:
         """Get performance tracker decorator."""
         return self.performance.track(operation)
 

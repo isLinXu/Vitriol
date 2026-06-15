@@ -8,12 +8,13 @@ import threading
 import webbrowser
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from typing import Any, Optional
 
 import click
 
 logger = logging.getLogger(__name__)
 
-def build_inline_config_model(model_path):
+def build_inline_config_model(model_path) -> Optional[Any]:
     """Build a complete model config object from config.json or model_index.json for inline use"""
     config_path = model_path / 'config.json'
     model_index_path = model_path / 'model_index.json'
@@ -118,6 +119,7 @@ def build_inline_config_model(model_path):
         analyzer = ArchitectureAnalyzer()
         # Mock a minimal config object that analyzer can use
         class MockConfig:
+            """Mock configuration for visualization testing."""
             def __init__(self, d):
                 self.__dict__.update(d)
                 self.model_type = d.get('model_type', 'unknown')
@@ -269,7 +271,7 @@ def collect_weight_stats(model_path: Path, max_layers: int = 64) -> dict:
 
 class QuietHTTPHandler(SimpleHTTPRequestHandler):
     """HTTP handler that suppresses logging"""
-    def log_message(self, format, *args):
+    def log_message(self, format, *args) -> None:
         pass  # Suppress request logging
 
 
@@ -288,7 +290,7 @@ class QuietHTTPHandler(SimpleHTTPRequestHandler):
     type=click.Path(exists=True, dir_okay=False),
     help='Path to trace.json (offline replay injection)',
 )
-def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_path):
+def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_path) -> Any:
     """Launch interactive visualizer for model architecture.
 
     MODEL_PATH: Path to ultra model directory or HuggingFace model ID.
@@ -398,6 +400,7 @@ def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_pat
                         analyzer = ArchitectureAnalyzer()
 
                         class MockConfig:
+                            """Mock configuration for inline visualization testing."""
                             def __init__(self, d):
                                 self.__dict__.update(d)
                                 self.model_type = d.get("model_type", "unknown")
@@ -481,7 +484,8 @@ def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_pat
 
     # Handler that serves the specific HTML file
     class CustomHandler(QuietHTTPHandler):
-        def do_GET(self):
+        """Custom HTTP request handler for the visualization server."""
+        def do_GET(self) -> Any:
             if self.path == '/' or self.path == '':
                 self.path = '/' + html_file_to_serve.name
             return SimpleHTTPRequestHandler.do_GET(self)
@@ -517,7 +521,7 @@ def visualize(model_path, port, no_open, use_3d, use_2d, with_weights, trace_pat
 
     # Open browser
     if not no_open:
-        def open_browser():
+        def open_browser() -> None:
             import time
             time.sleep(1)
             webbrowser.open(url)

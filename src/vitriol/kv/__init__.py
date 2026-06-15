@@ -16,7 +16,7 @@ from .codec import (
 try:
     from .triton_kernels import _HAS_TRITON, get_backend_name, triton_fwht
 except ImportError:
-    def get_backend_name():
+    def get_backend_name() -> str:
         return "python"
     triton_fwht = None
     _HAS_TRITON = False

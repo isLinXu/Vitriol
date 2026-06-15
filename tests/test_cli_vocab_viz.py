@@ -9,6 +9,14 @@ from click.testing import CliRunner
 
 from vitriol.cli.main import cli
 
+# Vocabulary visualization mock tests require plotly (part of [viz] optional dependency)
+# to be importable for patch targets. Skip the mocked tests if unavailable.
+_viz_available: bool = True
+try:
+    import plotly  # noqa: F401
+except ImportError:
+    _viz_available = False
+
 
 class TestVocabVizCommandHelp:
     def test_vocab_viz_help(self):
@@ -75,6 +83,7 @@ class TestVocabVizLoadLocalTokenizer:
             assert "[SPECIAL]" in special
 
 
+@pytest.mark.skipif(not _viz_available, reason="plotly not installed ([viz] extra)")
 class TestVocabVizCommandMocked:
     @patch("vitriol.vocab_viz.core.VocabVisualizer")
     def test_vocab_viz_treemap(self, mock_viz_cls):
@@ -143,6 +152,7 @@ class TestVocabVizCommandMocked:
         mock_viz.generate_treemap.assert_called_once_with("custom.html")
 
 
+@pytest.mark.skipif(not _viz_available, reason="plotly not installed ([viz] extra)")
 class TestVocabVizMissingDependency:
     @patch("vitriol.vocab_viz.core.VocabVisualizer", side_effect=ModuleNotFoundError("No module named 'plotly'"))
     def test_vocab_viz_missing_dependency(self, mock_viz_cls):

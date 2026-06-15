@@ -24,16 +24,19 @@ if TYPE_CHECKING:
 
 
 class ApproxMode(str, Enum):
+    """Enumeration of approximation modes for KV cache."""
     EXACT = "exact"
     APPROX = "approx"
 
 
 @dataclass(frozen=True)
 class KVPolicy:
+    """Base policy governing KV cache behavior."""
     mode: ApproxMode
 
 
 class KVLayerType(str, Enum):
+    """Enumeration of KV layer types."""
     FULL_ATTENTION = "full_attention"
     SLIDING_WINDOW = "sliding_window"
     MLA = "mla"
@@ -45,12 +48,14 @@ class KVLayerType(str, Enum):
 
 @dataclass(frozen=True)
 class SafeExactPolicy(KVPolicy):
+    """Conservative policy that preserves exact computation."""
     def __init__(self) -> None:
         super().__init__(mode=ApproxMode.EXACT)
 
 
 @dataclass(frozen=True)
 class Turbo3ExactKApproxVPolicy(KVPolicy):
+    """Turbo policy: 3 exact layers + K approximate V layers."""
     v_quantize_only_first_n_full_attention_layers: int = 1
     v_protect_last_n_full_attention_layers: int = 0
     turbo_k_format: str = "turbo3"
@@ -96,6 +101,7 @@ class Turbo3ExactKApproxVPolicy(KVPolicy):
 
 @dataclass(frozen=True)
 class KVLayerStrategy:
+    """Strategy for handling a single KV layer."""
     layer_type: KVLayerType
     turbo_quantize_k: bool
     turbo_quantize_v: bool
@@ -242,6 +248,7 @@ def apply_policy_to_store_cfg(base_cfg: KVCacheStoreConfig, policy: KVPolicy, ha
 
 @dataclass(frozen=True)
 class KVPolicyPreset:
+    """Predefined policy presets for common KV cache configurations."""
     name: str
     policy_type: str
     params: Dict[str, Any]

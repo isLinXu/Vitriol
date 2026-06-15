@@ -11,7 +11,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 
 def _ensure_cache_dirs() -> None:
@@ -165,7 +165,7 @@ def create_app(
                     inputs=[model1_id, model2_id],
                 )
 
-                def compare_models(m1_id, m2_id, trc, progress=gr.Progress()):  # noqa: B008
+                def compare_models(m1_id, m2_id, trc, progress=gr.Progress()) -> Any:  # noqa: B008
                     """Compare two model architectures."""
                     try:
                         progress(0, desc="Loading model 1...")
@@ -232,7 +232,7 @@ def create_app(
                 with gr.Row():
                     family_list = gr.JSON(label="Family Data")
 
-                def build_tree(title, show_inn):
+                def build_tree(title, show_inn) -> None:
                     """Build and visualize the architecture evolution tree."""
                     try:
                         tree = EvolutionTree()
@@ -311,7 +311,7 @@ def create_app(
                         nas_results = gr.JSON(label="Search Results")
                         nas_summary = gr.Markdown()
 
-                def run_targeted_nas(vram_limit, param_limit, objective_choice, iterations, progress=gr.Progress()):  # noqa: B008
+                def run_targeted_nas(vram_limit, param_limit, objective_choice, iterations, progress=gr.Progress()) -> Any:  # noqa: B008
                     """Run targeted NAS search."""
                     try:
                         progress(0, desc="Initializing optimizer...")
@@ -436,7 +436,7 @@ def create_app(
                         sim_results = gr.JSON(label="Simulation Results")
                         sim_summary = gr.Markdown()
 
-                def simulate_architecture(model_id, batch_size, seq_length, dtype, gpu, trc, progress=gr.Progress()):  # noqa: B008
+                def simulate_architecture(model_id, batch_size, seq_length, dtype, gpu, trc, progress=gr.Progress()) -> Any:  # noqa: B008
                     """Simulate architecture performance."""
                     try:
                         progress(0, desc="Loading configuration...")
@@ -529,7 +529,7 @@ def create_app(
                     with gr.Column(scale=2):
                         score_output = gr.HTML(label="Scorecard")
 
-                def generate_scorecard(model_id, trc, progress=gr.Progress()):  # noqa: B008
+                def generate_scorecard(model_id, trc, progress=gr.Progress()) -> Any:  # noqa: B008
                     """Generate architecture scorecard."""
                     try:
                         progress(0, desc="Loading configuration...")
@@ -646,7 +646,7 @@ def create_app(
 
                 timeline_output = gr.HTML(label="Timeline Visualization")
 
-                def generate_timeline(title):
+                def generate_timeline(title) -> None:
                     """Generate the innovation timeline."""
                     try:
                         timeline = InnovationTimeline()
@@ -713,7 +713,7 @@ def create_app(
                         recommend_output = gr.JSON(label="Recommendations")
                         recommend_summary = gr.Markdown()
 
-                def get_recommendations(max_params, max_vram, use_case, prefer_moe, require_gqa, long_context, progress=gr.Progress()):  # noqa: B008
+                def get_recommendations(max_params, max_vram, use_case, prefer_moe, require_gqa, long_context, progress=gr.Progress()) -> Any:  # noqa: B008
                     """Get architecture recommendations."""
                     try:
                         progress(0, desc="Initializing recommender...")

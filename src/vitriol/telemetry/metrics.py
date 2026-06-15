@@ -43,7 +43,7 @@ class MetricsCollector:
         self._histograms: Dict[str, list] = defaultdict(list)
         self._lock = threading.Lock()
 
-    def counter(self, name: str, value: float = 1, labels: Optional[Dict] = None):
+    def counter(self, name: str, value: float = 1, labels: Optional[Dict] = None) -> None:
         """
         Increment a counter metric.
 
@@ -56,7 +56,7 @@ class MetricsCollector:
             label_key = self._labels_to_key(labels)
             self._counters[f"{name}{label_key}"] += value
 
-    def gauge(self, name: str, value: float, labels: Optional[Dict] = None):
+    def gauge(self, name: str, value: float, labels: Optional[Dict] = None) -> None:
         """
         Set a gauge metric.
 
@@ -73,7 +73,7 @@ class MetricsCollector:
                 labels=labels or {}
             )
 
-    def histogram(self, name: str, value: float, labels: Optional[Dict] = None):
+    def histogram(self, name: str, value: float, labels: Optional[Dict] = None) -> None:
         """
         Record a histogram observation.
 
@@ -243,7 +243,7 @@ class HealthChecker:
         name: str,
         check_fn: Callable[[], tuple],
         cache_ttl: Optional[float] = None
-    ):
+    ) -> None:
         """
         Register a health check.
 

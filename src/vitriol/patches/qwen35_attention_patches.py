@@ -12,6 +12,7 @@ from .turboquant import resolve_turbo_kv_formats, sparse_v_attention, turbo_quan
 
 @dataclass(frozen=True)
 class Qwen35AttentionPatchConfig:
+    """Configuration for Qwen 3.5 attention patching."""
     decode_only: bool = True
     decode_query_len: int = 1
     enable_turbo_quant: bool = False
@@ -70,6 +71,7 @@ class Qwen35AttentionPatchConfig:
 
 
 class Qwen35AttentionPatcher:
+    """Patcher that modifies Qwen 3.5 attention layers."""
     def __init__(self, cfg: Qwen35AttentionPatchConfig) -> None:
         self.cfg = cfg
         self._orig_sdpa: Optional[Callable[..., Any]] = None
@@ -80,7 +82,7 @@ class Qwen35AttentionPatcher:
         self._calls_bypassed: int = 0
         self._calls_patched: int = 0
 
-    def apply(self) -> None:
+    def apply(self) -> Any:
         import transformers.modeling_utils as mu
         import transformers.models.qwen3_5.modeling_qwen3_5 as m
 
@@ -101,7 +103,7 @@ class Qwen35AttentionPatcher:
             scaling: float,
             dropout: float = 0.0,
             **kwargs: Any,
-        ):
+        ) -> Any:
             self._calls_total += 1
 
             if module.__class__.__name__ != "Qwen3_5Attention":
@@ -189,7 +191,7 @@ class Qwen35AttentionPatcher:
             scaling: float,
             dropout: float = 0.0,
             **kwargs: Any,
-        ):
+        ) -> Any:
             self._calls_total += 1
 
             if module.__class__.__name__ != "Qwen3_5Attention":

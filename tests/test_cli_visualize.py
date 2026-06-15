@@ -8,6 +8,14 @@ from click.testing import CliRunner
 
 from vitriol.cli.main import cli
 
+# Visualization mock tests require plotly (part of [viz] optional dependency)
+# to be importable for patch targets. Skip the mocked tests if unavailable.
+_viz_available: bool = True
+try:
+    import plotly  # noqa: F401
+except ImportError:
+    _viz_available = False
+
 
 class TestVisualizeCommandHelp:
     def test_visualize_help(self):
@@ -17,6 +25,7 @@ class TestVisualizeCommandHelp:
         assert "visualize" in result.output.lower()
 
 
+@pytest.mark.skipif(not _viz_available, reason="plotly not installed ([viz] extra)")
 class TestVisualizeCommandMocked:
     @patch("vitriol.visualization.utils.load_weights")
     @patch("vitriol.visualization.visualizer.WeightVisualizer")
@@ -102,6 +111,7 @@ class TestVisualizeCommandMocked:
             assert "Visualization failed" in result.output
 
 
+@pytest.mark.skipif(not _viz_available, reason="plotly not installed ([viz] extra)")
 class TestVisualizeMissingDependency:
     @patch("vitriol.visualization.utils.load_weights", side_effect=ModuleNotFoundError("No module named 'numpy'"))
     def test_visualize_missing_dependency(self, mock_load_weights):

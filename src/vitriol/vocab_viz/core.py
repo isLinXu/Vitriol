@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import plotly.express as px
@@ -31,7 +31,7 @@ class VocabVisualizer:
     def __init__(self, models: Optional[List[Dict]] = None):
         self.models = models if models else self.DEFAULT_MODELS.copy()
 
-    def add_model_from_id(self, model_id: str, family: str = "Custom", trust_remote_code: bool = False):
+    def add_model_from_id(self, model_id: str, family: str = "Custom", trust_remote_code: bool = False) -> None:
         """Loads a tokenizer from HF model ID and adds it to the list."""
         try:
             from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
@@ -61,7 +61,7 @@ class VocabVisualizer:
         except Exception as e:
             logger.warning("Failed to load tokenizer for %s: %s", model_id, e)
 
-    def generate_treemap(self, output_path: str = "vocab_treemap.html"):
+    def generate_treemap(self, output_path: str = "vocab_treemap.html") -> Any:
         """Generates a Treemap where area represents vocab size."""
         df = pd.DataFrame(self.models)
 
@@ -84,7 +84,7 @@ class VocabVisualizer:
         fig.write_html(output_path)
         return output_path
 
-    def generate_bar_chart(self, output_path: str = "vocab_bar.html"):
+    def generate_bar_chart(self, output_path: str = "vocab_bar.html") -> Any:
         """Generates a Bar Chart comparing vocab sizes."""
         df = pd.DataFrame(self.models).sort_values("vocab", ascending=True)
 
@@ -104,7 +104,7 @@ class VocabVisualizer:
         fig.write_html(output_path)
         return output_path
 
-    def generate_single_distribution(self, model_id: str, output_path: str = "vocab_dist.html", plot_type: str = "treemap", trust_remote_code: bool = False):
+    def generate_single_distribution(self, model_id: str, output_path: str = "vocab_dist.html", plot_type: str = "treemap", trust_remote_code: bool = False) -> Optional[Any]:
         """Generates a visualization of token types within a single tokenizer."""
         try:
             import unicodedata
@@ -350,7 +350,7 @@ class VocabVisualizer:
 
                 coverage_data = []
 
-                def check_single(num_str):
+                def check_single(num_str) -> Any:
                     ids = tokenizer.encode(num_str, add_special_tokens=False)
                     return len(ids) == 1
 

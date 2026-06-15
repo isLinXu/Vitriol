@@ -471,7 +471,7 @@ class CriticalPointDetector:
         self,
         compression_ratio: float,
         expressivity_score: float,
-    ):
+    ) -> None:
         """Add observation for critical point detection."""
         self.expressivity_history.append((compression_ratio, expressivity_score))
 

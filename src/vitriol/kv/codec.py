@@ -24,6 +24,7 @@ import torch.nn.functional as F
 
 @dataclass
 class PackedKVTensor:
+    """Container for packed (quantized) KV tensors."""
     q_data: torch.Tensor
     scales: torch.Tensor
     mins: torch.Tensor
@@ -42,6 +43,7 @@ class PackedKVTensor:
 
 @dataclass
 class ResidualQJLPackedTensor:
+    """Container for residual-quantized JL packed tensors."""
     base: PackedKVTensor
     projection: torch.Tensor
     residual_sign_bits: torch.Tensor
@@ -325,7 +327,7 @@ def _rademacher_projection(
     return proj
 
 
-def clear_projection_cache():
+def clear_projection_cache() -> Any:
     """Clear the global projection matrix cache."""
     global _PROJECTION_CACHE
     count = len(_PROJECTION_CACHE)
@@ -509,6 +511,7 @@ def _levels_from_bits(bits: torch.Tensor) -> torch.Tensor:
 
 
 class AdaptiveKVCodec:
+    """Adaptive codec that selects quantization strategy per-layer."""
     def __init__(
         self,
         block_size: int = 32,
@@ -590,12 +593,14 @@ class AdaptiveKVCodec:
 
 @dataclass(frozen=True)
 class ComputeSkipConfig:
+    """Configuration for compute-skip optimization decisions."""
     block_size: int = 128
     epsilon: float = 0.02
 
 
 @dataclass(frozen=True)
 class ComputeSkipResult:
+    """Result indicating whether compute can be skipped."""
     output: torch.Tensor
     kept_fraction: float
 

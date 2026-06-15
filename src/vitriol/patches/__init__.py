@@ -35,7 +35,7 @@ __all__ = [
 _PATCHES_APPLIED = False
 
 
-def apply_all_patches():
+def apply_all_patches() -> None:
     """Apply all necessary patches for compatibility."""
     global _PATCHES_APPLIED
     if _PATCHES_APPLIED:

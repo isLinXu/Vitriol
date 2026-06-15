@@ -47,6 +47,7 @@ def _get_turbo_utils():
 
 @dataclass
 class KVCacheStoreConfig:
+    """Configuration for KV cache store initialization."""
     # When False, KVCacheStore will drop the raw bf16 tensors (_k_raw/_v_raw) after encoding.
     # This reduces host/device memory usage at the cost of occasionally having to decode
     # from the encoded representation for certain operations (e.g., eviction or threshold crossing).
@@ -178,6 +179,7 @@ class KVCacheStoreConfig:
 
 
 class KVCacheStore:
+    """In-memory KV cache store with optional quantization."""
     def __init__(self, cfg: KVCacheStoreConfig) -> None:
         self.cfg = cfg
         self._k_raw: Optional[torch.Tensor] = None
