@@ -2,6 +2,8 @@ import random
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Dict, List, Optional
 
+from ..types import HFConfigDict
+
 
 @dataclass
 class ArchitectureGene:
@@ -19,9 +21,29 @@ class ArchitectureGene:
 
     vocab_size: int = 32000  # Default to 32k, but can be larger
 
-    # Derived/Optional
+    # Derived/Optional fields (computed in __post_init__)
     intermediate_size: int = field(init=False)
     num_kv_heads: int = field(init=False)
+
+    # MLA (Multi-head Latent Attention) parameters
+    use_mla: bool = False
+    qk_nope_head_dim: int = field(init=False)
+    qk_rope_head_dim: int = field(init=False)
+    kv_lora_rank: int = field(init=False)
+    q_lora_rank: int = field(init=False)
+
+    # MoE (Mixture of Experts) parameters
+    use_moe: bool = False
+    num_experts: int = field(init=False)
+    num_experts_per_tok: int = field(init=False)
+    moe_intermediate_size: int = field(init=False)
+    shared_expert_intermediate_size: int = field(init=False)
+
+    # Mamba / State Space Model parameters
+    use_mamba: bool = False
+    d_state: int = field(init=False)
+    d_conv: int = field(init=False)
+    expand_factor: int = field(init=False)
 
     def __post_init__(self):
         # Constraints and derived values
@@ -44,6 +66,41 @@ class ArchitectureGene:
         else:
             self.num_kv_heads = self.n_heads
 
+        # MLA derived values
+        head_dim = self.hidden_size // self.n_heads
+        if self.use_mla:
+            self.qk_nope_head_dim = max(head_dim // 2, 1)
+            self.qk_rope_head_dim = max(head_dim // 4, 4)
+            self.kv_lora_rank = max(head_dim * 2, 64)
+            self.q_lora_rank = max(head_dim * 2, 64)
+        else:
+            self.qk_nope_head_dim = head_dim
+            self.qk_rope_head_dim = max(head_dim // 4, 4)
+            self.kv_lora_rank = 0
+            self.q_lora_rank = 0
+
+        # MoE derived values
+        if self.use_moe:
+            self.num_experts = max(8, self.n_layers * 2)
+            self.num_experts_per_tok = max(2, self.num_experts // 4)
+            self.moe_intermediate_size = max(self.intermediate_size // 2, 256)
+            self.shared_expert_intermediate_size = max(self.intermediate_size // 4, 128)
+        else:
+            self.num_experts = 0
+            self.num_experts_per_tok = 0
+            self.moe_intermediate_size = 0
+            self.shared_expert_intermediate_size = 0
+
+        # Mamba derived values
+        if self.use_mamba:
+            self.d_state = max(16, self.hidden_size // 64)
+            self.d_conv = 4
+            self.expand_factor = 2
+        else:
+            self.d_state = 0
+            self.d_conv = 0
+            self.expand_factor = 0
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert gene to dictionary."""
         return asdict(self)
@@ -57,7 +114,7 @@ class ArchitectureGene:
         return cls(**init_kwargs)
 
     @classmethod
-    def from_config(cls, config: Dict[str, Any]) -> 'ArchitectureGene':
+    def from_config(cls, config: HFConfigDict) -> 'ArchitectureGene':
         """Create a gene from a Hugging Face-style config dictionary."""
         source = dict(config.get("_vitriol_nas_gene") or {})
 
@@ -78,6 +135,24 @@ class ArchitectureGene:
         if ffn_type not in {"Standard", "SwiGLU", "GeGLU"}:
             ffn_type = "SwiGLU" if abs(intermediate_size - swiglu_size) < abs(intermediate_size - hidden_size * 4) else "Standard"
 
+        # Detect MLA
+        use_mla = bool(
+            source.get("use_mla")
+            or config.get("qk_nope_head_dim")
+            or config.get("kv_lora_rank")
+        )
+
+        # Detect MoE
+        num_experts = int(config.get("num_experts", config.get("n_routed_experts", 0)) or 0)
+        use_moe = bool(source.get("use_moe") or num_experts > 0)
+
+        # Detect Mamba
+        use_mamba = bool(
+            source.get("use_mamba")
+            or config.get("d_state")
+            or config.get("model_type", "").startswith("mamba")
+        )
+
         return cls(
             n_layers=int(config.get("num_hidden_layers", source.get("n_layers", 12))),
             hidden_size=hidden_size,
@@ -87,11 +162,14 @@ class ArchitectureGene:
             activation=str(config.get("hidden_act", source.get("activation", "gelu"))),
             norm_type=source.get("norm_type", "RMSNorm" if "rms_norm_eps" in config else "LayerNorm"),
             vocab_size=int(config.get("vocab_size", source.get("vocab_size", 32000))),
+            use_mla=use_mla,
+            use_moe=use_moe,
+            use_mamba=use_mamba,
         )
 
-    def to_config(self) -> Dict[str, Any]:
+    def to_config(self) -> HFConfigDict:
         """Convert gene to Hugging Face config dictionary."""
-        return {
+        cfg: Dict[str, Any] = {
             "model_type": "qwen2",  # Default to qwen2 structure for broad compatibility
             "vocab_size": self.vocab_size,
             "hidden_size": self.hidden_size,
@@ -109,6 +187,21 @@ class ArchitectureGene:
             # Vitriol specific markers if needed
             "_vitriol_nas_gene": asdict(self)
         }
+        if self.use_mla:
+            cfg["qk_nope_head_dim"] = self.qk_nope_head_dim
+            cfg["qk_rope_head_dim"] = self.qk_rope_head_dim
+            cfg["kv_lora_rank"] = self.kv_lora_rank
+            cfg["q_lora_rank"] = self.q_lora_rank
+        if self.use_moe:
+            cfg["num_experts"] = self.num_experts
+            cfg["num_experts_per_tok"] = self.num_experts_per_tok
+            cfg["moe_intermediate_size"] = self.moe_intermediate_size
+            cfg["shared_expert_intermediate_size"] = self.shared_expert_intermediate_size
+        if self.use_mamba:
+            cfg["d_state"] = self.d_state
+            cfg["d_conv"] = self.d_conv
+            cfg["expand_factor"] = self.expand_factor
+        return cfg
 
 class SearchSpace:
     """Base class for search spaces."""
@@ -155,6 +248,11 @@ class LLMSearchSpace(SearchSpace):
             valid_heads = [4]
             hidden = (hidden // 4) * 4
 
+        # Sample advanced architecture variants
+        use_mla = random.random() < 0.15  # 15% chance for MLA
+        use_moe = random.random() < 0.20  # 20% chance for MoE
+        use_mamba = random.random() < 0.10  # 10% chance for Mamba
+
         return ArchitectureGene(
             n_layers=random.choice(self.n_layers_range),
             hidden_size=hidden,
@@ -163,7 +261,10 @@ class LLMSearchSpace(SearchSpace):
             attention_type=random.choice(self.attention_types),
             ffn_type=random.choice(self.ffn_types),
             activation=random.choice(self.activations),
-            norm_type=random.choice(self.norm_types)
+            norm_type=random.choice(self.norm_types),
+            use_mla=use_mla,
+            use_moe=use_moe,
+            use_mamba=use_mamba,
         )
 
     def sample_random(self) -> ArchitectureGene:
@@ -215,4 +316,17 @@ class LLMSearchSpace(SearchSpace):
         if random.random() < mutation_rate:
             new_gene_dict['ffn_type'] = random.choice(self.ffn_types)
 
-        return ArchitectureGene(**{k: v for k, v in new_gene_dict.items() if k not in ['intermediate_size', 'num_kv_heads']})
+        # Mutate advanced flags
+        if random.random() < mutation_rate:
+            new_gene_dict['use_mla'] = random.random() < 0.15
+        if random.random() < mutation_rate:
+            new_gene_dict['use_moe'] = random.random() < 0.20
+        if random.random() < mutation_rate:
+            new_gene_dict['use_mamba'] = random.random() < 0.10
+
+        # Exclude derived fields that are not in __init__
+        derived = {'intermediate_size', 'num_kv_heads', 'qk_nope_head_dim',
+                   'qk_rope_head_dim', 'kv_lora_rank', 'q_lora_rank',
+                   'num_experts', 'num_experts_per_tok', 'moe_intermediate_size',
+                   'shared_expert_intermediate_size', 'd_state', 'd_conv', 'expand_factor'}
+        return ArchitectureGene(**{k: v for k, v in new_gene_dict.items() if k not in derived})
