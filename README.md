@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-%3E%3D3.9-blue?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/version-0.3.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.1-green" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-brightgreen" alt="License">
   <img src="https://img.shields.io/badge/torch-%3E%3D2.0-red?logo=pytorch" alt="PyTorch">
   <img src="https://img.shields.io/badge/transformers-%3E%3D4.40-orange?logo=huggingface" alt="Transformers">
@@ -32,6 +32,19 @@ Vitriol is a toolkit for researching and maintaining LLM architectures. It decou
 | **Quantized Inference** | TurboQuant KV cache compression, Triton-accelerated kernels, PPL evaluation |
 | **Web UI & REST API** | Gradio-based GUI + optional FastAPI server for programmatic access |
 
+## Capability Tiers (Stable / Beta / Experimental)
+
+| Tier | CLI / modules | Commitment |
+|------|---------------|------------|
+| **Stable** | `check`, `generate`, `validate`, `analyze`, `arch-viz`, `viz`, `hash`, `evolve` (tree/compare/simulate) | Primary workflow; CLI contract preserved within semver |
+| **Beta** | `nas` (targeted/evolutionary), `bench kv-*`, CIS scoring | Usable; interfaces may evolve |
+| **Experimental** | `exobrain`, `infer`, `trace`, `bench turboquantum`, RL NAS, `webui`, REST API | Marked `@experimental`; no API stability guarantee |
+
+**Recommended entry point**: [`vitriol check`](docs/case-studies/01-zero-download-architecture-compare.md) — one command for analyze → viz → generate → validate → report.  
+**CI integration**: see [Case Study 02](docs/case-studies/02-ci-model-config-validation.md) and [CI integration guide](docs/ci-integration.md).  
+**CIS strategy ranking**: see [Case Study 03](docs/case-studies/03-cis-strategy-ranking.md) and `vitriol cis rank`.  
+**Multi-strategy compare**: see [Case Study 04](docs/case-studies/04-multi-strategy-cis-validate-compare.md) and `vitriol cis compare`.
+
 ## Highlights
 
 - **GB → MB compression**: 13 strategies from Random to Ultra (stride=0 hack, 1 float for any tensor)
@@ -40,7 +53,7 @@ Vitriol is a toolkit for researching and maintaining LLM architectures. It decou
 - **10 architecture analyzers**: Auto-detect GQA/MQA/MLA, RoPE, MoE (Shared+Routed Expert), multimodal components — including Qwen3.5 MoE with Linear/Full attention layer detection
 - **4 NAS algorithms**: Random Search, Evolutionary (GA), Targeted (constraint + multi-objective optimization), Reinforcement Learning agent
 - **Plugin adapter system**: Auto-discovery registry for extending to new model families
-- **18 CLI commands**: Complete toolchain from generation to benchmarking and inference
+- **19 CLI commands**: Complete toolchain from `check` golden path to benchmarking and inference
 - **Web UI**: Gradio interface with evolution tree, comparison, simulation, and targeted NAS
 - **REST API**: Experimental FastAPI server for HTTP-based model generation and search
 - **Triton GPU acceleration**: FWHT, blockwise min-max quantization, bit-packing kernels for KV cache compression
@@ -116,6 +129,13 @@ pip install -e ".[api]"
 ### Common Tasks
 
 ```bash
+# Theoretical CIS ranking
+python -m vitriol.cli.main cis rank
+python -m vitriol.cli.main cis report -o output/cis-report.md
+
+# One-shot Structure-First check (recommended)
+python -m vitriol.cli.main check Qwen/Qwen2.5-0.5B -o output/check-report --fast
+
 # Generate minimal weights
 python -m vitriol.cli.main generate Qwen/Qwen2.5-0.5B -o output/qwen-mini
 

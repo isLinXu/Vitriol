@@ -6,6 +6,7 @@ from typing import Any, Optional
 import click
 from click.core import ParameterSource
 
+from ...utils.experimental import experimental
 from ...utils.hf_loading import load_tokenizer as hf_load_tokenizer
 
 _PRESET_CHOICES = ["safe", "balanced", "fast-balanced", "aggressive", "ultra-long", "deepseek-v4", "hy3", "qwen-chat"]
@@ -193,6 +194,7 @@ def _smoke_summary_text(result: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+@experimental("TurboQuant single-prompt inference CLI", detail="Research path; not for production serving.")
 @click.command(name="infer")
 @click.argument("model_id")
 @click.option("--prompt", type=str, help="Prompt text to run")

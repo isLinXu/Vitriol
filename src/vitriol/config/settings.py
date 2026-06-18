@@ -416,6 +416,8 @@ class ConfigManager:
     def is_valid(self) -> bool:
         """Return True if configuration passes all validation checks."""
         return len(self.validate()) == 0
+
+    def get_environment(self) -> ConfigEnvironment:
         """Get current environment."""
         return ConfigEnvironment(self._config.environment)
 

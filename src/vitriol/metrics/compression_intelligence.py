@@ -588,7 +588,6 @@ class CompressionIntelligenceScorer:
 
         # Use SVD preservation
         return self.info_metrics.svd_preservation_score(original, compressed)
-        return self.info_metrics.svd_preservation_score(original, compressed)
 
     def compute_storage_efficiency(
         self,
@@ -778,6 +777,15 @@ class CompressionIntelligenceScorer:
             radar_vector=radar,
         )
 
+    def score_all_strategies(self) -> List[Tuple[str, float]]:
+        """Return theoretical PSI scores for all strategies in the score matrix."""
+        ranked = [
+            (name, compute_theoretical_psi(name, self.alpha, self.beta, self.gamma, self.delta))
+            for name in STRATEGY_SCORE_MATRIX
+        ]
+        ranked.sort(key=lambda item: item[1], reverse=True)
+        return ranked
+
     @staticmethod
     def compare_strategies(
         metrics_list: List[StrategyMetrics],
@@ -859,7 +867,10 @@ STRATEGY_SCORE_MATRIX = {
     "quantized":     (0.70, 0.75, 0.60, 0.70),
     "lowrank":       (0.75, 0.70, 0.65, 0.75),
     "structured_sparse": (0.55, 0.80, 0.45, 0.65),
-    "learned":       (0.85, 0.85, 0.80, 0.85),  # Our new strategy
+    "learned":       (0.85, 0.85, 0.80, 0.85),
+    "hybrid_ultra":  (0.15, 0.98, 0.10, 0.20),
+    "hybrid_learned": (0.82, 0.82, 0.78, 0.82),
+    "quantum":       (0.45, 0.85, 0.50, 0.30),
 }
 
 

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-06-18
+
+### Added
+
+- **`vitriol check`** — Structure-First golden path (analyze → arch-viz → generate → validate → fingerprint → HTML report)
+- **`vitriol cis`** — CIS ranking (`rank`, `table`, `score`, `report`, **`compare`**)
+- **`vitriol cis compare`** — Multi-strategy benchmark: generate → validate → empirical CIS
+- **Composite GitHub Action** — `.github/actions/vitriol-check` for one-line CI integration
+- **Case studies** — `docs/case-studies/01` through `04` (architecture compare, CI validation, CIS ranking, multi-strategy compare)
+- **Golden-path integration tests** — `tests/integration/` with nightly CI workflow
+- **Capability tiers** — Stable / Beta / Experimental matrix in README
+- **`CompressionIntelligenceScorer.score_all_strategies()`** — API referenced by README now implemented
+- **Generator modular split** — `config_loader`, `custom_code_sync`, `generator_persistence`
+
+### Fixed
+
+- **`ConfigManager.get_environment()`** — Restored method accidentally merged into `is_valid()`
+- **`PluginManager.unload_plugin()`** — Implemented missing API
+- **Validator security** — seq2seq loads propagate `trust_remote_code` via `hf_kwargs()`
+- **`generator_persistence` viz** — Default `trust_remote_code=False` (was True)
+- **`experimental` decorator** — Preserves Click Command objects for CLI compatibility
+- **`_FALLBACK_CHAIN` import** — Restored in `generator.py` after modular split
+
+### Changed
+
+- CLI command count: **19** top-level commands (+ `check`, + `cis` group)
+- Default recommended entry: `vitriol check`
+
+---
+
 ## [0.3.0] - 2026-04-30
 
 ### :star: Major New Features
@@ -223,7 +253,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/isLinXu/Vitriol/compare/v0.3.0...main
+[Unreleased]: https://github.com/isLinXu/Vitriol/compare/v0.3.1...main
+[0.3.1]: https://github.com/isLinXu/Vitriol/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/isLinXu/Vitriol/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/isLinXu/Vitriol/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/isLinXu/Vitriol/releases/tag/v0.1.0

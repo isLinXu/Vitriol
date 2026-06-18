@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vitriol"
-version = "0.3.0"
+version = "0.3.1"
 description = "Unified framework for model structure visualization, compression, pruning, quantization and efficient inference"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -93,6 +93,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--ignore=tests/integration"
+markers = [
+    "integration: golden-path integration tests (slower; run via tests/integration or nightly CI)",
+]
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "ignore::DeprecationWarning:torchao.*",

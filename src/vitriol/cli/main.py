@@ -8,6 +8,8 @@ from ..utils.logging import setup_logging
 from ..version import __version__
 
 COMMAND_SPECS = {
+    "check": "vitriol.cli.commands.check:check",
+    "cis": "vitriol.cli.commands.cis:cis_group",
     "infer": "vitriol.cli.commands.infer:infer",
     "generate": "vitriol.cli.commands.generate:generate",
     "trace": "vitriol.cli.commands.trace:trace",
@@ -29,6 +31,8 @@ COMMAND_SPECS = {
 }
 
 COMMAND_SHORT_HELP = {
+    "check": "Run Structure-First golden path (analyze → viz → generate → validate).",
+    "cis": "Compression Intelligence Score (CIS) ranking and reports.",
     "analyze": "Analyze model architecture.",
     "arch-viz": "Visualize model architecture from config.",
     "batch": "Generate multiple models from a YAML config.",

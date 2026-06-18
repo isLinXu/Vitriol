@@ -77,6 +77,8 @@ jobs:
         run: |
           python -m vitriol --version
           python -m vitriol --help
+          python -m vitriol check --help
+          python -m vitriol cis rank --help
           python -m vitriol generate --help
         env:
           PYTHONPATH: src

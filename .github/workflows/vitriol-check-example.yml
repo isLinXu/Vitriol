@@ -1,0 +1,51 @@
+name: Vitriol Check (Example)
+
+# Example workflow for model repos or Vitriol developers.
+# Copy/adapt this file into your model repository CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: HuggingFace model ID or local path to config directory
+        required: true
+        default: Qwen/Qwen2.5-0.5B
+      strategy:
+        description: Weight generation strategy for validate step
+        required: false
+        default: compact
+
+jobs:
+  vitriol-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Vitriol
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[viz]"
+
+      - name: Run vitriol check (composite action)
+        uses: ./.github/actions/vitriol-check
+        with:
+          model_id: ${{ github.event.inputs.model_id }}
+          output_dir: vitriol-report
+          strategy: ${{ github.event.inputs.strategy }}
+          fast: "true"
+          offline: "true"
+          trust_remote_code: "false"
+
+      - name: Upload report artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitriol-report
+          path: vitriol-report/
+          retention-days: 14

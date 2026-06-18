@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..utils.hf_loading import hf_kwargs
 from ..utils.hf_loading import load_causallm as hf_load_causallm
 from ..utils.hf_loading import load_model as hf_load_model
 from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
@@ -66,7 +67,7 @@ class ModelValidator:
 
     Example::
 
-        validator = ModelValidator("output/qwen-mini", trust_remote_code=True)
+        validator = ModelValidator("output/qwen-mini")  # trust_remote_code defaults to False
         report = validator.validate(run_inference=True)
         print(report.to_dict())
     """
@@ -119,13 +120,17 @@ class ModelValidator:
 
         return self.report
 
-    def _load_model_for_task(self, task_type: str):
-        # Validation should default to local loading to avoid accidental network access.
-        security = {
+    def _security_context(self) -> Dict[str, bool]:
+        """Security kwargs for local validation loads."""
+        return {
             "trust_remote_code": self.trust_remote_code,
             "allow_network": False,
             "local_files_only": True,
         }
+
+    def _load_model_for_task(self, task_type: str):
+        # Validation should default to local loading to avoid accidental network access.
+        security = self._security_context()
 
         common_kwargs = {
             "torch_dtype": "auto",
@@ -164,7 +169,11 @@ class ModelValidator:
 
                 AutoModelForSeq2SeqLM = _AutoModelForSeq2SeqLM
 
-            return AutoModelForSeq2SeqLM.from_pretrained(self.output_dir, **common_kwargs)
+            return AutoModelForSeq2SeqLM.from_pretrained(
+                self.output_dir,
+                **common_kwargs,
+                **hf_kwargs(security),
+            )
         if task_type == "generic":
             return hf_load_model(self.output_dir, security=security, **common_kwargs)
 
@@ -207,11 +216,7 @@ class ModelValidator:
         except Exception as e:
             # Try generic AutoModel if CausalLM fails
             try:
-                security = {
-                    "trust_remote_code": self.trust_remote_code,
-                    "allow_network": False,
-                    "local_files_only": True,
-                }
+                security = self._security_context()
                 common_kwargs = {
                     "torch_dtype": "auto",
                     "device_map": "cpu",
@@ -246,11 +251,7 @@ class ModelValidator:
             logger.info("Attempting to load tokenizer...")
             tokenizer = hf_load_tokenizer(
                 self.output_dir,
-                security={
-                    "trust_remote_code": self.trust_remote_code,
-                    "allow_network": False,
-                    "local_files_only": True,
-                },
+                security=self._security_context(),
             )
             self.report.tokenizer_loadable = True
             logger.info("Tokenizer loaded successfully.")

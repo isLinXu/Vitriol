@@ -17,7 +17,10 @@ import json
 
 import click
 
+from ...utils.experimental import experimental
 
+
+@experimental("ExoBrain shell + teacher KV injection/distillation")
 @click.group("exobrain")
 def exobrain_group() -> None:
     """ExoBrain: External brain inference and knowledge distillation for shell models."""

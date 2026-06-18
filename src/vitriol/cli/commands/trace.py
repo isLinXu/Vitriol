@@ -8,6 +8,7 @@ from typing import Any, Optional
 import click
 
 from vitriol.telemetry.run_context import new_run_id
+from vitriol.utils.experimental import experimental
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,7 @@ def _extract_attention_histogram_per_layer(
     return out
 
 
+@experimental("Offline trace.json generation for replay tooling")
 @click.command(name="trace")
 @click.option(
     "--model-path",

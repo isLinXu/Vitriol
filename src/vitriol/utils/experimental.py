@@ -69,6 +69,23 @@ def experimental(
             state["warned"] = True
             warnings.warn(_format(name, since, detail), ExperimentalWarning, stacklevel=3)
 
+        try:
+            import click
+        except ImportError:  # pragma: no cover - click is a core dependency
+            click = None
+
+        if click is not None and isinstance(obj, click.Command):
+            original_callback = obj.callback
+
+            @functools.wraps(original_callback)
+            def wrapped_callback(*args, **kwargs):
+                _warn()
+                return original_callback(*args, **kwargs)
+
+            obj.callback = wrapped_callback
+            setattr(obj, _FLAG, True)
+            return obj
+
         if isinstance(obj, type):
             original_init = obj.__init__
 

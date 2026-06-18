@@ -32,6 +32,10 @@ def _launch_kwargs(ctx, *, share, port, debug):
     return kwargs
 
 
+from ...utils.experimental import experimental
+
+
+@experimental("Gradio Web UI", detail="Install with pip install -e '.[webui]'.")
 @click.command(name="webui")
 @click.option("--port", "-p", default=7860, help="Port to run the web UI on")
 @click.option("--share", is_flag=True, help="Create a public share link")

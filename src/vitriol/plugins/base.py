@@ -269,6 +269,17 @@ class PluginManager:
             for name, plugin in self.plugins.items()
         ]
 
+    def unload_plugin(self, name: str) -> bool:
+        """Unload a plugin by name and call its shutdown hook."""
+        plugin = self.plugins.pop(name, None)
+        if plugin is None:
+            return False
+        try:
+            plugin.shutdown()
+        except Exception as e:
+            logger.warning("Plugin %s shutdown failed: %s", name, e)
+        return True
+
 
 # Global plugin manager
 _plugin_manager: Optional[PluginManager] = None

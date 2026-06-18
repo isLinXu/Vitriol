@@ -29,6 +29,13 @@ class TestGeneratorRefactor:
 
     def test_all_imports_work(self) -> None:
         """All split modules can be imported and have the expected symbols."""
+        from vitriol.core.config_loader import load_hf_config
+        from vitriol.core.custom_code_sync import copy_custom_code_files
+        from vitriol.core.generator_persistence import save_configs
+
+        assert callable(load_hf_config)
+        assert callable(copy_custom_code_files)
+        assert callable(save_configs)
         assert callable(positive_int_env)
         assert callable(extract_shard_id)
         assert callable(build_fallback_config)

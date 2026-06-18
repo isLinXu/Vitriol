@@ -12,7 +12,7 @@ Features:
 - Timeline: Visualize architecture innovations over time
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 from .compare import ArchComparator, ComparisonReport, ComparisonResult
 from .recommender import (
