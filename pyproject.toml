@@ -92,7 +92,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--ignore=tests/integration"
+addopts = "--ignore=tests/integration --cov=src/vitriol --cov-report=term-missing --cov-report=xml"
 markers = [
     "integration: golden-path integration tests (slower; run via tests/integration or nightly CI)",
 ]
@@ -102,6 +102,29 @@ filterwarnings = [
     "ignore::DeprecationWarning:websockets.*",
     "ignore::UserWarning:torch.*",
 ]
+
+[tool.coverage.run]
+source = ["src/vitriol"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "pass",
+]
+show_missing = true
+skip_covered = false
+fail_under = 60
 
 [tool.ruff]
 target-version = "py39"
