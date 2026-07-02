@@ -77,21 +77,21 @@ def analyze_kv_quantization(
     for each layer under the specified preset(s).
     """
     # Local imports to avoid circular deps and keep this module lightweight
+    from ..utils.hf_loading import load_causallm as hf_load_causallm
+    from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
     from ._planning import (
         _collect_policy_insights,
         _infer_kv_layer_types,
+        _LayerTypeHandle,
         _preset_to_kv_cfg,
         _select_preset,
-        _LayerTypeHandle,
     )
     from .runner import (
-        build_long_prompt,
-        select_device,
         _extract_dynamic_cache_kv,
         _prefill_cache,
+        build_long_prompt,
+        select_device,
     )
-    from ..utils.hf_loading import load_causallm as hf_load_causallm
-    from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
 
     device = select_device()
     dtype = torch.float16 if device.type in {"cuda", "mps"} else torch.float32

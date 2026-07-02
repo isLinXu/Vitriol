@@ -141,10 +141,10 @@ def positive_int_env(name: str, default: int) -> int:
     try:
         value = int(raw)
     except ValueError:
-        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        logger.warning("Invalid %s=%r (not an integer); using default %d", name, raw, default)
         return default
     if value <= 0:
-        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        logger.warning("Invalid %s=%r (must be > 0); using default %d", name, raw, default)
         return default
     return value
 

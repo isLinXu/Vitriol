@@ -10,8 +10,8 @@ import click
 
 from ...core.strategy_benchmark import DEFAULT_COMPARE_STRATEGIES
 from ...metrics.compression_intelligence import (
-    CompressionIntelligenceScorer,
     STRATEGY_SCORE_MATRIX,
+    CompressionIntelligenceScorer,
     generate_score_comparison_table,
 )
 from ...utils.strategy_discovery import discover_strategy_names

@@ -5,47 +5,22 @@ import importlib.util
 import json
 import logging
 import os
-import re
-import shutil
 import sys
-import tempfile
 import traceback
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch  # noqa: E402
 from accelerate import init_empty_weights  # noqa: E402
 from tqdm import tqdm  # noqa: E402
-from transformers import AutoConfig  # noqa: E402
 from transformers.utils import cached_file  # noqa: E402
 
 from ..patches import PatchRegistry, apply_all_patches, patch_remote_module  # noqa: E402
-
 from ._generator_utils import (  # noqa: E402
-    GenerationResult,
     _FALLBACK_CHAIN,
     _MOE_FALLBACK_CHAIN,
-    _ROPE_DEFAULTS,
-    _SAFE_KEYS,
-    _BLOCKED_CUSTOM_ASSET_EXTENSIONS,
-    _CUSTOM_ASSET_EXTENSIONS,
-    _CUSTOM_CODE_PREFIXES,
-    _CUSTOM_CODE_MAX_FILES_ENV,
-    _CUSTOM_CODE_MAX_PY_BYTES_ENV,
-    _CUSTOM_CODE_MAX_ASSET_BYTES_ENV,
-    _CUSTOM_CODE_DEFAULT_MAX_FILES,
-    _CUSTOM_CODE_DEFAULT_MAX_PY_BYTES,
-    _CUSTOM_CODE_DEFAULT_MAX_ASSET_BYTES,
-    positive_int_env,
-    custom_repo_file_size_limit,
-    set_missing,
-    inject_recursive,
-    copy_safe_attrs,
+    GenerationResult,
     build_fallback_config,
-    extract_shard_id,
-    find_best_alias,
-    extract_auto_map_modules,
-    custom_code_file_matches_auto_map,
-    is_allowed_custom_repo_file,
+    inject_recursive,
 )
 from .shrinker import ConfigShrinker  # noqa: E402
 
@@ -63,7 +38,7 @@ apply_all_patches()
 from ..adapters.registry import AdapterRegistry  # noqa: E402
 from ..config.manager import GenerationConfig  # noqa: E402
 from ..strategies import get_strategy  # noqa: E402
-from ..utils.exceptions import GenerationError, ModelNotSupportedError  # noqa: E402
+from ..utils.exceptions import ModelNotSupportedError  # noqa: E402
 from ..utils.size import parse_size_to_bytes  # noqa: E402
 from .incremental import IncrementalGenerator  # noqa: E402
 
@@ -145,6 +120,8 @@ class MinimalWeightGenerator:
             torch.int8: 1,
             torch.uint8: 1,
             torch.bool: 1,
+            torch.complex64: 8,    # [O1] 2× float32
+            torch.complex128: 16,  # [O1] 2× float64
         }.get(dtype, 4)
 
     @staticmethod
@@ -838,7 +815,8 @@ class MinimalWeightGenerator:
                     new = os.path.join(self.output_dir, new_name)
                     if os.path.exists(old) and not os.path.exists(new):
                         os.rename(old, new)
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    logger.debug("Could not parse shard id from '%s': %s", filename, e)
                     final[key] = filename
 
         # Validate: warn if actual file count != declared total_shards

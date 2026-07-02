@@ -145,10 +145,10 @@ def run_turboquantum_on_model_kv(
     """Run TurboQuantum compression on a real model's KV cache."""
     # Local imports to avoid pulling runner.py eagerly
     from .runner import (
-        build_long_prompt,
-        select_device,
         _extract_dynamic_cache_kv,
         _prefill_cache,
+        build_long_prompt,
+        select_device,
     )
 
     device = select_device()

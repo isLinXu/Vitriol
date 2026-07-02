@@ -1,9 +1,7 @@
 import datetime
-import importlib.util
 import json
 import logging
 import os
-import re
 import shutil
 import tempfile
 from typing import TYPE_CHECKING, Any, Dict
@@ -13,7 +11,7 @@ from transformers import AutoConfig
 from transformers.utils import cached_file
 
 if TYPE_CHECKING:
-    from .generator import MinimalWeightGenerator
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +379,7 @@ def copy_tokenizer_assets(generator) -> None:
 # ──────────────────────────────────────────────────────────────────────
 
 def add_readme_metadata(generator) -> None:
-    has_viz   = generate_visualization(generator, 
+    has_viz   = generate_visualization(generator,
         os.path.join(generator.output_dir, "architecture.png"))
     viz_block = (
         "## 🔍 Architecture Visualization\n\n"

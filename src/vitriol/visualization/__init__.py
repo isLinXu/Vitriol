@@ -14,4 +14,4 @@ def __getattr__(name: str):
     try:
         return importlib.import_module(f".{name}", __name__)
     except ImportError:
-        raise AttributeError(f"module 'vitriol.visualization' has no attribute '{name}'")
+        raise AttributeError(f"module 'vitriol.visualization' has no attribute '{name}'") from None

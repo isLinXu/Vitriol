@@ -29,10 +29,9 @@ from ..kv.policy import (
     apply_policy_to_store_cfg,
     build_policy,
     classify_kv_layer,
-    resolve_layer_strategy,
 )
 from ..patches.cache_hooks import CacheHookConfig, CacheHookPatcher, UniversalAttentionPatcher, get_cache_hook_stats
-from ..patches.turboquant import get_turboquant_stats, reset_turboquant_stats, turbo_quantize
+from ..patches.turboquant import get_turboquant_stats, reset_turboquant_stats
 from ..telemetry.run_context import new_run_id
 from ..utils.hf_loading import load_causallm as hf_load_causallm
 from ..utils.hf_loading import load_tokenizer as hf_load_tokenizer
@@ -152,7 +151,6 @@ def _extract_dynamic_cache_kv(past_key_values: Any) -> list[dict[str, Any]]:
         out.append({"layer_idx": int(idx), "key": keys, "value": values})
     return out
 
-from .runner_kv import analyze_kv_quantization
 
 
 def prefill_decode(model, tokenizer, prompt: str, device: torch.device, max_new_tokens: int) -> Dict[str, Any]:
@@ -931,8 +929,3 @@ def compare_smoke(
 
 
 
-from .runner_turboquant import (
-    compare_turboquantum_modes,
-    run_turboquantum_on_model_kv,
-    run_turboquantum_synthetic,
-)

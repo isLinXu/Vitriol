@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def custom_code_modules_from_saved_config(generator: "MinimalWeightGenerator") -> Set[str] | None:
+def custom_code_modules_from_saved_config(generator: MinimalWeightGenerator) -> Set[str] | None:
     """Return Python modules referenced by saved ``auto_map`` metadata, if present."""
     for config_name in ("meta-config.json", "config.json"):
         config_path = os.path.join(generator.output_dir, config_name)
@@ -42,7 +42,7 @@ def custom_code_modules_from_saved_config(generator: "MinimalWeightGenerator") -
     return None
 
 
-def copy_custom_code_files(generator: "MinimalWeightGenerator") -> None:
+def copy_custom_code_files(generator: MinimalWeightGenerator) -> None:
     """Download/copy custom Python files when trust_remote_code is enabled."""
     try:
         if not getattr(generator.config.security, "trust_remote_code", False):

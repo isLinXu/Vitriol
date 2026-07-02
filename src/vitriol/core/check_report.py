@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .check_runner import CheckReport
 
 
-def render_check_index_html(report: "CheckReport") -> str:
+def render_check_index_html(report: CheckReport) -> str:
     step_rows = []
     for step in report.steps:
         status = "pass" if step.success else "fail"

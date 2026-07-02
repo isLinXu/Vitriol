@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -16,8 +17,6 @@ def new_run_id() -> str:
 
     return str(uuid.uuid4())
 
-
-import sys
 
 if sys.version_info >= (3, 10):
     @dataclass(frozen=True, slots=True)

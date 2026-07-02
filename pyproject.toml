@@ -67,7 +67,7 @@ dev = [
     "pytest-cov>=4.0,<7.0",
     "pytest-timeout>=2.0,<3.0",
     "pytest-xdist>=2.0,<4.0",
-    "pytest-asyncio>=0.20,<1.0",
+    "pytest-asyncio>=0.21,<2.0",
     "ruff>=0.8.0,<1.0",
     "mypy>=1.0,<2.0",
     "pre-commit>=3.0,<5.0",
@@ -95,7 +95,9 @@ testpaths = ["tests"]
 addopts = "--ignore=tests/integration --cov=src/vitriol --cov-report=term-missing --cov-report=xml"
 markers = [
     "integration: golden-path integration tests (slower; run via tests/integration or nightly CI)",
+    "asyncio: asyncio tests (pytest-asyncio marker)",
 ]
+asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "ignore::DeprecationWarning:torchao.*",
@@ -126,6 +128,15 @@ show_missing = true
 skip_covered = false
 fail_under = 60
 
+[tool.mypy]
+python_version = "3.9"
+# Heavy ML dependencies (torch, transformers, tqdm, psutil, modelscope, ...)
+# ship without py.typed markers or stubs; do not fail on their missing stubs.
+ignore_missing_imports = true
+# Keep the baseline pragmatic: check signatures, not every untyped body yet.
+warn_unused_ignores = true
+warn_redundant_casts = true
+
 [tool.ruff]
 target-version = "py39"
 line-length = 120
@@ -151,8 +162,9 @@ ignore = [
     "UP035",  # `typing.Dict` is deprecated, use `dict`
     # UP045 (use `X | None` instead of `Optional[X]`) requires Python 3.10+
     # at runtime (Pydantic, dataclasses, FastAPI introspect annotations).
-    # Re-enable when the minimum Python version bumps to 3.10.
-    # "UP045",
+    # Kept consistent with UP006/UP007/UP035 above; re-enable when the
+    # minimum Python version bumps to 3.10.
+    "UP045",
 ]
 
 [tool.ruff.lint.per-file-ignores]

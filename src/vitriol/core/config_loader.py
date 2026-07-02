@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def load_hf_config(generator: "MinimalWeightGenerator") -> Any:
+def load_hf_config(generator: MinimalWeightGenerator) -> Any:
     """Load and normalise a HuggingFace config for weight generation."""
     local_files_only = bool(
         getattr(generator.config.security, "local_files_only", False)

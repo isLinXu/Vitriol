@@ -41,7 +41,7 @@ def __getattr__(name: str):
         try:
             return importlib.import_module(f".{name}", __name__)
         except ImportError:
-            raise AttributeError(f"module 'vitriol' has no attribute '{name}'")
+            raise AttributeError(f"module 'vitriol' has no attribute '{name}'") from None
 
 
 def __dir__():
