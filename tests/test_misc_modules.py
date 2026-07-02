@@ -1,4 +1,4 @@
-"""Tests for remaining modules: vocab_viz, webui, models_legacy, resilience."""
+"""Tests for remaining modules: vocab_viz, webui, resilience."""
 
 import pytest
 
