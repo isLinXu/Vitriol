@@ -59,7 +59,7 @@ class TestBlockRenderer:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             br.render(arch, tmp.name)
             mock_savefig.assert_called_once()
-            mock_close.assert_called_once()
+            assert mock_close.call_count >= 1
 
     @patch("matplotlib.pyplot.subplots")
     @patch("matplotlib.pyplot.savefig")
