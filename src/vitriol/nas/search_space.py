@@ -1,6 +1,6 @@
 import random
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from ..types import HFConfigDict
 
@@ -116,11 +116,12 @@ class ArchitectureGene:
     @classmethod
     def from_config(cls, config: HFConfigDict) -> 'ArchitectureGene':
         """Create a gene from a Hugging Face-style config dictionary."""
-        source = dict(config.get("_vitriol_nas_gene") or {})
+        cfg: Dict[str, Any] = dict(config)
+        source: Dict[str, Any] = dict(cfg.get("_vitriol_nas_gene") or {})
 
-        hidden_size = int(config.get("hidden_size", source.get("hidden_size", 1024)))
-        n_heads = int(config.get("num_attention_heads", source.get("n_heads", 8)))
-        num_kv_heads = int(config.get("num_key_value_heads", source.get("num_kv_heads", n_heads)))
+        hidden_size = int(cfg.get("hidden_size", source.get("hidden_size", 1024)))
+        n_heads = int(cfg.get("num_attention_heads", source.get("n_heads", 8)))
+        num_kv_heads = int(cfg.get("num_key_value_heads", source.get("num_kv_heads", n_heads)))
 
         if num_kv_heads == n_heads:
             attention_type = "MHA"
@@ -129,7 +130,7 @@ class ArchitectureGene:
         else:
             attention_type = "GQA"
 
-        intermediate_size = int(config.get("intermediate_size", source.get("intermediate_size", hidden_size * 4)))
+        intermediate_size = int(cfg.get("intermediate_size", source.get("intermediate_size", hidden_size * 4)))
         swiglu_size = int(hidden_size * 8 / 3)
         ffn_type = source.get("ffn_type")
         if ffn_type not in {"Standard", "SwiGLU", "GeGLU"}:
@@ -138,30 +139,30 @@ class ArchitectureGene:
         # Detect MLA
         use_mla = bool(
             source.get("use_mla")
-            or config.get("qk_nope_head_dim")
-            or config.get("kv_lora_rank")
+            or cfg.get("qk_nope_head_dim")
+            or cfg.get("kv_lora_rank")
         )
 
         # Detect MoE
-        num_experts = int(config.get("num_experts", config.get("n_routed_experts", 0)) or 0)
+        num_experts = int(cfg.get("num_experts", cfg.get("n_routed_experts", 0)) or 0)
         use_moe = bool(source.get("use_moe") or num_experts > 0)
 
         # Detect Mamba
         use_mamba = bool(
             source.get("use_mamba")
-            or config.get("d_state")
-            or config.get("model_type", "").startswith("mamba")
+            or cfg.get("d_state")
+            or cfg.get("model_type", "").startswith("mamba")
         )
 
         return cls(
-            n_layers=int(config.get("num_hidden_layers", source.get("n_layers", 12))),
+            n_layers=int(cfg.get("num_hidden_layers", source.get("n_layers", 12))),
             hidden_size=hidden_size,
             n_heads=n_heads,
             attention_type=source.get("attention_type", attention_type),
             ffn_type=ffn_type,
-            activation=str(config.get("hidden_act", source.get("activation", "gelu"))),
-            norm_type=source.get("norm_type", "RMSNorm" if "rms_norm_eps" in config else "LayerNorm"),
-            vocab_size=int(config.get("vocab_size", source.get("vocab_size", 32000))),
+            activation=str(cfg.get("hidden_act", source.get("activation", "gelu"))),
+            norm_type=source.get("norm_type", "RMSNorm" if "rms_norm_eps" in cfg else "LayerNorm"),
+            vocab_size=int(cfg.get("vocab_size", source.get("vocab_size", 32000))),
             use_mla=use_mla,
             use_moe=use_moe,
             use_mamba=use_mamba,
@@ -201,11 +202,14 @@ class ArchitectureGene:
             cfg["d_state"] = self.d_state
             cfg["d_conv"] = self.d_conv
             cfg["expand_factor"] = self.expand_factor
-        return cfg
+        return cast(HFConfigDict, cfg)
 
 class SearchSpace:
     """Base class for search spaces."""
     def sample(self) -> ArchitectureGene:
+        raise NotImplementedError
+
+    def mutate(self, gene: ArchitectureGene, mutation_rate: float = 0.1) -> ArchitectureGene:
         raise NotImplementedError
 
 class LLMSearchSpace(SearchSpace):

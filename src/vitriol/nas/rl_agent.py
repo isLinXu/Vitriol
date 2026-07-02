@@ -341,6 +341,7 @@ class RLSearcher:
             Experience tuple or None if failed
         """
         # Encode current state
+        assert self.current_gene is not None
         state = self.encoder(self.current_gene).detach().cpu().numpy()
 
         # Select action
@@ -552,7 +553,7 @@ class RLSearcher:
         Returns:
             Array of advantages
         """
-        advantages = []
+        advantages: List[float] = []
         gae = 0.0
 
         for i in reversed(range(len(batch))):

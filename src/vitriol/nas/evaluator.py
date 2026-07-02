@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 
 class ZeroCostProxy:
     """Base class for zero-cost proxies."""
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         raise NotImplementedError
 
 class ParamCountProxy(ZeroCostProxy):
     """Proxy that uses parameter count (or negative parameter count) as a score."""
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         V = getattr(gene, 'vocab_size', 32000)
         H = gene.hidden_size
         N = gene.n_layers
@@ -41,7 +41,7 @@ class GradNormProxy(ZeroCostProxy):
     Calculates the sum of Euclidean norms of gradients for all parameters.
     Higher gradient norm usually implies better trainability (vanishing gradient problem check).
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None or targets is None:
              raise ValueError("GradNormProxy requires model, inputs and targets")
 
@@ -64,7 +64,7 @@ class SynflowProxy(ZeroCostProxy):
     This measures the 'flow' of information through the network.
     Ideally, we sum |w * grad| over all parameters.
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None:
              raise ValueError("SynflowProxy requires model and inputs")
 
@@ -113,7 +113,7 @@ class FisherProxy(ZeroCostProxy):
     Measures how much information the parameters contain about the data distribution.
     Score = sum(grad^2)
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None or targets is None:
              raise ValueError("FisherProxy requires model, inputs and targets")
 
@@ -135,7 +135,7 @@ class SNIPProxy(ZeroCostProxy):
     Measures connection sensitivity by multiplying weights with their gradients.
     Score = sum(|w * grad|) computed on standard loss (not all-ones input like Synflow).
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None or targets is None:
              raise ValueError("SNIPProxy requires model, inputs and targets")
 
@@ -158,7 +158,7 @@ class JacobianCovarianceProxy(ZeroCostProxy):
     Networks that map different inputs to distinct representations score higher.
     Calculates log(det(K)) where K is the correlation matrix of the outputs/logits.
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None:
              raise ValueError("JacobianCovarianceProxy requires model and inputs")
 
@@ -196,7 +196,7 @@ class RankMeProxy(ZeroCostProxy):
     A higher effective rank means the architecture is less prone to dimensional collapse
     and has a higher expressivity space at initialization.
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None:
              raise ValueError("RankMeProxy requires model and inputs")
 
@@ -239,7 +239,7 @@ class VitriolExpressivityProxy(ZeroCostProxy):
     2. Vocabulary Entropy: Measures output space utilization.
        If the model collapses to predicting a single token, entropy is 0.
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None:
              raise ValueError("VitriolExpressivityProxy requires model and inputs")
 
@@ -280,7 +280,7 @@ class VitriolAttentionDiversityProxy(ZeroCostProxy):
     If all heads attend to the same tokens, the multi-head mechanism is redundant (Head Collapse).
     Calculates the inverse of the average off-diagonal cosine similarity between attention matrices.
     """
-    def score(self, gene: ArchitectureGene, model: torch.nn.Module = None, inputs: torch.Tensor = None, targets: torch.Tensor = None) -> float:
+    def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
         if model is None or inputs is None:
             raise ValueError("Requires model and inputs")
 
@@ -351,9 +351,9 @@ class HybridEvaluator:
 
         self.trust_remote_code = trust_remote_code
 
-        self.dataset_cache = {}
+        self.dataset_cache: Dict[Any, Any] = {}
 
-    def load_dataset(self, dataset_name: str, config_name: str = None, split: str = "train", n_samples: int = 100) -> Optional[Any]:
+    def load_dataset(self, dataset_name: str, config_name: Optional[str] = None, split: str = "train", n_samples: int = 100) -> Optional[Any]:
         """Load and cache a dataset."""
         key = f"{dataset_name}_{config_name}_{split}_{n_samples}"
         if key in self.dataset_cache:
@@ -373,23 +373,23 @@ class HybridEvaluator:
                     logger.warning(f"No parquet/json files found in {dataset_name}")
                     return None
 
-                data_files = [str(f) for f in data_files]
-                logger.info(f"Found {len(data_files)} data files.")
+                data_file_strs = [str(f) for f in data_files]
+                logger.info(f"Found {len(data_file_strs)} data files.")
 
                 # Use local path
                 # Check file type
                 # Handle single file or directory logic better
 
                 # Check file type from the first file found
-                if data_files[0].endswith(".parquet"):
+                if data_file_strs[0].endswith(".parquet"):
                     load_type = "parquet"
-                elif data_files[0].endswith(".json") or data_files[0].endswith(".jsonl"):
+                elif data_file_strs[0].endswith(".json") or data_file_strs[0].endswith(".jsonl"):
                     load_type = "json"
                 else:
-                    logger.warning(f"Unknown file type: {data_files[0]}")
+                    logger.warning(f"Unknown file type: {data_file_strs[0]}")
                     return None
 
-                dataset = datasets.load_dataset(load_type, data_files=data_files, split="train")
+                dataset = datasets.load_dataset(load_type, data_files=data_file_strs, split="train")
 
                 n_avail = len(dataset)
                 n_take = min(n_samples, n_avail)
@@ -471,7 +471,7 @@ class HybridEvaluator:
             logger.error(f"Error loading dataset: {e}")
             return None
 
-    def evaluate(self, gene: ArchitectureGene, strategy: str = "compact", dataset_config: Dict = None) -> Dict[str, Any]:
+    def evaluate(self, gene: ArchitectureGene, strategy: str = "compact", dataset_config: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Full evaluation pipeline.
 
@@ -553,11 +553,11 @@ class HybridEvaluator:
             # Create config from gene (now with correct vocab_size)
             config_dict = gene.to_config()
 
-            from transformers import AutoConfig
+            from transformers import AutoConfig, PretrainedConfig
             try:
                 config = AutoConfig.for_model(**config_dict)
             except Exception:
-                config = AutoConfig.from_dict(config_dict)
+                config = PretrainedConfig.from_dict(dict(config_dict))
 
             # Calculate FLOPs
             flops = self._estimate_flops(config)
@@ -643,6 +643,7 @@ class HybridEvaluator:
             # =========================================================================
             # Run a single standard backward pass to compute all gradient-based proxies
             # (GradNorm, Fisher, SNIP) simultaneously.
+            assert input_ids is not None and labels is not None
             model.zero_grad()
             outputs_bwd = model(input_ids[:2], labels=labels[:2])
             loss_val = outputs_bwd.loss

@@ -22,10 +22,9 @@ import time
 import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from ..utils.exceptions import MissingOptionalDependencyError
-from ..utils.experimental import experimental
 
 try:
     import uvicorn
@@ -270,10 +269,10 @@ class RateLimiter:
             elif window.startswith("hour"):
                 self._window_seconds = 3600
             else:
-                logger.warning("Unknown rate limit window '%s', using 'minute'", window)
+                logger.warning(f"Unknown rate limit window '{window}', using 'minute'")
                 self._window_seconds = 60
         except (ValueError, AttributeError) as exc:
-            logger.warning("Invalid VITRIOL_API_RATE_LIMIT value '%s': %s", raw, exc)
+            logger.warning(f"Invalid VITRIOL_API_RATE_LIMIT value '{raw}': {exc}")
             self._max_requests = 60
             self._window_seconds = 60
 
@@ -331,7 +330,7 @@ async def rate_limit_middleware(request: Request, call_next) -> StreamingRespons
     except HTTPException:
         raise  # Re-raise 429 exceptions
     except Exception as exc:
-        logger.warning("Rate limiter error: %s", exc)
+        logger.warning(f"Rate limiter error: {exc}")
     response = await call_next(request)
     return response
 
@@ -636,7 +635,7 @@ async def stream_logs(
     This endpoint streams all log messages captured by the LogStreamQueue handler,
     which is attached to the root logger to capture all logs from the application.
     """
-    async def log_generator() -> Generator[str, None, None]:
+    async def log_generator() -> AsyncGenerator[str, None]:
         # Send initial batch of recent logs
         recent_logs = _log_stream_handler.get_logs(since_timestamp=since)
         for log_entry in recent_logs:

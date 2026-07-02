@@ -2,7 +2,7 @@ import json
 import logging
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from .evaluator import HybridEvaluator
 from .rl_agent import RLSearcher
@@ -26,7 +26,7 @@ class NASController:
         """Run the search."""
         logger.info("Starting NAS run with algorithm=%s, iterations=%d", algorithm, n_iterations)
 
-        searcher = None
+        searcher: Optional[Union[RandomSearcher, EvolutionarySearcher, RLSearcher]] = None
 
         # Define checkpoint callback
         def checkpoint_cb() -> None:
@@ -56,7 +56,7 @@ class NASController:
         original_evaluate = self.evaluator.evaluate
         if dataset_config:
             logger.info("Using dataset config: %s", dataset_config)
-            self.evaluator.evaluate = partial(original_evaluate, dataset_config=dataset_config)
+            self.evaluator.evaluate = partial(original_evaluate, dataset_config=dataset_config)  # type: ignore[method-assign]
 
         # Resume logic
         if resume and self.checkpoint_path.exists():
@@ -71,7 +71,7 @@ class NASController:
             self._save_checkpoint(searcher)
             raise
         finally:
-            self.evaluator.evaluate = original_evaluate
+            self.evaluator.evaluate = original_evaluate  # type: ignore[method-assign]
 
         # Save final results
         results = {

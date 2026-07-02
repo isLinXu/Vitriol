@@ -237,7 +237,7 @@ class ConstraintOptimizer:
         metrics = MetricsCalculator.calculate_all(gene)
         metrics["nas_score"] = base_score
 
-        total_score = 0
+        total_score = 0.0
         for objective in self.objectives:
             total_score += objective.score(metrics)
 
@@ -249,11 +249,11 @@ class ConstraintOptimizer:
         base_evaluator,
         n_iterations: int = 50,
         verbose: bool = True,
-    ) -> Tuple[ArchitectureGene, float, Dict[str, float]]:
+    ) -> Tuple[Optional[ArchitectureGene], float, Dict[str, float]]:
         """Run constraint-optimized random search."""
-        best_gene = None
+        best_gene: Optional[ArchitectureGene] = None
         best_score = -float("inf")
-        best_metrics = {}
+        best_metrics: Dict[str, float] = {}
 
         for i in range(n_iterations):
             gene = search_space.sample()
@@ -471,7 +471,7 @@ def create_constraint_optimizer(
 def quick_search(
     target_vram_gb: float,
     n_iterations: int = 50,
-) -> Tuple[ArchitectureGene, Dict[str, float]]:
+) -> Tuple[Optional[ArchitectureGene], Dict[str, float]]:
     """Quick constrained search for target VRAM."""
     optimizer = create_constraint_optimizer(max_vram_gb=target_vram_gb)
     optimizer.add_objective(OptimizationTarget(ObjectiveType.MAXIMIZE_EFFICIENCY))

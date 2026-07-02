@@ -235,7 +235,7 @@ FALLBACK_PARAMS: Dict[str, Dict[str, Any]] = {
 }
 
 
-DEFAULT_FAMILIES = {
+DEFAULT_FAMILIES: Dict[str, Dict[str, Any]] = {
     "LLaMA": {
         "root": "meta-llama/Llama-2-7b",
         "members": {

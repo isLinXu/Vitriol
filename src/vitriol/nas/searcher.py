@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from tqdm import tqdm
 
@@ -19,7 +19,7 @@ class Searcher:
         self.history: List[Dict[str, Any]] = []
         self.save_checkpoint_callback = save_checkpoint_callback
 
-    def search(self, n_iterations: int) -> ArchitectureGene:
+    def search(self, n_iterations: int) -> Optional[ArchitectureGene]:
         raise NotImplementedError
 
     def _evaluate(self, gene: ArchitectureGene) -> float:
@@ -45,7 +45,7 @@ class Searcher:
 class RandomSearcher(Searcher):
     """Random Search Algorithm."""
 
-    def search(self, n_iterations: int) -> ArchitectureGene:
+    def search(self, n_iterations: int) -> Optional[ArchitectureGene]:
         best_gene = None
         best_score = -float("inf")
 
@@ -73,7 +73,7 @@ class EvolutionarySearcher(Searcher):
         self.mutation_rate = mutation_rate
         self.population: List[ArchitectureGene] = []
 
-    def search(self, n_generations: int) -> ArchitectureGene:
+    def search(self, n_generations: int) -> Optional[ArchitectureGene]:
         if not self.population:
             self.population = [self.search_space.sample() for _ in range(self.population_size)]
 
@@ -102,7 +102,7 @@ class EvolutionarySearcher(Searcher):
 
             parents = self._selection(self.population, scores, k=self.population_size // 2)
 
-            offspring = []
+            offspring: List[ArchitectureGene] = []
             while len(offspring) < self.population_size - len(parents):
                 p1, p2 = random.sample(parents, 2)
                 child = self._crossover(p1, p2)
