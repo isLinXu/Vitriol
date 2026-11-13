@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Initialize distributed task queues on their execution loop so Python 3.9 supports synchronous coordinator construction after asyncio.run; preserve pending tasks when a worker unregisters before the loop starts.
+- Keep the Python CI matrix on Ubuntu 24.04 for Python 3.9 availability, and install declared build dependencies through isolated distribution builds.
+- Allow machine-level rounding in the identical-architecture cosine similarity regression.
+
 - Close inherited output-lock descriptors after Python fork without unlocking the parent; serialize descriptor registration with fork and preserve active registrations across module reloads.
 - Prevent inherited context cleanup from closing reused child descriptors, and preserve the original generation error when explicit unlock also fails.
 
@@ -51,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install API test dependencies in CI and separate the integration suite from the full-suite coverage threshold.
 
 ### Changed
+
+- Publish pytest failures as GitHub annotations and retain JUnit/coverage reports for seven days, including failed CI runs.
 
 - Concurrent generation into an active output directory raises recoverable OutputDirectoryBusyError. The persistent .vitriol-generation.lock marker is retained; OS locking determines whether it is busy.
 
