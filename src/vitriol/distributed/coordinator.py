@@ -87,7 +87,10 @@ class DistributedCoordinator:
         # State
         self.workers: Dict[str, WorkerInfo] = {}
         self.tasks: Dict[str, GenerationTask] = {}
-        self.pending_tasks: asyncio.Queue = asyncio.Queue()
+        # Python 3.9 binds Queue to the current loop at construction time.
+        # The coordinator itself may be constructed before asyncio.run().
+        self._pending_tasks: Optional[asyncio.Queue] = None
+        self._deferred_tasks: List[GenerationTask] = []
         self.running = False
 
         # Statistics
@@ -99,6 +102,18 @@ class DistributedCoordinator:
         }
 
         logger.info(f"Coordinator initialized on {host}:{port}")
+
+    @property
+    def pending_tasks(self) -> asyncio.Queue:
+        """Access the pending queue from the coordinator's execution loop."""
+        if self._pending_tasks is None:
+            asyncio.get_running_loop()
+            queue = asyncio.Queue()
+            for task in self._deferred_tasks:
+                queue.put_nowait(task)
+            self._deferred_tasks.clear()
+            self._pending_tasks = queue
+        return self._pending_tasks
 
     async def start(self) -> None:
         """Start the coordinator."""
@@ -163,7 +178,11 @@ class DistributedCoordinator:
                 if task and task.status == "running":
                     task.status = "pending"
                     task.assigned_worker = None
-                    asyncio.create_task(self.pending_tasks.put(task))
+                    if self._pending_tasks is None:
+                        self._deferred_tasks.append(task)
+                    else:
+                        # The queue is unbounded; no background task is needed.
+                        self._pending_tasks.put_nowait(task)
                     logger.warning(f"Reassigned task {task.id} from disconnected worker")
 
             del self.workers[worker_id]
@@ -387,7 +406,7 @@ class DistributedCoordinator:
         return {
             **self.stats,
             "active_workers": len([w for w in self.workers.values() if w.status != WorkerStatus.OFFLINE]),
-            "pending_tasks": self.pending_tasks.qsize(),
+            "pending_tasks": self._pending_tasks.qsize() if self._pending_tasks is not None else len(self._deferred_tasks),
             "running_tasks": len([t for t in self.tasks.values() if t.status == "running"]),
             "workers": {
                 wid: {
