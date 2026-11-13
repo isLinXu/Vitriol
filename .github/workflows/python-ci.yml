@@ -19,7 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        # Ubuntu 26.04 no longer has setup-python builds for Python 3.9.
+        os: [ubuntu-24.04]
         python-version: ['3.9', '3.10', '3.11', '3.12']
         
     steps:
