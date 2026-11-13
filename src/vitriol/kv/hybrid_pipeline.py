@@ -98,8 +98,9 @@ class SlidingWindowEvictor:
         if num_to_evict <= 0:
             return torch.arange(current_seq_len)
 
-        # Always keep recent tokens
-        recent_start = max(0, current_seq_len - cfg.min_recent_tokens)
+        # The recent reserve cannot exceed the total cache budget.
+        recent_count = min(max(0, cfg.min_recent_tokens), target_len)
+        recent_start = max(0, current_seq_len - recent_count)
         recent_indices = torch.arange(recent_start, current_seq_len)
 
         # Older tokens that are eviction candidates
@@ -112,7 +113,7 @@ class SlidingWindowEvictor:
             # Only consider old positions
             old_attn = cum_attn[:recent_start]
             # Keep top-k by attention
-            num_old_to_keep = max(0, target_len - cfg.min_recent_tokens)
+            num_old_to_keep = target_len - recent_count
             if num_old_to_keep >= len(old_indices):
                 keep_old = old_indices
             else:
@@ -120,8 +121,10 @@ class SlidingWindowEvictor:
                 keep_old = old_indices[topk_idx.sort()[0]]
         else:
             # FIFO: keep the most recent old tokens
-            num_old_to_keep = max(0, target_len - cfg.min_recent_tokens)
-            if num_old_to_keep >= len(old_indices):
+            num_old_to_keep = target_len - recent_count
+            if num_old_to_keep == 0:
+                keep_old = old_indices[:0]
+            elif num_old_to_keep >= len(old_indices):
                 keep_old = old_indices
             else:
                 keep_old = old_indices[-num_old_to_keep:]

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+import threading
+import weakref
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 import torch
@@ -10,6 +12,8 @@ import torch.nn.functional as F
 
 from ..kv.codec import AdaptiveKVCodec, ComputeSkipConfig, compute_skip_attention
 from .turboquant import resolve_turbo_kv_formats, sparse_v_attention, turbo_quantize
+
+_PATCH_LOCK = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -22,7 +26,7 @@ class KVRuntimePatchConfig:
     enable_compute_skip: bool = False
     compute_skip: ComputeSkipConfig = ComputeSkipConfig()
     enable_adaptive_bits: bool = False
-    adaptive_bits: AdaptiveKVCodec = AdaptiveKVCodec()
+    adaptive_bits: AdaptiveKVCodec = field(default_factory=AdaptiveKVCodec)
     enable_turbo_quant: bool = False
     turbo_bits: Optional[float] = None
     turbo_k_bits: Optional[float] = None
@@ -38,7 +42,8 @@ class KVRuntimePatchConfig:
     turbo_residual_strength: float = 0.5
 
     # Preprocess cache (reuse K/V after turbo/adaptive transforms).
-    # Note: keys include the tensor id by default, so hit rate depends on upstream object reuse.
+    # Reuse requires identical live tensors with unchanged version/layout.
+    # Inference tensors without version counters and autograd/autocast work bypass reuse.
     # To avoid unbounded growth in long runs, enforce a capacity limit; <=0 disables the cache.
     preprocess_cache_max_entries: int = 128
 
@@ -82,12 +87,43 @@ class KVRuntimePatchConfig:
         object.__setattr__(self, "turbo_v_format", turbo_v_format)
 
 
+@dataclass
+class _PreprocessEntry:
+    inputs: tuple[weakref.ReferenceType, ...]
+    signature: tuple[Any, ...]
+    key: torch.Tensor
+    value: torch.Tensor
+
+
+def _input_signature(tensors: tuple[torch.Tensor, ...]) -> Optional[tuple[Any, ...]]:
+    """Return tracked input state, or disable reuse where state cannot be verified."""
+    if torch.is_grad_enabled() and any(t.requires_grad for t in tensors):
+        return None
+    try:
+        autocast = torch.is_autocast_enabled("cpu") or torch.is_autocast_enabled("cuda")
+    except TypeError:  # PyTorch versions before the device-type argument.
+        autocast = torch.is_autocast_enabled() or torch.is_autocast_cpu_enabled()
+    if autocast:
+        return None
+    try:
+        return tuple((t._version, tuple(t.shape), t.stride(), t.storage_offset(),
+                      t.data_ptr(), t.dtype, t.device) for t in tensors)
+    except RuntimeError:
+        # torch.inference_mode() tensors have no version counter. Identity alone
+        # cannot establish whether they have changed since the previous call.
+        return None
+
+
 class KVRuntimePatcher:
     """Patcher that modifies KV cache behavior at runtime."""
     def __init__(self, cfg: KVRuntimePatchConfig) -> None:
         self.cfg = cfg
         self._original: Optional[Callable[..., Any]] = None
-        self._preprocess_cache: OrderedDict[tuple[Any, ...], tuple[torch.Tensor, torch.Tensor]] = OrderedDict()
+        self._installed: Optional[Callable[..., Any]] = None
+        self._deactivate: Optional[Callable[[], None]] = None
+        self._cache_lock = threading.RLock()
+        self._context_depth = 0
+        self._preprocess_cache: OrderedDict[tuple[Any, ...], _PreprocessEntry] = OrderedDict()
         self._calls_total: int = 0
         self._calls_bypassed: int = 0
         self._calls_patched: int = 0
@@ -96,24 +132,44 @@ class KVRuntimePatcher:
         self._cache_evictions: int = 0
 
     def apply(self) -> Any:
-        if getattr(F.scaled_dot_product_attention, "_vitriol_kv_patched", False):
+        with _PATCH_LOCK:
+            self._apply()
+
+    def _apply(self) -> None:
+        if self._installed is not None:
             return
-        self._original = F.scaled_dot_product_attention
+        if getattr(F.scaled_dot_product_attention, "_vitriol_kv_patched", False) and getattr(
+            F.scaled_dot_product_attention, "_vitriol_kv_is_active", lambda: True,
+        )():
+            raise RuntimeError("Another KV runtime patch is already active")
+        original = F.scaled_dot_product_attention
+        self._original = original
+        active = True
 
-        def patched(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
+        def patched(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
+            attn_mask: Optional[torch.Tensor] = None, dropout_p: float = 0.0,
+            is_causal: bool = False, *, scale: Optional[float] = None,
+            enable_gqa: bool = False,
+        ) -> Any:
+            kwargs = {"attn_mask": attn_mask, "dropout_p": dropout_p, "is_causal": is_causal}
+            if scale is not None:
+                kwargs["scale"] = scale
+            if enable_gqa:
+                kwargs["enable_gqa"] = True
+            if not active:
+                return original(query, key, value, **kwargs)
+
             self._calls_total += 1
-            attn_mask = kwargs.get("attn_mask", None)
-            dropout_p = float(kwargs.get("dropout_p", 0.0))
-            is_causal = bool(kwargs.get("is_causal", False))
-
             if self.cfg.decode_only and int(query.size(-2)) != int(self.cfg.decode_query_len):
                 self._calls_bypassed += 1
-                return self._original(query, key, value, *args, **kwargs)
+                return original(query, key, value, **kwargs)
 
             self._calls_patched += 1
             q = query
             k = key
             v = value
+            inputs = (q, k, v)
 
             cache_key = (
                 id(q),
@@ -136,14 +192,21 @@ class KVRuntimePatcher:
                 float(self.cfg.adaptive_bits.k_share),
                 float(self.cfg.adaptive_bits.rotate_kurtosis_threshold),
             )
-            cached = self._preprocess_cache.get(cache_key)
             max_entries = int(getattr(self.cfg, "preprocess_cache_max_entries", 0) or 0)
             cache_enabled = max_entries > 0 and (self.cfg.enable_turbo_quant or self.cfg.enable_adaptive_bits)
-
-            if cache_enabled and cached is not None:
-                self._cache_hits += 1
-                self._preprocess_cache.move_to_end(cache_key)
-                k, v = cached
+            signature = _input_signature(inputs) if cache_enabled else None
+            cache_enabled = cache_enabled and signature is not None
+            with self._cache_lock:
+                cached = self._preprocess_cache.get(cache_key) if cache_enabled and active else None
+                if cached is not None and cached.signature == signature and all(
+                    ref() is tensor for ref, tensor in zip(cached.inputs, inputs)
+                ):
+                    self._cache_hits += 1
+                    self._preprocess_cache.move_to_end(cache_key)
+                else:
+                    cached = None
+            if cached is not None:
+                k, v = cached.key, cached.value
             else:
                 if cache_enabled:
                     self._cache_misses += 1
@@ -170,11 +233,29 @@ class KVRuntimePatcher:
                     k, v, _ = self.cfg.adaptive_bits.quantize_kv(query=q, key=k, value=v)
 
                 if cache_enabled:
-                    self._preprocess_cache[cache_key] = (k, v)
-                    self._preprocess_cache.move_to_end(cache_key)
-                    while len(self._preprocess_cache) > max_entries:
-                        self._preprocess_cache.popitem(last=False)
-                        self._cache_evictions += 1
+                    with self._cache_lock:
+                        if active:
+                            self._preprocess_cache[cache_key] = _PreprocessEntry(
+                                tuple(weakref.ref(t) for t in inputs), signature, k, v,
+                            )
+                            self._preprocess_cache.move_to_end(cache_key)
+                            while len(self._preprocess_cache) > max_entries:
+                                self._preprocess_cache.popitem(last=False)
+                                self._cache_evictions += 1
+
+            if self.cfg.enable_compute_skip or self.cfg.enable_sparse_v:
+                if enable_gqa and k.size(-3) != v.size(-3):
+                    raise ValueError("GQA requires matching key and value head counts")
+                q_heads = q.size(-3)
+                expanded = []
+                for tensor in (k, v):
+                    heads = tensor.size(-3)
+                    if heads != q_heads:
+                        if heads <= 0 or q_heads % heads or (not enable_gqa and heads != 1):
+                            raise ValueError("Query heads must match KV heads or enable valid GQA")
+                        tensor = tensor.repeat_interleave(q_heads // heads, dim=-3)
+                    expanded.append(tensor)
+                k, v = expanded
 
             if self.cfg.enable_compute_skip:
                 res = compute_skip_attention(
@@ -185,6 +266,7 @@ class KVRuntimePatcher:
                     attn_mask=attn_mask,
                     dropout_p=dropout_p,
                     is_causal=is_causal,
+                    scaling=scale,
                 )
                 return res.output
 
@@ -197,19 +279,48 @@ class KVRuntimePatcher:
                     dropout_p=dropout_p,
                     is_causal=is_causal,
                     threshold=float(self.cfg.sparse_v_threshold),
+                    scaling=scale,
                 )
 
-            return self._original(q, k, v, *args, **kwargs)
+            return original(q, k, v, **kwargs)
+
+        def deactivate() -> None:
+            nonlocal active
+            active = False
 
         patched._vitriol_kv_patched = True
-        patched._vitriol_kv_original = self._original
+        patched._vitriol_kv_original = original
+        patched._vitriol_kv_is_active = lambda: active
+        self._installed = patched
+        self._deactivate = deactivate
         F.scaled_dot_product_attention = patched
 
     def restore(self) -> None:
-        current = F.scaled_dot_product_attention
-        original = getattr(current, "_vitriol_kv_original", None)
-        if getattr(current, "_vitriol_kv_patched", False) and original is not None:
-            F.scaled_dot_product_attention = original
+        with _PATCH_LOCK, self._cache_lock:
+            self._restore()
+
+    def _restore(self) -> None:
+        if self._deactivate is not None:
+            self._deactivate()
+        if self._installed is not None and F.scaled_dot_product_attention is self._installed:
+            F.scaled_dot_product_attention = self._original
+        self._preprocess_cache.clear()
+        self._installed = None
+        self._original = None
+        self._deactivate = None
+        self._context_depth = 0
+
+    def __enter__(self) -> KVRuntimePatcher:
+        with _PATCH_LOCK:
+            self.apply()
+            self._context_depth += 1
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        with _PATCH_LOCK:
+            self._context_depth = max(0, self._context_depth - 1)
+            if self._context_depth == 0:
+                self.restore()
 
     def stats(self) -> dict:
         hits = int(self._cache_hits)

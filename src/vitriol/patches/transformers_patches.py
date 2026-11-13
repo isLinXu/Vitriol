@@ -67,11 +67,12 @@ def patch_fx_available() -> None:
 
 def patch_pretrained_init() -> Any:
     """
-    Force eager attention when flash_attn is absent.
+    Fall back from FlashAttention 2 when flash_attn is absent.
 
     Some models default to FlashAttention 2, which requires the flash_attn library.
     This patch automatically detects if flash_attn is available and falls back
-    to eager attention if not.
+    to eager attention if not. Preserve SDPA, eager, and automatic backend
+    selection: SDPA does not require flash_attn and is used by KV runtime patches.
     """
     if getattr(transformers.modeling_utils.PreTrainedModel.__init__, "_vitriol_patched", False):
         return
@@ -87,10 +88,10 @@ def patch_pretrained_init() -> Any:
             _fa2_available = importlib.util.find_spec("flash_attn") is not None
             _patched._checked = True  # type: ignore[attr-defined]
 
-        # Force eager attention if flash_attn not available
+        # Only an unavailable FlashAttention request needs eager fallback.
         if not _fa2_available:
             for attr in ("_attn_implementation", "attn_implementation"):
-                if hasattr(config, attr):
+                if getattr(config, attr, None) == "flash_attention_2":
                     try:
                         object.__setattr__(config, attr, "eager")
                     except Exception as e:

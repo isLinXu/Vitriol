@@ -107,14 +107,28 @@ def _fwht_last_dim(x: torch.Tensor) -> torch.Tensor:
 
 
 def walsh_hadamard_rotate(x: torch.Tensor) -> torch.Tensor:
-    orig = x.shape[-1]
-    padded = 2 ** math.ceil(math.log2(orig))
-    if padded != orig:
-        x = F.pad(x, (0, padded - orig))
-    y = _fwht_last_dim(x)
-    if padded != orig:
-        y = y[..., :orig]
-    return y
+    """Apply a shape-preserving, orthonormal, self-inverse rotation.
+
+    Power-of-two dimensions retain the standard normalized Walsh-Hadamard
+    transform. Other dimensions use consecutive power-of-two blocks, largest
+    first (e.g. 80 = 64 + 16). Their block-diagonal transform remains orthogonal;
+    padding followed by truncation would discard information. Accumulation in
+    float32 avoids intermediate overflow for half/bfloat16 inputs.
+    """
+    if x.ndim == 0 or x.shape[-1] == 0:
+        raise ValueError("Hadamard rotation requires a non-empty last dimension")
+    orig_dtype = x.dtype
+    work = x.float() if orig_dtype in (torch.float16, torch.bfloat16) else x
+    remaining = work.shape[-1]
+    parts = []
+    offset = 0
+    while remaining:
+        size = 1 << (remaining.bit_length() - 1)
+        parts.append(_fwht_last_dim(work[..., offset:offset + size]))
+        offset += size
+        remaining -= size
+    result = parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)
+    return result.to(orig_dtype) if x.is_floating_point() else result
 
 
 def blockwise_minmax_quantize_dequantize(
@@ -199,7 +213,7 @@ def _vectorized_blockwise_qdq(
 
     # Vectorized quantize + dequantize
     q = torch.round((flat_all - mins) / (scales + 1e-5))
-    q = torch.clamp(q, 0, (expanded_levels_f - 1).clamp(min=2))
+    q = torch.minimum(q.clamp_min(0), expanded_levels_f - 1)
     dq = q * scales + mins
 
     # Restore shape
@@ -407,13 +421,15 @@ def pack_blockwise_tensor_with_qjl_residual(
 def unpack_qjl_residual_tensor(packed: ResidualQJLPackedTensor) -> torch.Tensor:
     base = unpack_blockwise_tensor(packed.base)
     residual_proj = packed.residual_signs.to(torch.float32) * packed.residual_scale
-    approx_residual = residual_proj @ packed.projection.transpose(0, 1)
+    approx_residual = residual_proj @ packed.projection.float().transpose(0, 1)
     return base + approx_residual.to(base.dtype)
 
 
 def approx_inner_product_with_packed_tensor(
     query: torch.Tensor,
     packed: PackedKVTensor,
+    *,
+    all_pairs: bool = False,
 ) -> torch.Tensor:
     prefix = tuple(int(v) for v in packed.orig_shape[:-2])
     seq_len = int(packed.orig_shape[-2])
@@ -431,7 +447,7 @@ def approx_inner_product_with_packed_tensor(
         *prefix, seq_len, num_blocks, 1
     )
 
-    if query.shape == packed.orig_shape:
+    if not all_pairs and query.shape == packed.orig_shape:
         return (q_query * restored_blocks).sum(dim=(-2, -1))
     return torch.einsum("...lnd,...snd->...ls", q_query, restored_blocks)
 
@@ -439,16 +455,20 @@ def approx_inner_product_with_packed_tensor(
 def approx_inner_product_with_qjl_residual(
     query: torch.Tensor,
     packed: ResidualQJLPackedTensor,
+    *,
+    all_pairs: bool = False,
 ) -> torch.Tensor:
-    query_proj = query @ packed.projection
+    # Projection storage may be fp16 on CUDA, while queries are often bf16.
+    # Accumulate both the base and sketch corrections in float32.
+    query_proj = query.float() @ packed.projection.float()
     residual_proj = packed.residual_signs.to(torch.float32) * packed.residual_scale
-    base_ip = approx_inner_product_with_packed_tensor(query, packed.base)
+    base_ip = approx_inner_product_with_packed_tensor(query, packed.base, all_pairs=all_pairs)
     sketch_dim = float(packed.sketch_dim)
     if sketch_dim < 32.0:
         correction_gain = math.sqrt(sketch_dim / 32.0)
     else:
         correction_gain = 1.0 + (1.0 - (32.0 / sketch_dim)) * (math.sqrt(math.pi / 2.0) - 1.0)
-    if query.shape == packed.base.orig_shape:
+    if not all_pairs and query.shape == packed.base.orig_shape:
         correction = (query_proj * residual_proj).sum(dim=-1) * correction_gain
         return base_ip + correction
     correction = (query_proj @ residual_proj.transpose(-2, -1)) * correction_gain
@@ -471,16 +491,29 @@ def adaptive_kv_bits(
 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
     d = query.shape[-1]
     s = key.shape[-2]
+    if s == 0:
+        raise ValueError("Adaptive KV bit allocation requires at least one key token")
 
     scale = 1.0 / math.sqrt(d)
-    logits = (query @ key.transpose(-2, -1)) * scale
+    # Allocate one precision per KV head, averaging importance across the
+    # corresponding query heads for GQA/MQA. Keep the original Q/K basis and
+    # float32 arithmetic so half-precision softmax zeros do not produce NaNs.
+    num_kv_heads = key.shape[1]
+    num_q_heads = query.shape[1]
+    if num_kv_heads == 0 or num_q_heads == 0 or num_q_heads % num_kv_heads:
+        raise ValueError("Query head count must be a positive multiple of KV head count")
+    groups = num_q_heads // num_kv_heads
+    grouped_query = query.float().reshape(query.shape[0], num_kv_heads, groups, *query.shape[2:])
+    logits = (grouped_query @ key.float().unsqueeze(2).transpose(-2, -1)) * scale
     w = torch.softmax(logits, dim=-1)
     ent = _entropy(w, dim=-1)
     ent = ent.mean(dim=-1)
-    ent = ent / math.log(s)
+    # A singleton distribution has zero entropy; log(1) cannot normalize it.
+    ent = ent / math.log(s) if s > 1 else torch.zeros_like(ent)
     importance = torch.clamp(1.0 - ent, 0.0, 1.0)
+    importance = importance.mean(dim=2)
 
-    v_rms = torch.sqrt((value * value).mean(dim=(-2, -1)))
+    v_rms = torch.sqrt(value.float().square().mean(dim=(-2, -1)))
     v_rms = v_rms / (v_rms.mean(dim=-1, keepdim=True) + 1e-12)
     v_importance = torch.clamp(v_rms / (v_rms.max(dim=-1, keepdim=True)[0] + 1e-12), 0.0, 1.0)
 
@@ -529,7 +562,7 @@ class AdaptiveKVCodec:
         self.rotate_kurtosis_threshold = float(rotate_kurtosis_threshold)
 
     def _maybe_rotate(self, x: torch.Tensor) -> Tuple[torch.Tensor, bool]:
-        z = (x - x.mean()) / (x.std() + 1e-12)
+        z = (x - x.mean()) / (x.std(correction=0) + 1e-12)
         kurt = torch.mean(z.pow(4))
         if float(kurt) >= self.rotate_kurtosis_threshold:
             return walsh_hadamard_rotate(x), True
@@ -541,20 +574,19 @@ class AdaptiveKVCodec:
         key: torch.Tensor,
         value: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
-        key2, rotated_k = self._maybe_rotate(key)
-        value2, rotated_v = self._maybe_rotate(value)
-
         k_bits, v_bits, report = adaptive_kv_bits(
             query=query,
-            key=key2,
-            value=value2,
+            key=key,
+            value=value,
             min_bits=self.min_bits,
             max_bits=self.max_bits,
             target_avg_bits=self.target_avg_bits,
             k_share=self.k_share,
         )
 
-        b, h = key2.shape[:2]
+        key2, rotated_k = self._maybe_rotate(key.float())
+        value2, rotated_v = self._maybe_rotate(value.float())
+        b, h = key.shape[:2]
         k_levels = _levels_from_bits(k_bits).view(b, h, 1, 1)
         v_levels = _levels_from_bits(v_bits).view(b, h, 1, 1)
 
@@ -586,9 +618,26 @@ class AdaptiveKVCodec:
                 "avg_bytes_per_value": float(self.target_avg_bits / 8.0),
                 "k_levels": [int(x) for x in k_levels[0, :, 0, 0].tolist()],
                 "v_levels": [int(x) for x in v_levels[0, :, 0, 0].tolist()],
+                "k_levels_by_batch": k_levels[..., 0, 0].tolist(),
+                "v_levels_by_batch": v_levels[..., 0, 0].tolist(),
             }
         )
-        return k_out, v_out, report
+        return k_out.to(key.dtype), v_out.to(value.dtype), report
+
+    def quantize_with_levels(
+        self, tensor: torch.Tensor, levels: torch.Tensor, *, rotated: bool,
+    ) -> torch.Tensor:
+        """Quantize new tokens with the prefill allocation, in the original basis."""
+        b, h = tensor.shape[:2]
+        work = tensor.float()
+        if rotated:
+            work = walsh_hadamard_rotate(work)
+        work = _vectorized_blockwise_qdq(
+            work.reshape(b * h, *work.shape[2:]), levels.reshape(b * h), self.block_size,
+        ).reshape(tensor.shape)
+        if rotated:
+            work = walsh_hadamard_rotate(work)
+        return work.to(tensor.dtype)
 
 
 @dataclass(frozen=True)
@@ -628,7 +677,8 @@ def compute_skip_attention(
         s = s + pad
 
     scale = float(scaling) if scaling is not None else (1.0 / math.sqrt(d))
-    logits = (query @ key.transpose(-2, -1)) * scale
+    work_dtype = torch.float64 if query.dtype == torch.float64 else torch.float32
+    logits = (query.to(work_dtype) @ key.to(work_dtype).transpose(-2, -1)) * scale
 
     attn_bias = None
     if is_causal:
@@ -651,16 +701,19 @@ def compute_skip_attention(
     if attn_bias is not None:
         logits = logits + attn_bias
 
-    w = torch.softmax(logits, dim=-1)
-    if dropout_p > 0.0:
-        w = torch.dropout(w, float(dropout_p), train=True)
+    if pad:
+        logits[..., -pad:] = float("-inf")
+    # Mask before softmax as well so fully masked rows also have finite gradients.
+    fully_masked = torch.isneginf(logits).all(dim=-1, keepdim=True)
+    w = torch.softmax(logits.masked_fill(fully_masked, 0.0), dim=-1)
+    w = w.masked_fill(fully_masked, 0.0)
 
     n_blocks = s // bs
     w_blk = w.view(b, h, seq_len, n_blocks, bs)
-    v_blk = value.view(b, h, n_blocks, bs, d)
+    v_blk = value.to(work_dtype).reshape(b, h, n_blocks, bs, value.shape[-1])
 
     attn_mass = w_blk.sum(dim=-1)
-    v_norm = torch.sqrt((v_blk * v_blk).sum(dim=(-2, -1)) + 1e-12)
+    v_norm = torch.sqrt(v_blk.square().sum(dim=(-2, -1)) + 1e-12)
     bound = attn_mass * v_norm.unsqueeze(-2)
     total = bound.sum(dim=-1, keepdim=True) + 1e-12
     keep = bound >= (float(cfg.epsilon) * total)
@@ -669,6 +722,8 @@ def compute_skip_attention(
     mass = w_masked.sum(dim=-1).sum(dim=-1, keepdim=True)
     cond = (mass > 0).unsqueeze(-1)
     w_masked = torch.where(cond, w_masked / (mass.unsqueeze(-1) + 1e-12), w_masked)
+    if dropout_p > 0.0:
+        w_masked = torch.dropout(w_masked, float(dropout_p), train=True)
     out = torch.einsum("bhlne,bhned->bhld", w_masked, v_blk)
     kept = keep.to(dtype=torch.float32).mean()
-    return ComputeSkipResult(output=out, kept_fraction=float(kept.item()))
+    return ComputeSkipResult(output=out.to(query.dtype), kept_fraction=float(kept.item()))

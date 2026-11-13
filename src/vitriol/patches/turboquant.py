@@ -42,6 +42,8 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.nn.functional as F
 
+from ..kv.codec import walsh_hadamard_rotate
+
 # Try to import Triton-accelerated kernels; fall back gracefully
 _TRITON_AVAILABLE = False
 try:
@@ -101,18 +103,8 @@ def fwht(a: torch.Tensor) -> torch.Tensor:
 
 
 def apply_walsh_hadamard_rotation(tensor: torch.Tensor) -> torch.Tensor:
-    orig_dim = tensor.shape[-1]
-    padded_dim = 2 ** math.ceil(math.log2(orig_dim))
-
-    if padded_dim != orig_dim:
-        tensor = F.pad(tensor, (0, padded_dim - orig_dim))
-
-    transformed = fwht(tensor)
-
-    if padded_dim != orig_dim:
-        transformed = transformed[..., :orig_dim]
-
-    return transformed
+    """Use the shared, invertible rotation without dropping padded coordinates."""
+    return walsh_hadamard_rotate(tensor)
 
 
 def _normalize_turbo_spec(format_type: TurboFormatSpec) -> tuple[float, int]:
@@ -502,30 +494,30 @@ def turbo_quantize(
 def sparse_v_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, threshold=0.01, scaling=None) -> Any:
     L, S = query.size(-2), key.size(-2)
     scale_factor = float(scaling) if scaling is not None else (1 / math.sqrt(query.size(-1)))
-    attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+    work_dtype = torch.float64 if query.dtype == torch.float64 else torch.float32
+    logits = query.to(work_dtype) @ key.to(work_dtype).transpose(-2, -1) * scale_factor
     if is_causal:
-        assert attn_mask is None
         temp_mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril(diagonal=0)
-        attn_bias.masked_fill_(~temp_mask, float("-inf"))
+        logits = logits.masked_fill(~temp_mask, float("-inf"))
 
     if attn_mask is not None:
         if attn_mask.dtype == torch.bool:
-            attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+            logits = logits.masked_fill(~attn_mask, float("-inf"))
         else:
-            attn_bias += attn_mask
+            logits = logits + attn_mask
 
-    attn_weight = query @ key.transpose(-2, -1) * scale_factor
-    attn_weight += attn_bias
-    attn_weight = torch.softmax(attn_weight, dim=-1)
-
-    if dropout_p > 0.0:
-        attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+    # Avoid both NaN outputs and NaN softmax gradients for fully masked rows.
+    fully_masked = torch.isneginf(logits).all(dim=-1, keepdim=True)
+    attn_weight = torch.softmax(logits.masked_fill(fully_masked, 0.0), dim=-1)
+    attn_weight = attn_weight.masked_fill(fully_masked, 0.0)
 
     sparse_attn_weight = torch.where(attn_weight > threshold, attn_weight, torch.zeros_like(attn_weight))
     row_sums = sparse_attn_weight.sum(dim=-1, keepdim=True)
-    sparse_attn_weight = torch.where(row_sums > 0, sparse_attn_weight / row_sums, sparse_attn_weight)
+    sparse_attn_weight = sparse_attn_weight / row_sums.clamp_min(1e-12)
+    if dropout_p > 0.0:
+        sparse_attn_weight = torch.dropout(sparse_attn_weight, dropout_p, train=True)
 
-    return sparse_attn_weight @ value
+    return (sparse_attn_weight @ value.to(work_dtype)).to(query.dtype)
 
 
 class TurboQuantPatch:

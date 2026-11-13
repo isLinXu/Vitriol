@@ -29,14 +29,12 @@ from .codec import (
     ComputeSkipConfig,
     PackedKVTensor,
     ResidualQJLPackedTensor,
-    _vectorized_blockwise_qdq,
     approx_inner_product_with_qjl_residual,
     compute_skip_attention,
     pack_blockwise_tensor,
     pack_blockwise_tensor_with_qjl_residual,
     unpack_blockwise_tensor,
     unpack_qjl_residual_tensor,
-    walsh_hadamard_rotate,
 )
 
 
@@ -402,6 +400,10 @@ class KVCacheStore:
         if self._decode_cache is not None:
             self._decode_cache.invalidate()
 
+        if self.cfg.enable_adaptive_bits and self._k_levels is not None and self._v_levels is not None:
+            self._append_adaptive(key_new, value_new)
+            return
+
         # If we keep raw cache and it exists, use the optimized raw-path implementation.
         if bool(self.cfg.keep_raw_cache) and self._k_raw is not None and self._v_raw is not None:
             # Always maintain raw cache for potential rebuilds
@@ -456,24 +458,6 @@ class KVCacheStore:
             if self.cfg.enable_turbo_quant:
                 k_add = self._encode_tensor(k_add, is_key=True)
                 v_add = self._encode_tensor(v_add, is_key=False)
-
-            if self.cfg.enable_adaptive_bits and self._k_levels is not None and self._v_levels is not None:
-                if self._rotated_k:
-                    k_add = walsh_hadamard_rotate(k_add)
-                if self._rotated_v:
-                    v_add = walsh_hadamard_rotate(v_add)
-
-                b, h, s, d = k_add.shape
-                k_levels_flat = self._k_levels.unsqueeze(0).expand(b, -1).reshape(b * h)
-                v_levels_flat = self._v_levels.unsqueeze(0).expand(b, -1).reshape(b * h)
-                k_out = _vectorized_blockwise_qdq(
-                    k_add.reshape(b * h, s, d), k_levels_flat, self.cfg.adaptive_bits.block_size
-                )
-                v_out = _vectorized_blockwise_qdq(
-                    v_add.reshape(b * h, s, d), v_levels_flat, self.cfg.adaptive_bits.block_size
-                )
-                k_add = k_out.reshape(b, h, s, d)
-                v_add = v_out.reshape(b, h, s, d)
 
             self._k_enc = torch.cat([self._k_enc, k_add], dim=-2)
             self._v_enc = torch.cat([self._v_enc, v_add], dim=-2)
@@ -541,6 +525,32 @@ class KVCacheStore:
             self._v_enc = torch.cat([self._v_enc, v_add], dim=-2)
         else:
             self._v_enc = self._concat_packed(self._v_enc, v_add)
+
+    def _append_adaptive(self, key_new: torch.Tensor, value_new: torch.Tensor) -> None:
+        """Keep prefill precision and coordinates when appending adaptive tokens."""
+        new_len = self.seq_len + int(key_new.size(-2))
+        evict = self._evictor is not None and self._evictor.should_evict(new_len, "full_attention")
+        crossed_threshold = not self._should_quantize() and self._should_quantize(new_len)
+        if evict or crossed_threshold:
+            # Rebuild from original tensors when retained, otherwise from the
+            # decoded approximation. set_prefill resets stale allocations and
+            # applies eviction; the next query determines the new precision.
+            key = self._k_raw if self._k_raw is not None else self._decode_tensor(self._k_enc)
+            value = self._v_raw if self._v_raw is not None else self._decode_tensor(self._v_enc)
+            self.set_prefill(torch.cat([key, key_new], dim=-2), torch.cat([value, value_new], dim=-2))
+            return
+
+        key, value = key_new, value_new
+        if self._should_quantize(new_len):
+            key = self._decode_tensor(self._encode_tensor(key, is_key=True))
+            value = self._decode_tensor(self._encode_tensor(value, is_key=False))
+        key = self.cfg.adaptive_bits.quantize_with_levels(key, self._k_levels, rotated=self._rotated_k)
+        value = self.cfg.adaptive_bits.quantize_with_levels(value, self._v_levels, rotated=self._rotated_v)
+        self._k_enc = torch.cat([self._k_enc, key], dim=-2)
+        self._v_enc = torch.cat([self._v_enc, value], dim=-2)
+        if self._k_raw is not None and self._v_raw is not None:
+            self._k_raw = torch.cat([self._k_raw, key_new], dim=-2)
+            self._v_raw = torch.cat([self._v_raw, value_new], dim=-2)
 
     def _concat_packed(self, existing: Any, new_packed: Any) -> Any:
         """
@@ -696,15 +706,18 @@ class KVCacheStore:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Expand K/V heads to match query head count for GQA/MQA/MLA attention."""
         num_q_heads = query.size(1)
-        num_kv_heads = v.size(1)
+        num_kv_heads = k.size(1)
+        if num_kv_heads == 0 or num_q_heads == 0 or num_q_heads % num_kv_heads:
+            raise ValueError("Query head count must be a positive multiple of KV head count")
         if num_q_heads == num_kv_heads:
             return k, v
         num_key_value_groups = num_q_heads // num_kv_heads
         if num_key_value_groups == 1:
             return k, v
-        b, kvh, s, d = v.shape
-        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, d).reshape(b, kvh * num_key_value_groups, s, d)
-        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, d).reshape(b, kvh * num_key_value_groups, s, d)
+        b, kvh, s, key_dim = k.shape
+        value_dim = v.shape[-1]
+        k = k[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, key_dim).reshape(b, kvh * num_key_value_groups, s, key_dim)
+        v = v[:, :, None, :, :].expand(b, kvh, num_key_value_groups, s, value_dim).reshape(b, kvh * num_key_value_groups, s, value_dim)
         return k, v
 
     def _decode_kv_if_packed(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -749,8 +762,8 @@ class KVCacheStore:
         self._v_enc = v_out
         self._rotated_k = bool(rep.get("rotated_k", False))
         self._rotated_v = bool(rep.get("rotated_v", False))
-        self._k_levels = torch.tensor(rep.get("k_levels"), device=query.device, dtype=torch.int64)
-        self._v_levels = torch.tensor(rep.get("v_levels"), device=query.device, dtype=torch.int64)
+        self._k_levels = torch.tensor(rep["k_levels_by_batch"], device=query.device, dtype=torch.int64)
+        self._v_levels = torch.tensor(rep["v_levels_by_batch"], device=query.device, dtype=torch.int64)
 
     def _attention_with_residual_qjl_proxy(
         self,
@@ -765,7 +778,7 @@ class KVCacheStore:
     ) -> torch.Tensor:
         d = query.size(-1)
         scale_factor = float(scale) if scale is not None else (1.0 / math.sqrt(d))
-        logits = approx_inner_product_with_qjl_residual(query, packed_key) * scale_factor
+        logits = approx_inner_product_with_qjl_residual(query, packed_key, all_pairs=True) * scale_factor
 
         if is_causal:
             causal = torch.ones(
@@ -780,9 +793,10 @@ class KVCacheStore:
                 logits = logits + attn_mask
 
         weights = torch.softmax(logits, dim=-1)
+        weights = weights.masked_fill(torch.isneginf(logits).all(dim=-1, keepdim=True), 0.0)
         if dropout_p > 0.0:
             weights = torch.dropout(weights, float(dropout_p), train=True)
-        return weights @ value
+        return (weights @ value.float()).to(query.dtype)
 
     def _attention_with_sparse_v_residual_proxy(
         self,
@@ -798,7 +812,7 @@ class KVCacheStore:
     ) -> torch.Tensor:
         d = query.size(-1)
         scale_factor = float(scale) if scale is not None else (1.0 / math.sqrt(d))
-        logits = approx_inner_product_with_qjl_residual(query, packed_key) * scale_factor
+        logits = approx_inner_product_with_qjl_residual(query, packed_key, all_pairs=True) * scale_factor
 
         if is_causal:
             causal = torch.ones(
@@ -813,13 +827,14 @@ class KVCacheStore:
                 logits = logits + attn_mask
 
         weights = torch.softmax(logits, dim=-1)
+        weights = weights.masked_fill(torch.isneginf(logits).all(dim=-1, keepdim=True), 0.0)
         if dropout_p > 0.0:
             weights = torch.dropout(weights, float(dropout_p), train=True)
 
         sparse = torch.where(weights > float(threshold), weights, torch.zeros_like(weights))
         row_sums = sparse.sum(dim=-1, keepdim=True)
         sparse = torch.where(row_sums > 0, sparse / row_sums, sparse)
-        return sparse @ value
+        return (sparse @ value.float()).to(query.dtype)
 
     def _attention_with_compute_skip_residual_proxy(
         self,
@@ -843,9 +858,9 @@ class KVCacheStore:
             s = s + pad
 
         scale_factor = float(scale) if scale is not None else (1.0 / math.sqrt(d))
-        logits = approx_inner_product_with_qjl_residual(query, packed_key) * scale_factor
+        logits = approx_inner_product_with_qjl_residual(query, packed_key, all_pairs=True) * scale_factor
         if pad:
-            logits = F.pad(logits, (0, pad))
+            logits = F.pad(logits, (0, pad), value=float("-inf"))
 
         attn_bias = None
         if is_causal:
@@ -870,12 +885,11 @@ class KVCacheStore:
             logits = logits + attn_bias
 
         w = torch.softmax(logits, dim=-1)
-        if dropout_p > 0.0:
-            w = torch.dropout(w, float(dropout_p), train=True)
+        w = w.masked_fill(torch.isneginf(logits).all(dim=-1, keepdim=True), 0.0)
 
         n_blocks = s // bs
         w_blk = w.view(b, h, seq_len, n_blocks, bs)
-        v_blk = value_work.view(b, h, n_blocks, bs, d)
+        v_blk = value_work.float().reshape(b, h, n_blocks, bs, value.shape[-1])
 
         attn_mass = w_blk.sum(dim=-1)
         v_norm = torch.sqrt((v_blk * v_blk).sum(dim=(-2, -1)) + 1e-12)
@@ -887,7 +901,9 @@ class KVCacheStore:
         mass = w_masked.sum(dim=-1).sum(dim=-1, keepdim=True)
         cond = (mass > 0).unsqueeze(-1)
         w_masked = torch.where(cond, w_masked / (mass.unsqueeze(-1) + 1e-12), w_masked)
-        return torch.einsum("bhlne,bhned->bhld", w_masked, v_blk)
+        if dropout_p > 0.0:
+            w_masked = torch.dropout(w_masked, float(dropout_p), train=True)
+        return torch.einsum("bhlne,bhned->bhld", w_masked, v_blk).to(query.dtype)
 
     def attention(
         self,
@@ -992,12 +1008,18 @@ class KVCacheStore:
                     k = k[..., -w:, :]
                 v = v[..., -w:, :]
                 if residual_proxy_eligible:
+                    residual_proxy_eligible = False
                     k_proxy = None
                     if k is None:
                         k = self._decode_tensor(self._k_enc)
                         k = k[..., -w:, :]
                 if attn_mask is not None:
                     attn_mask = attn_mask[..., -w:]
+
+        # Packed codecs decode to float32; SDPA requires matching Q/K/V dtypes.
+        if k is not None:
+            k = k.to(query.dtype)
+        v = v.to(query.dtype)
 
         num_q_heads = query.size(1)
         num_kv_heads = k.size(1) if k is not None else v.size(1)

@@ -162,7 +162,8 @@ def temporal_importance_attention(
             logits = logits + attn_mask
 
     # Softmax to get attention weights
-    weights = torch.softmax(logits, dim=-1)
+    weights = torch.softmax(logits.float(), dim=-1)
+    weights = weights.masked_fill(torch.isneginf(logits).all(dim=-1, keepdim=True), 0.0)
     if dropout_p > 0.0:
         weights = torch.dropout(weights, dropout_p, train=True)
 
@@ -215,7 +216,7 @@ def temporal_importance_attention(
     masked_weights = masked_weights / (row_sums + 1e-12)
 
     # Compute output
-    output = masked_weights @ value
+    output = (masked_weights.float() @ value.float()).to(query.dtype)
 
     # ── Diagnostics ──
     sparsity = float((masked_weights < 1e-4).float().mean().item())
@@ -262,7 +263,7 @@ def temporal_importance_attention_with_residual_proxy(
     scale_factor = float(scale) if scale is not None else (1.0 / math.sqrt(d))
 
     # Approximate logits via QJL proxy
-    logits = approx_inner_product_with_qjl_residual(query, packed_key) * scale_factor
+    logits = approx_inner_product_with_qjl_residual(query, packed_key, all_pairs=True) * scale_factor
 
     if is_causal:
         causal = torch.ones(
@@ -276,7 +277,8 @@ def temporal_importance_attention_with_residual_proxy(
         else:
             logits = logits + attn_mask
 
-    weights = torch.softmax(logits, dim=-1)
+    weights = torch.softmax(logits.float(), dim=-1)
+    weights = weights.masked_fill(torch.isneginf(logits).all(dim=-1, keepdim=True), 0.0)
     if dropout_p > 0.0:
         weights = torch.dropout(weights, dropout_p, train=True)
 
@@ -310,7 +312,7 @@ def temporal_importance_attention_with_residual_proxy(
     row_sums = masked_weights.sum(dim=-1, keepdim=True)
     masked_weights = masked_weights / (row_sums + 1e-12)
 
-    output = masked_weights @ value
+    output = (masked_weights @ value.float()).to(query.dtype)
 
     sparsity = float((masked_weights < 1e-4).float().mean().item())
     report = {
