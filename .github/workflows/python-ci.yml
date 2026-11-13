@@ -119,7 +119,7 @@ jobs:
           
       - name: Build distribution
         run: |
-          python -m build --no-isolation
+          python -m build
           
       - name: Check distribution
         run: |
