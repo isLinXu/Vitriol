@@ -94,6 +94,9 @@ class ModelValidator:
         Returns:
             A :class:`ValidationReport` with detailed results.
         """
+        # A validator can be reused after files are repaired. Each attempt must
+        # report only its own outcome, not accumulated errors from earlier runs.
+        self.report = ValidationReport(True, False, False, False)
         logger.info("Validating model in %s...", self.output_dir)
         try:
             # 1. Validate Model Loading
@@ -136,6 +139,7 @@ class ModelValidator:
             "torch_dtype": "auto",
             "device_map": "cpu",
             "low_cpu_mem_usage": True,
+            "output_loading_info": True,
         }
 
         # Detect available memory and adjust for large models
@@ -177,18 +181,11 @@ class ModelValidator:
         if task_type == "generic":
             return hf_load_model(self.output_dir, security=security, **common_kwargs)
 
-        # Try CausalLM first, with ignore_mismatched_sizes as fallback
+        # Validation must load the actual stored shapes. Ignoring mismatches
+        # silently initializes replacement weights and incorrectly certifies a
+        # broken artifact as loadable.
         try:
             return hf_load_causallm(self.output_dir, security=security, **common_kwargs)
-        except RuntimeError as e:
-            if "size mismatch" in str(e).lower() or "mismatch" in str(e).lower():
-                logger.warning(
-                    "Size mismatch detected, retrying with ignore_mismatched_sizes=True: %s",
-                    e,
-                )
-                common_kwargs["ignore_mismatched_sizes"] = True
-                return hf_load_causallm(self.output_dir, security=security, **common_kwargs)
-            raise
         except (MemoryError, OSError) as e:
             # OOM — try with disk offloading
             err_str = str(e).lower()
@@ -206,22 +203,46 @@ class ModelValidator:
                     raise
             raise
 
+    @staticmethod
+    def _check_loaded_weights(result):
+        # Transformers reports missing/unexpected tensors as warnings and may
+        # initialize missing parameters. A load validator must reject those
+        # artifacts instead of certifying the replacement weights.
+        if not (isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict)):
+            return result  # Compatibility with injected/custom loaders.
+        model, info = result
+        problems = {}
+        for diagnostic in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs"):
+            entries = info.get(diagnostic) or []
+            if diagnostic == "unexpected_keys":
+                entries = [key for key in entries if not str(key).startswith("__vitriol_pad__")]
+            if entries:
+                problems[diagnostic] = entries
+        if problems:
+            raise RuntimeError(f"Stored weights do not match the model: {problems}")
+        return model
+
     def _validate_model_loading(self, task_type: str = "causal_lm"):
         try:
             logger.info("Attempting to load model...")
-            model = self._load_model_for_task(task_type)
+            model = self._check_loaded_weights(self._load_model_for_task(task_type))
             self.report.model_loadable = True
             logger.info("Model loaded successfully.")
             return model
         except Exception as e:
-            # Try generic AutoModel if CausalLM fails
+            if isinstance(e, RuntimeError):
+                self.report.success = False
+                self.report.errors.append(f"Model loading failed: {e}")
+                logger.error("Model loading failed: %s", e)
+                return None
+            # Try generic AutoModel for unsupported task/model families.
             try:
                 security = self._security_context()
                 common_kwargs = {
                     "torch_dtype": "auto",
                     "device_map": "cpu",
                     "low_cpu_mem_usage": True,
-                    "ignore_mismatched_sizes": True,
+                    "output_loading_info": True,
                 }
                 # Memory-constrained loading
                 try:
@@ -235,14 +256,15 @@ class ModelValidator:
                 except ImportError:
                     pass
 
-                model = hf_load_model(self.output_dir, security=security, **common_kwargs)
+                model = self._check_loaded_weights(
+                    hf_load_model(self.output_dir, security=security, **common_kwargs))
                 self.report.model_loadable = True
                 self.report.warnings.append("Loaded as AutoModel, not AutoModelForCausalLM")
                 logger.info("Model loaded as generic AutoModel.")
                 return model
-            except Exception:
+            except Exception as fallback_error:
                 self.report.success = False
-                self.report.errors.append(f"Model loading failed: {e}")
+                self.report.errors.append(f"Model loading failed: {e}; generic fallback: {fallback_error}")
                 logger.error(f"Model loading failed: {e}")
                 return None
 

@@ -431,7 +431,7 @@ def test_build_inline_config_model_diffusers_does_not_emit_placeholder_params(tm
 
 
 def test_generator_rope_defaults_do_not_add_unsupported_default_keys() -> None:
-    from vitriol.core import generator as gen_mod
+    from vitriol.core import _generator_utils as gen_mod
     from vitriol.patches import model_family_patches as patch_mod
 
     assert gen_mod._ROPE_DEFAULTS == {
@@ -484,8 +484,7 @@ def test_generator_skips_non_persistent_buffers_during_export(tmp_path: Path) ->
             non_persistent_buffers.add(qualified)
 
     def _iter_export_tensors():
-        for item in model.named_parameters():
-            yield item
+        yield from model.named_parameters()
         for name, buf in model.named_buffers():
             if name in non_persistent_buffers:
                 continue

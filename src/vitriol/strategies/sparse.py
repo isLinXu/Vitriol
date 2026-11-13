@@ -32,6 +32,11 @@ class SparseSpec:
         self.dtype_str = dtype_str
         self.size = size
 
+    @property
+    def nbytes(self) -> int:
+        """Declared payload size, without materializing the tensor."""
+        return self.size
+
 
 class SparseStrategy(WeightGenerationStrategy):
     """Generates sparse weights (safetensors with holes)."""

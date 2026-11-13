@@ -227,7 +227,9 @@ def _maybe_patch_dynamic_modules(model_id: str, *, security: Optional[SecurityOp
             if not isinstance(target, str) or "." not in target:
                 continue
             try:
-                cls = get_class_from_dynamic_module(target, model_id)
+                cls = get_class_from_dynamic_module(
+                    target, model_id, local_files_only=bool(kwargs.get("local_files_only", False))
+                )
                 mod = sys.modules.get(cls.__module__)
                 if mod is not None:
                     patch_remote_module(mod)
@@ -321,12 +323,43 @@ def load_causallm(
     return model
 
 
+def _model_from_config(auto_class, config: Any, extra: Dict[str, Any]) -> Any:
+    local_files_only = extra.pop("local_files_only", False)
+    auto_map = getattr(config, "auto_map", {})
+    class_ref = auto_map.get(auto_class.__name__) if isinstance(auto_map, dict) else None
+    if local_files_only and extra.get("trust_remote_code") and class_ref:
+        # AutoModel.from_config forwards kwargs to both the Hub resolver and
+        # model constructor. Dropping local_files_only permits a network fetch;
+        # retaining it breaks constructors that do not accept that keyword.
+        # Resolve trusted custom code explicitly, then construct it locally.
+        from transformers.dynamic_module_utils import get_class_from_dynamic_module
+
+        if "--" in class_ref:
+            repo_id, class_ref = class_ref.split("--", 1)
+        else:
+            repo_id = config.name_or_path
+        hub_kwargs = {k: extra.pop(k) for k in (
+            "cache_dir", "force_download", "resume_download", "proxies", "token",
+            "revision", "code_revision", "use_auth_token",
+        ) if k in extra}
+        model_class = get_class_from_dynamic_module(
+            class_ref, repo_id, local_files_only=True, **hub_kwargs)
+        try:
+            from transformers.models.auto.auto_factory import add_generation_mixin_to_remote_model
+        except ImportError:
+            pass  # Older Transformers versions inherit GenerationMixin already.
+        else:
+            model_class = add_generation_mixin_to_remote_model(model_class)
+        extra.pop("trust_remote_code", None)
+        return model_class._from_config(config, **extra)
+    return auto_class.from_config(config, **extra)
+
+
 def load_model_from_config(config: Any, *, security: Optional[SecurityOptions | Dict[str, Any]] = None, **kwargs: Any) -> Any:
     from transformers import AutoModel
 
     extra = hf_kwargs(security, extra=kwargs)
-    extra.pop("local_files_only", None)
-    return AutoModel.from_config(config, **extra)
+    return _model_from_config(AutoModel, config, extra)
 
 
 def load_causallm_from_config(
@@ -335,8 +368,7 @@ def load_causallm_from_config(
     from transformers import AutoModelForCausalLM
 
     extra = hf_kwargs(security, extra=kwargs)
-    extra.pop("local_files_only", None)
-    model = AutoModelForCausalLM.from_config(config, **extra)
+    model = _model_from_config(AutoModelForCausalLM, config, extra)
     if device is not None and hasattr(model, "to"):
         model = model.to(device)
     if hasattr(model, "eval"):

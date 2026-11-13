@@ -1,13 +1,13 @@
 """
 Tests for vitriol.core.incremental and vitriol.core.validator modules.
 """
-import pytest
-from unittest.mock import patch, MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from vitriol.core.incremental import IncrementalGenerator
-from vitriol.core.validator import ValidationReport, ModelValidator
-
+from vitriol.core.validator import ModelValidator, ValidationReport
 
 # ─────────────────────────────────────────────────────────────
 # IncrementalGenerator
@@ -164,7 +164,7 @@ class TestModelValidator:
 
     @patch("vitriol.core.validator.hf_load_causallm")
     def test_validate_model_load_falls_back_to_generic(self, mock_load_causallm):
-        mock_load_causallm.side_effect = RuntimeError("size mismatch")
+        mock_load_causallm.side_effect = ValueError("Unsupported configuration for AutoModelForCausalLM")
 
         with patch("vitriol.core.validator.hf_load_model") as mock_load_model:
             mock_model = MagicMock()
@@ -309,16 +309,16 @@ class TestModelValidator:
             assert result is mock_model
 
     @patch("vitriol.core.validator.hf_load_causallm")
-    def test_load_model_for_task_size_mismatch_retry(self, mock_load_causallm):
+    def test_load_model_for_task_size_mismatch_rejected(self, mock_load_causallm):
         mock_load_causallm.side_effect = [
             RuntimeError("size mismatch"),
             MagicMock(),
         ]
 
         validator = self.ModelValidator("/output")
-        result = validator._load_model_for_task("causal_lm")
-        assert result is not None
-        assert mock_load_causallm.call_count == 2
+        with pytest.raises(RuntimeError, match="size mismatch"):
+            validator._load_model_for_task("causal_lm")
+        assert mock_load_causallm.call_count == 1
 
     @patch("vitriol.core.validator.hf_load_causallm")
     def test_load_model_for_task_oom_retry(self, mock_load_causallm):

@@ -467,8 +467,8 @@ def generate_visualization(generator, viz_path: str) -> bool:
         # Strategy A: meta config exists → swap to expose original for visualization
         if meta_path:
             os.rename(cfg_json, cfg_shrunk)
-            shutil.copy2(meta_path, cfg_json)
             temp_swap = True
+            shutil.copy2(meta_path, cfg_json)
 
         # Strategy B: shrink mode, no meta → fetch from Hub
         elif generator.shrink_config:
@@ -480,8 +480,8 @@ def generate_visualization(generator, viz_path: str) -> bool:
                 with tempfile.TemporaryDirectory() as tmp:
                     orig.save_pretrained(tmp)
                     os.rename(cfg_json, cfg_shrunk)
+                    temp_swap = True
                     shutil.move(os.path.join(tmp, "config.json"), cfg_json)
-                temp_swap = True
                 logger.info("Fetched original config for visualization.")
             except Exception as e:
                 logger.warning("Config fetch for viz failed: %s. Using shrunk.", e)

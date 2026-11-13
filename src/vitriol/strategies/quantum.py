@@ -7,6 +7,7 @@ This strategy implements extreme quantization using quantum-inspired techniques:
 - Entanglement patterns between related parameters
 """
 
+import hashlib
 import logging
 from typing import Any, Dict
 
@@ -211,12 +212,14 @@ class QuantumStrategy(WeightGenerationStrategy):
             n_groups = max(1, out_features // self.group_size)
 
             # Use parameter name hash for deterministic scaling
-            name_hash = hash(name) % 10000
-            torch.manual_seed(name_hash)
+            # Python's hash is process-randomized. A local generator also
+            # avoids resetting the random stream used by subsequent weights.
+            name_hash = int.from_bytes(hashlib.sha256(name.encode()).digest()[:8], "big")
+            rng = torch.Generator(device=self.device).manual_seed(name_hash)
 
             # Generate scaling factors with some variation
             base_scale = 0.01  # Typical weight scale
-            scaling = torch.randn(n_groups, 1, device=self.device) * 0.5 + 1.0
+            scaling = torch.randn(n_groups, 1, device=self.device, generator=rng) * 0.5 + 1.0
             scaling = scaling.abs() * base_scale
 
             # Expand to match output features
@@ -298,6 +301,7 @@ class QuantumStrategy(WeightGenerationStrategy):
 
         # Add metadata about quantization
         metadata = {
+            "format": "pt",
             "quantization": "quantum",
             "n_bits": str(self.n_bits),
             "adaptive": str(self.adaptive),

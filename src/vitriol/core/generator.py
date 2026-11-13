@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import importlib.util
 import json
 import logging
 import os
 import sys
+import tempfile
 import traceback
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch  # noqa: E402
@@ -37,9 +40,10 @@ apply_all_patches()
 
 from ..adapters.registry import AdapterRegistry  # noqa: E402
 from ..config.manager import GenerationConfig  # noqa: E402
-from ..strategies import get_strategy  # noqa: E402
+from ..strategies import STRATEGY_REGISTRY, get_strategy  # noqa: E402
 from ..utils.exceptions import ModelNotSupportedError  # noqa: E402
 from ..utils.size import parse_size_to_bytes  # noqa: E402
+from .checkpoint_state import capture_rng_state, inspect_shard, restore_rng_state, shard_digest  # noqa: E402
 from .incremental import IncrementalGenerator  # noqa: E402
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -143,7 +147,10 @@ class MinimalWeightGenerator:
         try:
             return int(tensor.untyped_storage().nbytes())
         except Exception:
-            logger.debug("tensor.untyped_storage().nbytes() failed, falling back to element_size * nelement")
+            logger.debug("tensor.untyped_storage().nbytes() unavailable; checking descriptor byte size")
+        nbytes = getattr(tensor, "nbytes", None)
+        if type(nbytes) is int and nbytes >= 0:
+            return nbytes
         try:
             return int(tensor.element_size() * tensor.nelement())
         except Exception:
@@ -420,13 +427,13 @@ class MinimalWeightGenerator:
         return None
 
     def _try_load_auto(self, hf_config):
-        _trc = self.config.security.trust_remote_code
+        security = asdict(self.config.security)
         for loader, label in (
             (
                 lambda: __import__("vitriol.utils.hf_loading", fromlist=["load_causallm_from_config"])
                 .load_causallm_from_config(
                     hf_config,
-                    security={"trust_remote_code": _trc, "allow_network": True, "local_files_only": False},
+                    security=security,
                 ),
                 "AutoModelForCausalLM",
             ),
@@ -434,7 +441,7 @@ class MinimalWeightGenerator:
                 lambda: __import__("vitriol.utils.hf_loading", fromlist=["load_model_from_config"])
                 .load_model_from_config(
                     hf_config,
-                    security={"trust_remote_code": _trc, "allow_network": True, "local_files_only": False},
+                    security=security,
                 ),
                 "AutoModel",
             ),
@@ -499,35 +506,28 @@ class MinimalWeightGenerator:
         )
 
     def generate(self) -> GenerationResult:
-        """Generate minimal weights.
+        """Generate minimal weights while exclusively owning the output directory.
 
-        This method is the public entry point. Internally it delegates to an
-        experimental pipeline wrapper to improve testability and maintainability.
-        In the initial stage, behavior is preserved by running the legacy
-        implementation unchanged.
+        The pipeline, metadata writes and result construction share one OS lock.
+        A competing generation fails immediately with OutputDirectoryBusyError.
         """
         # Local imports to keep module import lightweight and avoid circular deps
+        from .output_lock import output_directory_lock
         from .pipeline.context import GenerationContext
         from .pipeline.pipeline import GenerationPipeline
         from .pipeline.steps import BootstrapStep, LegacyGenerateStep
 
-        ctx = GenerationContext(model_id=self.model_id, output_dir=self.output_dir, config=self.config, generator=self)
-        GenerationPipeline([BootstrapStep(), LegacyGenerateStep()]).run(ctx)
-        return self._build_generation_result()
+        if os.path.isdir(self.model_id) and os.path.realpath(self.model_id) == os.path.realpath(self.output_dir):
+            raise ValueError("output_dir must differ from the source model directory")
+        with output_directory_lock(self.output_dir):
+            ctx = GenerationContext(model_id=self.model_id, output_dir=self.output_dir, config=self.config, generator=self)
+            GenerationPipeline([BootstrapStep(), LegacyGenerateStep()]).run(ctx)
+            return self._build_generation_result()
 
     def _generate_legacy_impl(self) -> GenerationResult:
+        if os.path.isdir(self.model_id) and os.path.realpath(self.model_id) == os.path.realpath(self.output_dir):
+            raise ValueError("output_dir must differ from the source model directory")
         os.makedirs(self.output_dir, exist_ok=True)
-        # [Cleanup] Remove existing weight files to prevent confusion from previous runs
-        for f in os.listdir(self.output_dir):
-            if f.endswith(".bin") or f.endswith(".safetensors") or f.endswith(".index.json"):
-                try:
-                    os.remove(os.path.join(self.output_dir, f))
-                except OSError as e:
-                    logger.warning("Failed to clean up %s: %s", f, e)
-
-        if os.listdir(self.output_dir):
-            logger.warning("Output directory %s contains residual files.", self.output_dir)
-
         # ── 1. Config ───────────────────────────────────────────────────
         logger.info("Loading config for %s…", self.model_id)
         hf_config = self._load_hf_config()
@@ -581,159 +581,222 @@ class MinimalWeightGenerator:
         logger.info("Strategy: %s", self.config.strategy)
         original_shard_map = self._get_original_shard_map()
 
-        checkpoint = self.incremental.load_checkpoint()
-        if checkpoint:
-            logger.info("Resuming from checkpoint…")
-            # [B3 fix] checkpoint key renamed to generated_param_names
-            generated_names: Set[str] = set(
-                checkpoint.get("generated_param_names",
-                               checkpoint.get("generated_param_ids", []))
-            )
-            shard_count     = checkpoint.get("shard_count", 0)
-            self.total_size = checkpoint.get("total_size", 0)
-            self.shard_map  = checkpoint.get("shard_map", {})
-        else:
-            generated_names = set()
-            shard_count     = 0
-            self.total_size = 0
-            self.shard_map  = {}
-
-        # [F-4] Determine canonical shard count ONCE — used everywhere below
-        expected_shards: List[str] = (
-            sorted(set(original_shard_map.values())) if original_shard_map else []
-        )
-        n_expected = len(expected_shards)   # e.g. 94 for a 94-shard model
-
-        shard_buffers: Dict[str, Dict[str, Any]] = {f: {} for f in expected_shards}
-
         export_items = self._snapshot_export_tensors(model)
-
-        # Snapshot names for progress bar (without materialising tensors)
-        all_names = [n for n, _ in export_items]
-        total_params = len(all_names)
-
-        current_target: Optional[str] = None
-        if all_names and original_shard_map:
-            current_target = self._resolve_target_shard(
-                all_names[0], original_shard_map, None, param_seq_idx=0, available_shards=expected_shards)
-
-        pbar = tqdm(total=total_params, desc="Generating tensors")
-        pbar.update(len(generated_names))
-
-        try:
-            # Per-shard byte tracker for streaming flush
-            buf_bytes: Dict[str, int] = {}
-            # [F-1] Track shards written by streaming flush (distinct from "still empty")
-            flushed_shards: Set[str] = set()
-            param_seq_idx = 0   # monotonically increments; used for even fallback distribution
-
-            # ── 4. Generation loop ──────────────────────────────────────────
-            for name, param in export_items:  # [A7] reusable snapshot, no repeated traversal
-                if name in generated_names:  # [B3 fix] stable name key
-                    param_seq_idx += 1
-                    pbar.update(1)
-                    continue
-
-                # [F-3] Pass param_seq_idx for even fallback distribution
-                target = self._resolve_target_shard(
-                    name, original_shard_map, current_target,
-                    param_seq_idx=param_seq_idx,
-                    available_shards=expected_shards,
-                )
-                if original_shard_map and not target:
-                    # Still no target? Use round-robin on expected_shards
-                    target = expected_shards[param_seq_idx % n_expected] if n_expected else None
-                if not target:
-                    target = (
-                        f"{self.strategy.get_shard_prefix()}-00001-of-{{total:05d}}"
-                        f".{self.strategy.file_extension}"
-                    )
-
-                try:
-                    tensor = self.strategy.generate_tensor(param.shape, param.dtype, name)
-                except Exception as e:
-                    logger.error("Tensor generation failed for '%s': %s", name, e)
-                    raise
-
-                if target not in shard_buffers:
-                    shard_buffers[target] = {}
-                shard_buffers[target][name] = tensor
-
-                # Compute byte size: use actual storage size for stride tricks,
-                # fall back to logical size (numel × dtype_bytes) otherwise.
-                nbytes = self._estimate_tensor_nbytes(
-                    tensor,
-                    fallback_numel=int(param.numel()),
-                    fallback_dtype=param.dtype,
-                )
-                self.total_size += nbytes
-                buf_bytes[target] = buf_bytes.get(target, 0) + nbytes
-
-                # [A5] Streaming flush when buffer reaches max_shard_size
-                if (buf_bytes.get(target, 0) >= self.max_shard_size
-                        and "{total:05d}" not in target):
-                    self._save_shard(shard_buffers[target], target, shard_count)
-                    shard_buffers[target] = {}
-                    buf_bytes[target]     = 0
-                    flushed_shards.add(target)   # [F-1] mark as written
-                    shard_count += 1
-
-                generated_names.add(name)
-                param_seq_idx += 1
-                pbar.update(1)
-                current_target = target
-        finally:
-            pbar.close()
-
-        # ── 5a. Fill shards that are still empty with a placeholder tensor ──
-        # [F-2] Ensures every expected shard gets a file (e.g. 94 of 94).
-        # Safetensors / bin formats require ≥ 1 tensor per file.
-        # Placeholders use a reserved prefix "__vitriol_pad" so callers can
-        # identify / filter them.  They are tiny (shape=(1,), float16 → 2 bytes)
-        # and do NOT count toward total_size so the index metadata stays accurate.
+        expected_shards = sorted(set(original_shard_map.values()))
+        groups: Dict[str, List[Tuple[str, Any]]] = {f: [] for f in expected_shards}
         if expected_shards:
-            for shard_name in expected_shards:
-                if shard_name in flushed_shards:
-                    continue   # already written
-                if not shard_buffers.get(shard_name):
-                    ph_key = f"__vitriol_pad__{shard_name}"
-                    try:
-                        shard_buffers[shard_name][ph_key] = (
-                            self.strategy.generate_tensor((1,), torch.float16, ph_key)
-                        )
-                        logger.debug("Placeholder added to empty shard: %s", shard_name)
-                    except Exception as e:
-                        logger.warning("Could not add placeholder to %s: %s", shard_name, e)
+            for i, (name, param) in enumerate(export_items):
+                target = self._resolve_target_shard(
+                    name, original_shard_map, None, i, expected_shards)
+                groups[target].append((name, param))
+        else:
+            groups[""] = export_items
+        # Bind checkpoints to the source, generation settings, and actual model
+        # structure. A stale checkpoint must never suppress new tensor generation.
+        signature = hashlib.sha256(json.dumps({
+            "checkpoint_version": 2,
+            "model_id": self.model_id,
+            "strategy_recipe": self.strategy.get_recipe(),
+            "storage_format": self.strategy.storage_format,
+            "max_shard_size": self.max_shard_size,
+            "config": asdict(self.config),
+            "active_config": active_config.to_dict(),
+            "shrink_config": self.shrink_config,
+            "shard_map": original_shard_map,
+            "tensors": [(n, list(p.shape), str(p.dtype)) for n, p in export_items],
+        }, sort_keys=True, default=str).encode()).hexdigest()
+        checkpoint = self.incremental.load_checkpoint()
+        # Learned strategies carry network parameters in addition to RNG state.
+        # Rebuilding those objects cannot safely continue their old checkpoints.
+        resume_supported = (
+            type(self.strategy) is STRATEGY_REGISTRY.get(self.config.strategy)
+            and self.config.strategy in {
+                "random", "compact", "sparse", "ultra", "hybrid_ultra", "binary",
+                "ternary", "quantized", "lowrank", "structured_sparse", "quantum",
+            }
+            and torch.device(self.strategy.device).type in {"cpu", "cuda"}
+        )
+        if checkpoint and not resume_supported:
+            logger.warning("Strategy has no reproducible resume support; regenerating all tensors")
+            checkpoint = None
+        self._generation_checkpoint = None
+        shard_hashes: Dict[str, str] = {}
+        completed_groups: Set[str] = set()
+        generated_names: Set[str] = set()
+        saved_dtypes: Dict[str, str] = {}
+        self.total_size = 0
+        self.shard_map = {}
+        shard_count = 0
+        if checkpoint and checkpoint.get("signature") == signature:
+            try:
+                saved_map = checkpoint["shard_map"]
+                expected_shapes = {n: tuple(p.shape) for n, p in export_items}
+                saved_dtypes = checkpoint["tensor_dtypes"]
+                if not isinstance(saved_map, dict):
+                    raise ValueError("invalid checkpoint shard map")
+                shard_hashes = checkpoint["shard_hashes"]
+                if not isinstance(shard_hashes, dict) or not set(saved_map.values()).issubset(shard_hashes):
+                    raise ValueError("checkpoint missing shard digests")
+                rename_plan = checkpoint.get("rename_plan", {})
+                if (not isinstance(rename_plan, dict) or not set(rename_plan).issubset(shard_hashes)
+                        or len(set(rename_plan.values())) != len(rename_plan)):
+                    raise ValueError("invalid checkpoint rename plan")
+                for destination in rename_plan.values():
+                    if (not isinstance(destination, str) or os.path.basename(destination) != destination
+                            or destination in (".", "..")):
+                        raise ValueError("checkpoint rename destination is not local")
+                resolved_files = {}
+                verified_size = 0
+                for filename, digest in shard_hashes.items():
+                    if os.path.basename(filename) != filename or filename in (".", ".."):
+                        raise ValueError("checkpoint contains a non-local shard path")
+                    resolved = filename
+                    if not os.path.exists(os.path.join(self.output_dir, filename)):
+                        resolved = rename_plan.get(filename, filename)
+                    resolved_files[filename] = resolved
+                    path = os.path.join(self.output_dir, resolved)
+                    if shard_digest(path, legacy=len(digest) == 64) != digest:
+                        raise ValueError(f"checkpoint shard content changed: {filename}")
+                    shapes, dtypes, nbytes = inspect_shard(path)
+                    verified_size += nbytes
+                    expected_names = {n for n, target in saved_map.items() if target == filename}
+                    if {n for n in shapes if not n.startswith("__vitriol_pad__")} != expected_names:
+                        raise ValueError("checkpoint shard contains unexpected tensor names")
+                    for name in expected_names:
+                        if (shapes[name] != expected_shapes.get(name)
+                                or dtypes[name] != saved_dtypes.get(name)):
+                            raise ValueError(f"checkpoint tensor missing or incompatible: {name}")
+                ordered_names = [n for items in groups.values() for n, _ in items]
+                if set(saved_map) != set(ordered_names[:len(saved_map)]):
+                    raise ValueError("checkpoint tensors do not form a completed prefix")
+                if (type(checkpoint["total_size"]) is not int or checkpoint["total_size"] != verified_size
+                        or type(checkpoint["shard_count"]) is not int
+                        or checkpoint["shard_count"] != len(shard_hashes)):
+                    raise ValueError("checkpoint size or shard count is inconsistent")
+                completed_groups = set(checkpoint["completed_groups"])
+                if expected_shards:
+                    if (len(shard_hashes) > len(groups)
+                            or completed_groups != set(list(groups)[:len(shard_hashes)])):
+                        raise ValueError("checkpoint groups do not form a completed prefix")
+                elif completed_groups:
+                    raise ValueError("checkpoint contains unexpected original shard groups")
+                for target in completed_groups:
+                    if any(n not in saved_map for n, _ in groups[target]):
+                        raise ValueError("checkpoint group is incomplete")
+                if not set(saved_map).issubset(expected_shapes):
+                    raise ValueError("checkpoint contains unexpected tensor names")
+                if expected_shards:
+                    for items in groups.values():
+                        names = {n for n, _ in items}
+                        if names.intersection(saved_map) and not names.issubset(saved_map):
+                            raise ValueError("checkpoint contains only part of an original shard")
+                if len(set(resolved_files.values())) != len(resolved_files):
+                    raise ValueError("checkpoint resolves multiple shards to one file")
+                saved_map = {n: resolved_files[f] for n, f in saved_map.items()}
+                shard_hashes = {resolved_files[f]: digest for f, digest in shard_hashes.items()}
+                restore_rng_state(checkpoint["rng_state"])
+                checkpoint = {**checkpoint, "shard_map": saved_map, "shard_hashes": shard_hashes}
+                checkpoint.pop("rename_plan", None)
+                self._generation_checkpoint = checkpoint
+                self.shard_map = dict(saved_map)
+                generated_names = set(saved_map)
+                self.total_size = int(checkpoint["total_size"])
+                shard_count = int(checkpoint["shard_count"])
+                logger.info("Resuming %d persisted tensors", len(generated_names))
+            except Exception as exc:
+                # Corrupt safetensors and restricted pickle loaders have their
+                # own exception types; any unreadable checkpoint is regenerated.
+                logger.warning("Ignoring incomplete checkpoint: %s", exc)
+                checkpoint = None
+        else:
+            checkpoint = None
 
-        # ── 5b. Final flush ─────────────────────────────────────────────
-        # Use expected_shards order so filenames stay deterministic.
-        # If no expected_shards (no original index), fall back to shard_buffers keys.
-        ordered = expected_shards if expected_shards else sorted(shard_buffers.keys())
-        n_ordered = len(ordered)
-        logger.info("Flushing %d shard(s) (%d expected)…", n_ordered, n_expected)
+        if checkpoint is None:
+            self.total_size = 0
+            self.shard_map = {}
+            generated_names = set()
+            saved_dtypes = {}
+            shard_hashes = {}
+            completed_groups = set()
+            shard_count = 0
+            self.incremental.clear_checkpoint()
+            # Clean stale output only after determining that it cannot be resumed.
+            for filename in os.listdir(self.output_dir):
+                if filename.endswith((".bin", ".safetensors", ".index.json")):
+                    path = os.path.join(self.output_dir, filename)
+                    if os.path.isfile(path):
+                        os.remove(path)
 
-        for i, filename in enumerate(ordered):
-            if filename in flushed_shards:
-                continue   # [F-1] already written via streaming flush
-            buf = shard_buffers.get(filename, {})
-            real = (
-                f"{self.strategy.get_shard_prefix()}"
-                f"-{i + 1:05d}-of-{n_ordered:05d}"
-                f".{self.strategy.file_extension}"
-                if "{total:05d}" in filename else filename
-            )
-            self._save_shard(buf, real, i)
+        def persist(data, filename, rng_state=None, target=None):
+            nonlocal shard_count
+            filename = self._save_shard(data, filename, shard_count)
+            path = os.path.join(self.output_dir, filename)
+            _, dtypes, _ = inspect_shard(path)
+            saved_dtypes.update({n: dtype for n, dtype in dtypes.items() if n in self.shard_map})
+            shard_hashes[filename] = shard_digest(path)
+            if target:
+                completed_groups.add(target)
+            shard_count += 1
+            state = {
+                "signature": signature,
+                "generated_param_names": list(self.shard_map),
+                "shard_count": shard_count,
+                "total_size": self.total_size,
+                "shard_map": dict(self.shard_map),
+                "tensor_dtypes": dict(saved_dtypes),
+                "shard_hashes": dict(shard_hashes),
+                "completed_groups": sorted(completed_groups),
+                "rng_state": rng_state if rng_state is not None else capture_rng_state(),
+            }
+            self.incremental.save_checkpoint(state, strict=True)
+            self._generation_checkpoint = state
+
+        # Generate original shards together and write each exactly once. Flushing
+        # fragments to the same filename overwrites previously saved tensors.
+        # Original shard boundaries take precedence over max_shard_size.
+
+        with tqdm(total=len(export_items), initial=len(generated_names),
+                  desc="Generating tensors") as pbar:
+            for target, items in groups.items():
+                if target in completed_groups or (items and all(name in generated_names for name, _ in items)):
+                    continue
+                buf: Dict[str, Any] = {}
+                buf_bytes = 0
+                for name, param in items:
+                    if name in generated_names:
+                        continue
+                    # The next tensor may force a flush. Its RNG consumption
+                    # belongs to the next shard, so checkpoint the state BEFORE it.
+                    before_tensor = capture_rng_state() if not target and buf else None
+                    tensor = self.strategy.generate_tensor(param.shape, param.dtype, name)
+                    nbytes = self._estimate_tensor_nbytes(
+                        tensor, fallback_numel=int(param.numel()), fallback_dtype=param.dtype)
+                    if not target and buf and buf_bytes + nbytes > self.max_shard_size:
+                        persist(buf, f"{self.strategy.get_shard_prefix()}-{shard_count + 1:05d}.{self.strategy.file_extension}", before_tensor)
+                        buf = {}
+                        buf_bytes = 0
+                    buf[name] = tensor
+                    buf_bytes += nbytes
+                    self.total_size += nbytes
+                    pbar.update(1)
+                if not buf and target and not items:
+                    ph_key = f"__vitriol_pad__{target}"
+                    buf[ph_key] = self.strategy.generate_tensor((1,), torch.float16, ph_key)
+                if buf:
+                    filename = target or f"{self.strategy.get_shard_prefix()}-{shard_count + 1:05d}.{self.strategy.file_extension}"
+                    persist(buf, filename, target=target)
 
         # ── 6. Metadata ─────────────────────────────────────────────────
-        # [F-4] Always use the canonical expected shard count, never len(shard_buffers)
-        final_shard_count = n_expected if n_expected else n_ordered
+        # Original indices retain their canonical shard count.
+        final_shard_count = len(expected_shards) if expected_shards else shard_count
         self._save_index(final_shard_count, original_shard_map)
-        self.incremental.clear_checkpoint()
         self._save_configs(active_config)
         self._copy_custom_code_files() # Ensure custom Python code is copied
         self._save_tokenizer()
         self._add_readme_metadata()
         self._write_manifest()
+        self.incremental.clear_checkpoint()
+        self._generation_checkpoint = None
         logger.info("✓ Done — weights saved to %s", self.output_dir)
         return self._build_generation_result()
 
@@ -760,7 +823,7 @@ class MinimalWeightGenerator:
         shard_data: Dict[str, Any],
         filename: str,
         shard_id: int = 0,
-    ) -> None:
+    ) -> str:
         prefix = self.strategy.get_shard_prefix()
         ext    = self.strategy.file_extension
 
@@ -768,16 +831,28 @@ class MinimalWeightGenerator:
             filename = f"{prefix}-{shard_id + 1:05d}.{ext}"
         elif filename.endswith(".safetensors") and ext == "bin":
             filename = filename.replace(".safetensors", ".bin")
-            filename = filename.replace("model-", "pytorch_model-")
+            if filename.startswith("model-"):
+                filename = "pytorch_" + filename
         elif filename.endswith(".bin") and ext == "safetensors":
             filename = filename.replace(".bin", ".safetensors")
             filename = filename.replace("pytorch_model-", "model-")
 
+        if os.path.basename(filename) != filename or filename in (".", ".."):
+            raise ValueError("shard filename must be a local basename")
         path = os.path.join(self.output_dir, filename)
         logger.info("Saving shard → %s  (%d tensors)", filename, len(shard_data))
-        self.strategy.save_shard(shard_data, path)
+        # Commit complete shards atomically so interrupted writes cannot replace
+        # a valid checkpoint artifact with a truncated file.
+        with tempfile.TemporaryDirectory(prefix=".vitriol-shard-", dir=self.output_dir) as tmp:
+            temporary_path = os.path.join(tmp, filename)
+            self.strategy.save_shard(shard_data, temporary_path)
+            if not os.path.isfile(temporary_path):
+                raise OSError(f"Strategy did not write the declared shard format: {filename}")
+            os.replace(temporary_path, path)
         for key in shard_data:
-            self.shard_map[key] = filename
+            if not key.startswith("__vitriol_pad__"):
+                self.shard_map[key] = filename
+        return filename
 
     # ──────────────────────────────────────────────────────────────────────
     # Index save
@@ -799,25 +874,31 @@ class MinimalWeightGenerator:
         prefix = self.strategy.get_shard_prefix()
         final:  Dict[str, str] = {}
 
+        renames: Dict[str, str] = {}
         for key, filename in self.shard_map.items():
-            # Skip internal padding tensors
             if key.startswith("__vitriol_pad__"):
                 continue
-
-            if "-of-" in filename:
-                final[key] = filename
-            else:
+            if os.path.basename(filename) != filename or filename in (".", ".."):
+                raise ValueError("shard filename must be a local basename")
+            final[key] = filename
+            if "-of-" not in filename:
                 try:
-                    shard_id  = int(filename.rsplit(".", 1)[0].split("-")[-1])
-                    new_name  = f"{prefix}-{shard_id:05d}-of-{total_shards:05d}.{ext}"
+                    shard_id = int(filename.rsplit(".", 1)[0].split("-")[-1])
+                    new_name = f"{prefix}-{shard_id:05d}-of-{total_shards:05d}.{ext}"
                     final[key] = new_name
-                    old = os.path.join(self.output_dir, filename)
-                    new = os.path.join(self.output_dir, new_name)
-                    if os.path.exists(old) and not os.path.exists(new):
-                        os.rename(old, new)
+                    renames[filename] = new_name
                 except (ValueError, IndexError) as e:
                     logger.debug("Could not parse shard id from '%s': %s", filename, e)
-                    final[key] = filename
+
+        # Publish the rename journal BEFORE moving any committed shard. Recovery
+        # can then verify either its original name or the declared destination.
+        state = getattr(self, "_generation_checkpoint", None)
+        if state is not None and renames:
+            state = {**state, "rename_plan": renames}
+            self.incremental.save_checkpoint(state, strict=True)
+            self._generation_checkpoint = state
+        for old_name, new_name in renames.items():
+            os.replace(os.path.join(self.output_dir, old_name), os.path.join(self.output_dir, new_name))
 
         # Validate: warn if actual file count != declared total_shards
         written_files = set(
@@ -837,9 +918,24 @@ class MinimalWeightGenerator:
             if self.strategy.storage_format == "pytorch"
             else "model.safetensors.index.json"
         )
-        with open(os.path.join(self.output_dir, idx_name), "w") as f:
-            json.dump({"metadata": {"total_size": self.total_size}, "weight_map": final},
-                      f, indent=2)
+        # A failed serialization/write must not leave a truncated index.
+        with tempfile.TemporaryDirectory(prefix=".vitriol-index-", dir=self.output_dir) as tmp:
+            temporary_index = os.path.join(tmp, idx_name)
+            with open(temporary_index, "w") as f:
+                json.dump({"metadata": {"total_size": self.total_size}, "weight_map": final}, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_index, os.path.join(self.output_dir, idx_name))
+        self.shard_map = final
+        if state is not None:
+            state = {
+                **state,
+                "shard_map": dict(final),
+                "shard_hashes": {renames.get(f, f): digest for f, digest in state["shard_hashes"].items()},
+            }
+            state.pop("rename_plan", None)
+            self.incremental.save_checkpoint(state, strict=True)
+            self._generation_checkpoint = state
         logger.info("Saved index → %s  (%d weight entries, %d shards)",
                     idx_name, len(final), total_shards)
 

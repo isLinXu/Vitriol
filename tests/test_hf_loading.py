@@ -228,3 +228,66 @@ def test_build_config_object_falls_back_to_raw_config_when_pretrained_config_bre
 
     assert loaded.model_type == "deepseek_v4"
     assert loaded.text_config.max_position_embeddings == 1048576
+
+
+def test_offline_custom_from_config_passes_policy_only_to_code_resolver(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import transformers.dynamic_module_utils as dynamic
+    import transformers.models.auto.auto_factory as factory
+
+    from vitriol.utils import hf_loading
+
+    model = object()
+    remote_class = MagicMock()
+    remote_class._from_config.return_value = model
+    resolver = MagicMock(return_value=remote_class)
+    monkeypatch.setattr(dynamic, "get_class_from_dynamic_module", resolver)
+    if hasattr(factory, "add_generation_mixin_to_remote_model"):
+        monkeypatch.setattr(factory, "add_generation_mixin_to_remote_model", lambda cls: cls)
+    config = SimpleNamespace(auto_map={"AutoModel": "other/repo--modeling.CustomModel"}, name_or_path="local/model")
+    result = hf_loading.load_model_from_config(
+        config, security={"trust_remote_code": True, "allow_network": False}, torch_dtype="float32")
+    assert result is model
+    resolver.assert_called_once_with("modeling.CustomModel", "other/repo", local_files_only=True)
+    remote_class._from_config.assert_called_once_with(config, torch_dtype="float32")
+
+
+def test_dynamic_module_patch_respects_offline_policy(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import MagicMock
+
+    import transformers.dynamic_module_utils as dynamic
+
+    from vitriol.utils import hf_loading
+
+    (tmp_path / "config.json").write_text(json.dumps({"auto_map": {"AutoModel": "other/repo--modeling.CustomModel"}}))
+    resolver = MagicMock(side_effect=OSError("not cached"))
+    monkeypatch.setattr(dynamic, "get_class_from_dynamic_module", resolver)
+    hf_loading._maybe_patch_dynamic_modules(str(tmp_path), security={"trust_remote_code": True, "allow_network": False})
+    assert resolver.call_count == 1
+    assert resolver.call_args.kwargs["local_files_only"] is True
+
+
+def test_real_offline_custom_model_constructor_receives_no_hub_kwargs(tmp_path):
+    import torch
+    from transformers import PretrainedConfig
+
+    from vitriol.utils import hf_loading
+
+    (tmp_path / "modeling_custom.py").write_text(
+        "import torch\n"
+        "from transformers import PreTrainedModel, PretrainedConfig\n"
+        "class LocalCustomModel(PreTrainedModel):\n"
+        "    config_class = PretrainedConfig\n"
+        "    def __init__(self, config):\n"
+        "        super().__init__(config)\n"
+        "        self.weight = torch.nn.Parameter(torch.ones(2))\n"
+    )
+    config = PretrainedConfig()
+    config.name_or_path = str(tmp_path)
+    config.auto_map = {"AutoModel": "modeling_custom.LocalCustomModel"}
+    model = hf_loading.load_model_from_config(
+        config, security={"trust_remote_code": True, "allow_network": False})
+    assert torch.equal(model.weight, torch.ones(2))

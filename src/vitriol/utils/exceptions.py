@@ -22,6 +22,18 @@ class VitriolError(Exception):
         super().__init__(message)
 
 
+class OutputDirectoryBusyError(VitriolError, RuntimeError):
+    """Another generator holds the output directory's operating-system lock."""
+
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
+        super().__init__(
+            f"Output directory '{output_dir}' is already in use by another generation. "
+            "Retry after it finishes.",
+            recoverable=True,
+        )
+
+
 class MissingOptionalDependencyError(VitriolError, ImportError):
     """An optional third-party dependency required for a feature is not installed.
 
