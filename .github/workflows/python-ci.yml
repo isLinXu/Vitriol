@@ -72,9 +72,38 @@ jobs:
         run: |
           pytest tests/ -v --ignore=tests/integration --tb=short --maxfail=5 \
             --cov=src/vitriol --cov-report=term-missing --cov-report=xml \
-            --cov-fail-under=60
+            --cov-fail-under=60 --junitxml=test-results.xml
         env:
           PYTHONPATH: src
+
+      - name: Report test failures
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report = Path("test-results.xml")
+          if report.exists():
+              for case in ET.parse(report).iter("testcase"):
+                  for result in case:
+                      if result.tag in {"failure", "error"}:
+                          name = f"{case.get('classname', '')}.{case.get('name', '')}"
+                          message = name + "\n" + (result.text or result.get("message", ""))[-4000:]
+                          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                          print(f"::error title=pytest failure::{message}")
+          PY
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ matrix.python-version }}
+          path: |
+            test-results.xml
+            coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
