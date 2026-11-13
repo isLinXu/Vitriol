@@ -419,7 +419,7 @@ class TestEvolutionTreeComputeSimilarity:
         tree.add_model("a", config=config)
         tree.add_model("b", config=config)
         sim = tree.compute_similarity("a", "b")
-        assert sim == 1.0
+        assert sim == pytest.approx(1.0, rel=0, abs=1e-15)
 
     def test_different(self):
         tree = EvolutionTree()
