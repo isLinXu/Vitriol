@@ -11,6 +11,7 @@ Enhanced NAS with:
 from __future__ import annotations
 
 import logging
+import math
 import random
 from dataclasses import dataclass, field
 from enum import Enum
@@ -19,6 +20,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from .search_space import ArchitectureGene, LLMSearchSpace
 
 logger = logging.getLogger(__name__)
+
+
+def _evaluate_base_score(evaluator, gene: ArchitectureGene) -> float:
+    """Use the supplied evaluator; metric-only searches have no quality score."""
+    if evaluator is None:
+        return 0.0
+    result = evaluator.evaluate(gene)
+    score = float(result["score"])
+    if not math.isfinite(score):
+        raise ValueError("NAS evaluator score must be finite")
+    return score
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -262,13 +274,14 @@ class ConstraintOptimizer:
             if not satisfied:
                 continue
 
-            base_score = random.random()
+            base_score = _evaluate_base_score(base_evaluator, gene)
             score = self.evaluate_objectives(gene, base_score)
 
             if score > best_score:
                 best_score = score
                 best_gene = gene
                 best_metrics = MetricsCalculator.calculate_all(gene)
+                best_metrics["nas_score"] = base_score
                 if verbose:
                     logger.info(
                         f"Iter {i}: New best score={score:.4f}, "
@@ -361,8 +374,10 @@ class MultiObjectiveOptimizer:
 
         for i in range(n_iterations):
             gene = search_space.sample()
-            obj_values = self._compute_objective_values(gene, random.random())
+            base_score = _evaluate_base_score(base_evaluator, gene)
+            obj_values = self._compute_objective_values(gene, base_score)
             metrics = MetricsCalculator.calculate_all(gene)
+            metrics["nas_score"] = base_score
 
             sol = ParetoSolution(
                 gene=gene,

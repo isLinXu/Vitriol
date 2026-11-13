@@ -8,8 +8,8 @@ Provides configuration classes and builders for Vitriol:
 
 Configuration sources (in priority order):
 1. Explicit overrides (programmatic)
-2. Environment variables (VITRIOL_* prefix)
-3. YAML config file
+2. YAML config file
+3. Environment variables (VITRIOL_* prefix)
 4. Default values
 """
 
@@ -197,7 +197,10 @@ def build_generation_config(
 
     explicit = dict(overrides or {})
     base_security = SecurityOptions()
-    explicit_security: Dict[str, Any] = {}
+    nested_security = explicit.pop("security", None)
+    if nested_security is not None and not isinstance(nested_security, dict):
+        raise ConfigValidationError("generation config", "security must be an object")
+    explicit_security: Dict[str, Any] = dict(nested_security or {})
 
     yaml_security = data.pop("security", None)
     if isinstance(yaml_security, dict):

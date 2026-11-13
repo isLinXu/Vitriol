@@ -16,18 +16,8 @@ from vitriol.config.settings import init_config  # noqa: E402
 @pytest.fixture(autouse=True)
 def reset_api_state():
     server.active_jobs.clear()
-    while not server.job_queue.empty():
-        try:
-            server.job_queue.get_nowait()
-        except Exception:
-            break
     yield
     server.active_jobs.clear()
-    while not server.job_queue.empty():
-        try:
-            server.job_queue.get_nowait()
-        except Exception:
-            break
 
 
 async def _noop_background_job(*_args, **_kwargs):

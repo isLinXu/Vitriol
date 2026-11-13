@@ -30,7 +30,7 @@ try:
     import uvicorn
     from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import StreamingResponse
+    from fastapi.responses import JSONResponse, StreamingResponse
     from pydantic import BaseModel, ConfigDict, Field
 except ImportError as exc:  # pragma: no cover - exercised only without [api] extra
     raise MissingOptionalDependencyError(
@@ -46,6 +46,9 @@ from ..version import __version__
 
 logger = get_logger("vitriol.api")
 _APP_STARTED_AT = time.monotonic()
+# Generation uses process-wide library/security state. Keep jobs serialized while
+# allowing the event loop to serve status, health and log requests.
+_generation_lock = threading.Lock()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,6 +64,7 @@ class LogStreamQueue(logging.Handler):
         super().__init__()
         self._queue: deque = deque(maxlen=maxlen)
         self._lock = threading.Lock()
+        self._sequence = 0
 
     def emit(self, record: logging.LogRecord) -> None:
         """Add a log record to the stream queue."""
@@ -78,15 +82,21 @@ class LogStreamQueue(logging.Handler):
                 formatter = self.formatter or logging.Formatter()
                 log_entry["exception"] = formatter.formatException(record.exc_info)
             with self._lock:
+                self._sequence += 1
+                log_entry["sequence"] = self._sequence
                 self._queue.append(log_entry)
         except Exception:
             # Silently drop logs on error to avoid disrupting the main application
             pass
 
-    def get_logs(self, since_timestamp: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get all log entries, optionally filtered by timestamp."""
+    def get_logs(
+        self,
+        since_timestamp: Optional[str] = None,
+        after_sequence: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Get retained entries newer than the cursor, optionally filtered by time."""
         with self._lock:
-            logs = list(self._queue)
+            logs = [entry for entry in self._queue if entry["sequence"] > after_sequence]
         if since_timestamp:
             try:
                 cutoff = datetime.fromisoformat(since_timestamp.replace('Z', '+00:00'))
@@ -128,6 +138,18 @@ def _model_dump(model: Any) -> Dict[str, Any]:
         return model.model_dump()
     return model.dict()
 
+
+def _run_generation(model_id: str, output_dir: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+    """Construct and run a generator in a worker thread, returning plain data."""
+    with _generation_lock:
+        from ..core.generator import MinimalWeightGenerator
+
+        config = build_generation_config(overrides=overrides)
+        generator = MinimalWeightGenerator(model_id=model_id, output_dir=output_dir, config=config)
+        result = _result_to_dict(generator.generate())
+        result["security_context"] = getattr(config, "security_context", {})
+        return result
+
 # API Models
 
 class GenerateRequest(BaseModel):
@@ -149,7 +171,7 @@ class GenerateRequest(BaseModel):
     output_dir: Optional[str] = Field(None, description="Output directory")
     trust_remote_code: Optional[bool] = Field(
         None,
-        description="Override trust_remote_code for this request; uses server defaults when omitted",
+        description="Explicitly enable remote model code for this request; disabled when omitted",
     )
     allow_network: Optional[bool] = Field(
         None,
@@ -207,7 +229,6 @@ class SystemStatus(BaseModel):
 
 # Job tracking
 active_jobs: Dict[str, Dict[str, Any]] = {}
-job_queue: asyncio.Queue = asyncio.Queue()
 
 # Create FastAPI app with organized tags
 app = FastAPI(
@@ -323,12 +344,13 @@ _rate_limiter = RateLimiter()
 
 
 @app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next) -> StreamingResponse:
+async def rate_limit_middleware(request: Request, call_next):
     """Apply rate limiting to all requests."""
     try:
         _rate_limiter.check(request)
-    except HTTPException:
-        raise  # Re-raise 429 exceptions
+    except HTTPException as exc:
+        # User middleware sits outside FastAPI's exception handler middleware.
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
     except Exception as exc:
         logger.warning(f"Rate limiter error: {exc}")
     response = await call_next(request)
@@ -397,8 +419,8 @@ async def get_status(_api_key: Optional[str] = Depends(verify_api_key)) -> Syste
         status="running",
         version=__version__,
         uptime=uptime_seconds,
-        active_jobs=len(active_jobs),
-        queue_size=job_queue.qsize(),
+        active_jobs=sum(job.get("status") == "running" for job in active_jobs.values()),
+        queue_size=sum(job.get("status") == "queued" for job in active_jobs.values()),
         system_info={
             "cpu_percent": psutil.cpu_percent(),
             "memory_percent": psutil.virtual_memory().percent,
@@ -433,7 +455,6 @@ async def generate_weights(
     }
 
     active_jobs[job_id] = job
-    await job_queue.put(job)
 
     # Start background processing
     background_tasks.add_task(process_generation_job, job_id)
@@ -493,7 +514,6 @@ async def start_nas_search(
     }
 
     active_jobs[job_id] = job
-    await job_queue.put(job)
 
     background_tasks.add_task(process_nas_job, job_id)
 
@@ -642,14 +662,13 @@ async def stream_logs(
             yield f"data: {json.dumps(log_entry)}\n\n"
 
         # Then stream new logs as they come in
-        last_idx = len(recent_logs)
+        last_sequence = recent_logs[-1]["sequence"] if recent_logs else 0
         while True:
             await asyncio.sleep(0.5)  # Poll every 500ms
-            all_logs = _log_stream_handler.get_logs(since_timestamp=since)
-            if len(all_logs) > last_idx:
-                for log_entry in all_logs[last_idx:]:
-                    yield f"data: {json.dumps(log_entry)}\n\n"
-                last_idx = len(all_logs)
+            new_logs = _log_stream_handler.get_logs(since_timestamp=since, after_sequence=last_sequence)
+            for log_entry in new_logs:
+                last_sequence = log_entry["sequence"]
+                yield f"data: {json.dumps(log_entry)}\n\n"
 
     return StreamingResponse(
         log_generator(),
@@ -768,8 +787,6 @@ async def process_batch_job(batch_id: str, request: BatchGenerateRequest) -> Non
     logger.info(f"Starting batch generation job: {batch_id}")
 
     try:
-        from ..core.generator import MinimalWeightGenerator
-
         total = len(request.models)
 
         for i, model_spec in enumerate(request.models):
@@ -791,18 +808,9 @@ async def process_batch_job(batch_id: str, request: BatchGenerateRequest) -> Non
                     "max_shard_size": model_spec.get("max_shard_size", "5GB"),
                 }
                 if trust_remote_code is not None:
-                    overrides["trust_remote_code"] = bool(trust_remote_code)
+                    overrides["trust_remote_code"] = trust_remote_code
 
-                config = build_generation_config(overrides=overrides)
-
-                generator = MinimalWeightGenerator(
-                    model_id=model_id,
-                    output_dir=output_dir,
-                    config=config
-                )
-
-                result = generator.generate()
-                result_data = _result_to_dict(result)
+                result_data = await asyncio.to_thread(_run_generation, model_id, output_dir, overrides)
                 total_size = result_data.get("total_size") or 0
                 result_output_dir = result_data.get("output_dir") or output_dir
 
@@ -855,34 +863,24 @@ async def process_generation_job(job_id: str) -> None:
     logger.info(f"Starting generation job: {job_id}")
 
     try:
-        # Import here to avoid circular dependencies
-        from ..core.generator import MinimalWeightGenerator
-
         request = job["request"]
 
         overrides = {
             "strategy": request.get("strategy", "compact"),
             "dtype": request.get("dtype", "bfloat16"),
             "max_shard_size": request.get("max_shard_size", "5GB"),
+            # Remote model code remains an explicit per-request opt-in.
+            "trust_remote_code": bool(request.get("trust_remote_code", False)),
         }
-        # Fail closed: remote model code must be enabled explicitly per request.
-        overrides["trust_remote_code"] = bool(request.get("trust_remote_code", False))
-        overrides["allow_network"] = bool(request.get("allow_network", True))
-        overrides["local_files_only"] = bool(
-            request.get("local_files_only", False) or (not overrides["allow_network"])
+        # Omitted optional fields are serialized as None; preserve config defaults.
+        for key in ("allow_network", "local_files_only"):
+            if request.get(key) is not None:
+                overrides[key] = request[key]
+
+        output_dir = request.get("output_dir") or f"./output/{request['model_id'].split('/')[-1]}"
+        result_data = await asyncio.to_thread(
+            _run_generation, request["model_id"], output_dir, overrides,
         )
-
-        config = build_generation_config(overrides=overrides)
-
-        generator = MinimalWeightGenerator(
-            model_id=request["model_id"],
-            output_dir=request.get("output_dir", f"./output/{request['model_id'].split('/')[-1]}"),
-            config=config,
-        )
-
-        result = generator.generate()
-        result_data = _result_to_dict(result)
-        result_data["security_context"] = getattr(config, "security_context", {})
 
         job["status"] = "completed"
         job["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -929,7 +927,7 @@ async def process_nas_job(job_id: str) -> None:
         best_score = -float("inf")
         best_metrics = {}
 
-        # base_evaluator is not used by ConstraintOptimizer.optimize yet; keep it for future extensibility.
+        # This API path ranks analytical parameter estimates without a quality evaluator.
         for i in range(n_iterations):
             gene = search_space.sample()
             ok, _violated = optimizer.check_constraints(gene)
