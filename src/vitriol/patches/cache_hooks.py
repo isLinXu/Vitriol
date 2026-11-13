@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import logging
 import threading
+import weakref
+from collections.abc import MutableMapping
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Type
+from types import SimpleNamespace
+from typing import Any, Optional, Type
 
 import torch
 
@@ -12,6 +15,9 @@ from ..kv.backend import KVStoreBackend
 logger = logging.getLogger(__name__)
 
 _thread_local = threading.local()
+
+_HOOK_LOCK = threading.RLock()
+_ATTENTION_OWNERS: dict[int, Any] = {}
 
 _STATS_LOCK = threading.Lock()
 _CACHE_HOOK_STATS: dict[str, int] = {}
@@ -58,204 +64,289 @@ def _cache_position_query_len(cache_position: Any) -> int:
 class CacheHookConfig:
     """Configuration for cache hook patching."""
     enabled: bool = True
-    passthrough_update: bool = False
+    # Retained for compatibility; generic hooks always preserve native history.
+    passthrough_update: bool = True
     auto_enable_mode: bool = False
 
 
+@dataclass
+class _AttentionBinding:
+    cache: Any
+    key: Any
+    value: Any
+    backend: Any
+    layer_idx: int
+    epoch: int
+    state: Any
+    consumed: bool = False
+
+
+def _invalidate_cache(handle: Any) -> None:
+    handle._vitriol_kv_stores = {}
+    handle._vitriol_disabled_layers = set()
+    handle._vitriol_cache_epoch = getattr(handle, "_vitriol_cache_epoch", 0) + 1
+
+
 class CacheHookPatcher:
-    """Patcher that injects cache hooks into model layers."""
+    """Mirror native KV into a backend while retaining complete fallback history.
+
+    The legacy passthrough_update=False option no longer suppresses native
+    updates: without model-specific routing that can silently drop decode KV.
+    """
+
     def __init__(self, cfg: CacheHookConfig, backend: KVStoreBackend) -> None:
         self.cfg = cfg
         self.backend = backend
-        self._orig_update: Optional[Callable[..., Any]] = None
-        self._orig_get_seq: Optional[Callable[..., Any]] = None
-        self._orig_get_mask_sizes: Optional[Callable[..., Any]] = None
         self._target_cls: Optional[Type[Any]] = None
+        self._state = None
+        self._installed: dict[str, Any] = {}
+        self._descriptors: dict[str, tuple[bool, Any]] = {}
 
-    def apply_to_class(self, cache_cls: Type[Any]) -> int:
+    def apply_to_class(self, cache_cls: Type[Any]) -> None:
+        with _HOOK_LOCK:
+            self._apply_to_class(cache_cls)
+
+    def _apply_to_class(self, cache_cls: Type[Any]) -> None:
         if not self.cfg.enabled:
             return
-        if getattr(cache_cls.update, "_vitriol_cache_hook_patched", False):
-            return
+        if self._target_cls is not None:
+            if self._target_cls is cache_cls:
+                return
+            raise RuntimeError("Cache hook is already installed on another class")
+        current = cache_cls.update
+        if getattr(current, "_vitriol_cache_hook_patched", False) and getattr(
+            current, "_vitriol_cache_hook_is_active", lambda: True,
+        )():
+            raise RuntimeError("Another cache hook is already active on this class")
+        if not self.cfg.passthrough_update:
+            logger.warning("Generic cache hooks retain native KV history even when passthrough_update=False")
 
-        self._target_cls = cache_cls
-        self._orig_update = cache_cls.update
-        self._orig_get_seq = cache_cls.get_seq_length
-        self._orig_get_mask_sizes = getattr(cache_cls, "get_mask_sizes", None)
+        state = SimpleNamespace(active=True)
+        original_update = cache_cls.update
+        backend, cfg = self.backend, self.cfg
 
-        def update_wrapped(
-            self_cache,
-            key_states: torch.Tensor,
-            value_states: torch.Tensor,
-            layer_idx: int,
-            cache_kwargs: Optional[dict[str, Any]] = None,
-        ) -> Any:
+        def update_wrapped(handle, key_states, value_states, layer_idx, cache_kwargs=None):
+            if not state.active:
+                return original_update(handle, key_states, value_states, layer_idx, cache_kwargs)
             _bump_cache_hook_stat("cache_update_calls")
-            if self.cfg.auto_enable_mode and not getattr(self_cache, "_vitriol_kv_store_mode", False):
-                self_cache._vitriol_kv_store_mode = True
-            mode = getattr(self_cache, "_vitriol_kv_store_mode", False)
-            if not mode:
-                return self._orig_update(self_cache, key_states, value_states, layer_idx, cache_kwargs)
+            # Compatibility placeholder only; routing never uses a thread-global handle.
+            _thread_local.current_cache = None
+            key, value = original_update(handle, key_states, value_states, layer_idx, cache_kwargs)
+            if cfg.auto_enable_mode:
+                handle._vitriol_kv_store_mode = True
+            if not getattr(handle, "_vitriol_kv_store_mode", False):
+                _invalidate_cache(handle)
+                return key, value
 
-            _thread_local.current_cache = self_cache
-
-            info = dict(cache_kwargs or {})
-            q_len = int(key_states.size(-2))
-            info["q_len"] = q_len
-            _bump_cache_hook_stat("write_kv_calls")
-            self.backend.write_kv(self_cache, int(layer_idx), key_states, value_states, info)
-
-            seq_lens = getattr(self_cache, "_vitriol_seq_lens", None)
-            if seq_lens is None:
-                size = len(getattr(self_cache, "layer_types", [])) or (int(layer_idx) + 1)
-                seq_lens = [0 for _ in range(size)]
-                self_cache._vitriol_seq_lens = seq_lens
-
-            if int(layer_idx) >= len(seq_lens):
-                seq_lens.extend([0] * (int(layer_idx) - len(seq_lens) + 1))
-
-            seq_lens[int(layer_idx)] += q_len
-            if q_len > 1:
-                _bump_cache_hook_stat("update_passthrough_prefill")
-                return self._orig_update(self_cache, key_states, value_states, layer_idx, cache_kwargs)
-            if self.cfg.passthrough_update:
-                _bump_cache_hook_stat("update_passthrough_decode")
-                return self._orig_update(self_cache, key_states, value_states, layer_idx, cache_kwargs)
-            _bump_cache_hook_stat("update_short_circuit_decode")
-            return key_states.contiguous(), value_states.contiguous()
-
-        def get_seq_length_wrapped(self_cache, layer_idx: int | None = 0) -> int:
-            mode = getattr(self_cache, "_vitriol_kv_store_mode", False)
-            if not mode:
-                return self._orig_get_seq(self_cache, layer_idx)
-
-            seq_lens = getattr(self_cache, "_vitriol_seq_lens", None)
-            if not seq_lens:
-                return 0
-
-            if layer_idx is None:
-                for x in seq_lens:
-                    if x:
-                        return int(x)
-                return 0
-
+            if getattr(handle, "_vitriol_cache_backend", None) is not backend:
+                _invalidate_cache(handle)
+                handle._vitriol_cache_backend = backend
+            handle._vitriol_native_cache_retained = True
+            handle._vitriol_cache_epoch = getattr(handle, "_vitriol_cache_epoch", 0) + 1
+            disabled = getattr(handle, "_vitriol_disabled_layers", set())
             idx = int(layer_idx)
-            if idx < 0 or idx >= len(seq_lens):
-                return 0
-            return int(seq_lens[idx])
+            if idx in disabled:
+                return key, value
+            q_len = int(key_states.size(-2))
+            info = dict(cache_kwargs or {})
+            info.update(q_len=q_len, native_key=key, native_value=value)
+            _bump_cache_hook_stat("write_kv_calls")
+            try:
+                backend.write_kv(handle, idx, key_states, value_states, info)
+            except Exception:
+                disabled.add(idx)
+                handle._vitriol_disabled_layers = disabled
+                getattr(handle, "_vitriol_kv_stores", {}).pop(idx, None)
+                _bump_cache_hook_stat("write_kv_fallback")
+                logger.warning("KV backend write failed at layer %s; retaining native attention", idx, exc_info=True)
+                return key, value
 
-        def get_mask_sizes_wrapped(self_cache, cache_position: Any, layer_idx: int) -> tuple[int, int]:
-            mode = getattr(self_cache, "_vitriol_kv_store_mode", False)
-            if not mode or self._orig_get_mask_sizes is None:
-                return self._orig_get_mask_sizes(self_cache, cache_position, layer_idx)
+            _bump_cache_hook_stat("update_passthrough_prefill" if q_len > 1 else "update_passthrough_decode")
+            try:
+                key._vitriol_attention_binding = _AttentionBinding(
+                    weakref.ref(handle), weakref.ref(key), weakref.ref(value), backend,
+                    idx, handle._vitriol_cache_epoch, state,
+                )
+            except (TypeError, AttributeError):
+                _bump_cache_hook_stat("attention_binding_unsupported")
+            return key, value
 
-            seq_lens = getattr(self_cache, "_vitriol_seq_lens", None)
-            past = 0
-            if seq_lens:
-                idx = int(layer_idx)
-                if 0 <= idx < len(seq_lens):
-                    past = int(seq_lens[idx])
-            query_len = _cache_position_query_len(cache_position)
-            return past + query_len, 0
+        methods = {"update": update_wrapped}
+        original_mask = getattr(cache_cls, "get_mask_sizes", None)
+        if original_mask is not None:
+            def get_mask_sizes_wrapped(handle, cache_position, layer_idx):
+                if state.active:
+                    if isinstance(cache_position, (int, float)):
+                        cache_position = torch.tensor([int(cache_position)], dtype=torch.long)
+                    elif isinstance(cache_position, torch.Tensor) and cache_position.ndim == 0:
+                        cache_position = cache_position.unsqueeze(0)
+                # Preserve native sliding/static cache offsets and lengths.
+                return original_mask(handle, cache_position, layer_idx)
+            methods["get_mask_sizes"] = get_mask_sizes_wrapped
 
-        update_wrapped._vitriol_cache_hook_patched = True
-        update_wrapped._vitriol_cache_hook_original = self._orig_update
-        get_seq_length_wrapped._vitriol_cache_hook_patched = True
-        get_seq_length_wrapped._vitriol_cache_hook_original = self._orig_get_seq
-        if self._orig_get_mask_sizes is not None:
-            get_mask_sizes_wrapped._vitriol_cache_hook_patched = True
-            get_mask_sizes_wrapped._vitriol_cache_hook_original = self._orig_get_mask_sizes
+        def mutation_wrapper(original):
+            def wrapped(handle, *args, **kwargs):
+                try:
+                    return original(handle, *args, **kwargs)
+                finally:
+                    # A native method may mutate tensors before raising.
+                    if state.active:
+                        _invalidate_cache(handle)
+            return wrapped
 
-        cache_cls.update = update_wrapped
-        cache_cls.get_seq_length = get_seq_length_wrapped
-        if self._orig_get_mask_sizes is not None:
-            cache_cls.get_mask_sizes = get_mask_sizes_wrapped
+        for name in ("reset", "crop", "reorder_cache", "batch_select_indices", "batch_repeat_interleave"):
+            original = getattr(cache_cls, name, None)
+            if original is not None:
+                methods[name] = mutation_wrapper(original)
+        self._target_cls, self._state = cache_cls, state
+        try:
+            for name, wrapper in methods.items():
+                self._descriptors[name] = (name in cache_cls.__dict__, cache_cls.__dict__.get(name))
+                wrapper._vitriol_cache_hook_patched = True
+                wrapper._vitriol_cache_hook_is_active = lambda: state.active
+                wrapper._vitriol_cache_hook_original = getattr(cache_cls, name)
+                setattr(cache_cls, name, wrapper)
+                self._installed[name] = wrapper
+        except Exception:
+            self.restore()
+            raise
 
     def restore(self) -> None:
-        if self._target_cls is None:
-            return
-        cache_cls = self._target_cls
-        if self._orig_update is not None and getattr(cache_cls.update, "_vitriol_cache_hook_patched", False):
-            cache_cls.update = self._orig_update
-        if self._orig_get_seq is not None and getattr(cache_cls.get_seq_length, "_vitriol_cache_hook_patched", False):
-            cache_cls.get_seq_length = self._orig_get_seq
-        if self._orig_get_mask_sizes is not None and getattr(cache_cls.get_mask_sizes, "_vitriol_cache_hook_patched", False):
-            cache_cls.get_mask_sizes = self._orig_get_mask_sizes
+        with _HOOK_LOCK:
+            if self._state is not None:
+                self._state.active = False
+            cls = self._target_cls
+            if cls is not None:
+                for name, wrapper in self._installed.items():
+                    if getattr(cls, name) is wrapper:
+                        was_local, original = self._descriptors[name]
+                        if was_local:
+                            setattr(cls, name, original)
+                        else:
+                            delattr(cls, name)
+            self._installed.clear()
+            self._descriptors.clear()
+            self._target_cls = None
+            self._state = None
+            _thread_local.current_cache = None
 
 
 class UniversalAttentionPatcher:
-    """Patcher that intercepts attention computations universally."""
+    """Route single-use K/V bindings through a backend, with native fallback."""
+
     def __init__(self, backend: KVStoreBackend) -> None:
         self.backend = backend
-        import transformers.modeling_utils as mu
-        registry = getattr(mu, "ALL_ATTENTION_FUNCTIONS", None)
-        self._supported = registry is not None and hasattr(registry, "get_interface")
-        self.orig_get_interface = registry.get_interface if self._supported else None
         self._patched = False
-        self._warned_unsupported = False
+        self._registry = None
+        self._state = None
+        self._installed: dict[str, Any] = {}
+        self._originals: dict[str, tuple[bool, Any]] = {}
+        self.orig_get_interface = None
 
-    def apply(self) -> Any:
-        if not self._supported:
-            _bump_cache_hook_stat("attention_hook_unsupported")
-            if not self._warned_unsupported:
-                self._warned_unsupported = True
-                logger.warning(
-                    "UniversalAttentionPatcher unsupported: transformers.modeling_utils.ALL_ATTENTION_FUNCTIONS.get_interface not found"
-                )
-            return
-        if self._patched:
-            return
+    def _wrap(self, original, state):
+        backend = self.backend
 
-        import transformers.modeling_utils as mu
+        def attention(module, query_states, key_states, value_states, attention_mask=None, **kwargs):
+            binding = getattr(key_states, "_vitriol_attention_binding", None)
+            cache = binding.cache() if isinstance(binding, _AttentionBinding) else None
+            matches = (
+                state.active and isinstance(binding, _AttentionBinding) and binding.state.active
+                and not binding.consumed and cache is not None and binding.backend is backend
+                and binding.key() is key_states and binding.value() is value_states
+                and binding.layer_idx == getattr(module, "layer_idx", None)
+                and binding.epoch == getattr(cache, "_vitriol_cache_epoch", None)
+                and getattr(cache, "_vitriol_kv_store_mode", False)
+            )
+            if matches:
+                binding.consumed = True
+                if query_states.size(-2) == 1 and binding.layer_idx not in getattr(cache, "_vitriol_disabled_layers", set()):
+                    _bump_cache_hook_stat("read_attention_attempt")
+                    info = {"dropout_p": kwargs.get("dropout", 0.0)}
+                    if "sliding_window" in kwargs:
+                        info["sliding_window"] = kwargs["sliding_window"]
+                    try:
+                        output = backend.read_attention(
+                            handle=cache, layer_idx=binding.layer_idx, query=query_states,
+                            attn_mask=attention_mask, is_causal=False,
+                            scale=kwargs.get("scaling"), info=info,
+                        )
+                        _bump_cache_hook_stat("read_attention_hit")
+                        return output.transpose(1, 2).contiguous(), None
+                    except Exception:
+                        disabled = getattr(cache, "_vitriol_disabled_layers", set())
+                        disabled.add(binding.layer_idx)
+                        cache._vitriol_disabled_layers = disabled
+                        _bump_cache_hook_stat("read_attention_fallback")
+                        logger.warning("KV backend attention failed; using complete native KV", exc_info=True)
+            return original(module, query_states, key_states, value_states, attention_mask, **kwargs)
 
-        def custom_get_interface(config_attn_implementation, eager_attention_forward) -> Any:
-            orig_interface = self.orig_get_interface(config_attn_implementation, eager_attention_forward)
+        return attention
 
-            def custom_attention_forward(module, query_states, key_states, value_states, attention_mask, **kwargs) -> Any:
-                cache = getattr(_thread_local, "current_cache", None)
-                q_len = query_states.size(-2)
-                if cache is not None and q_len == 1 and getattr(cache, "_vitriol_kv_store_mode", False):
-                    layer_idx = getattr(module, "layer_idx", None)
-                    if layer_idx is not None:
-                        _bump_cache_hook_stat("read_attention_attempt")
-                        dropout = kwargs.get("dropout", 0.0)
-                        scaling = kwargs.get("scaling", None)
-                        is_causal = kwargs.get("is_causal", False)
-                        if is_causal is None:
-                            is_causal = getattr(module, "is_causal", True)
-                        is_causal = bool(is_causal) and (query_states.shape[2] > 1) and (attention_mask is None)
-                        info = {"dropout_p": dropout}
-                        if "sliding_window" in kwargs:
-                            info["sliding_window"] = kwargs.get("sliding_window")
-                        try:
-                            attn_output = self.backend.read_attention(
-                                handle=cache,
-                                layer_idx=layer_idx,
-                                query=query_states,
-                                attn_mask=attention_mask,
-                                is_causal=is_causal,
-                                scale=scaling,
-                                info=info
-                            )
-                            _bump_cache_hook_stat("read_attention_hit")
-                            attn_output = attn_output.transpose(1, 2).contiguous()
-                            return attn_output, None
-                        except Exception:
-                            _bump_cache_hook_stat("read_attention_fallback")
-                            logger.debug("Failed to call attention interface for cache hooks")
-                return orig_interface(module, query_states, key_states, value_states, attention_mask, **kwargs)
+    def apply(self) -> None:
+        with _HOOK_LOCK:
+            if self._patched:
+                return
+            import transformers.modeling_utils as mu
+            registry = getattr(mu, "ALL_ATTENTION_FUNCTIONS", None)
+            mapping = isinstance(registry, MutableMapping)
+            legacy = registry is not None and callable(getattr(registry, "get_interface", None))
+            if not mapping and not legacy:
+                _bump_cache_hook_stat("attention_hook_unsupported")
+                raise RuntimeError("Unsupported Transformers attention registry")
+            if id(registry) in _ATTENTION_OWNERS:
+                raise RuntimeError("Another attention hook is already active on this registry")
+            self._registry = registry
+            state = self._state = SimpleNamespace(active=True)
+            _ATTENTION_OWNERS[id(registry)] = self
+            self._patched = True
+            try:
+                if mapping:
+                    local = getattr(registry, "_local_mapping", registry)
+                    for name, original in list(registry.items()):
+                        if not callable(original):
+                            continue
+                        wrapper = self._wrap(original, state)
+                        self._originals[name] = (name in local, original)
+                        registry[name] = wrapper
+                        self._installed[name] = wrapper
+                else:
+                    original_get = registry.get_interface
+                    self.orig_get_interface = original_get
 
-            return custom_attention_forward
+                    def get_interface(*args, **kwargs):
+                        original = original_get(*args, **kwargs)
+                        return self._wrap(original, state) if state.active else original
 
-        mu.ALL_ATTENTION_FUNCTIONS.get_interface = custom_get_interface
-        self._patched = True
-        _bump_cache_hook_stat("attention_hook_enabled")
+                    self._originals["get_interface"] = ("get_interface" in vars(registry), original_get)
+                    registry.get_interface = get_interface
+                    self._installed["get_interface"] = get_interface
+            except Exception:
+                self.restore()
+                raise
+            _bump_cache_hook_stat("attention_hook_enabled")
 
     def restore(self) -> None:
-        if not self._supported:
-            return
-        if not self._patched:
-            return
-        import transformers.modeling_utils as mu
-        mu.ALL_ATTENTION_FUNCTIONS.get_interface = self.orig_get_interface
-        self._patched = False
+        with _HOOK_LOCK:
+            if not self._patched:
+                return
+            self._state.active = False
+            registry = self._registry
+            for name, wrapper in self._installed.items():
+                was_local, original = self._originals[name]
+                if isinstance(registry, MutableMapping):
+                    if registry.get(name) is wrapper:
+                        if was_local:
+                            registry[name] = original
+                        else:
+                            del registry[name]
+                elif getattr(registry, name) is wrapper:
+                    if was_local:
+                        setattr(registry, name, original)
+                    else:
+                        delattr(registry, name)
+            if _ATTENTION_OWNERS.get(id(registry)) is self:
+                del _ATTENTION_OWNERS[id(registry)]
+            self._installed.clear()
+            self._originals.clear()
+            self._registry = None
+            self._patched = False

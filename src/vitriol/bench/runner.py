@@ -237,6 +237,9 @@ def _benchmark_memory_stats(run_out: Dict[str, Any], backend: KVStoreBackend | N
     return {
         "estimated_kv_bytes": estimated_kv_bytes,
         "estimated_kv_megabytes": float(estimated_kv_bytes) / (1024.0 ** 2),
+        "estimated_kv_bytes_scope": "vitriol_store_payload_excludes_native_cache",
+        "native_cache_retained": bool(kv_stats.get("native_cache_retained", False)),
+        "fallback_layers": kv_stats.get("fallback_layers", []),
         "peak_device_bytes": peak_device_bytes,
         "peak_device_megabytes": (float(peak_device_bytes) / (1024.0 ** 2)) if peak_device_bytes is not None else None,
         "layer_stats": kv_stats.get("layer_stats", {}),
@@ -295,7 +298,7 @@ def _apply_vitriol_universal(
     v_quantize_only_first_n_layers: int,
     policy: Any | None = None,
     layer_types: List[str] | None = None,
-    passthrough_update: bool = False,
+    passthrough_update: bool = True,
     enable_attention_patch: bool = True,
 ):
     backend = _make_backend(store_cfg, v_quantize_only_first_n_layers, policy=policy, layer_types=layer_types)
@@ -303,10 +306,16 @@ def _apply_vitriol_universal(
         cfg=CacheHookConfig(enabled=True, passthrough_update=bool(passthrough_update), auto_enable_mode=True),
         backend=backend,
     )
-    cache_patcher.apply_to_class(DynamicCache)
     attn_patcher = UniversalAttentionPatcher(backend=backend) if enable_attention_patch else None
-    if attn_patcher is not None:
-        attn_patcher.apply()
+    try:
+        if attn_patcher is not None:
+            attn_patcher.apply()
+        cache_patcher.apply_to_class(DynamicCache)
+    except Exception:
+        cache_patcher.restore()
+        if attn_patcher is not None:
+            attn_patcher.restore()
+        raise
     return backend, cache_patcher, attn_patcher
 
 
@@ -926,6 +935,4 @@ def compare_smoke(
         "delta_speedup": compare_speedup - base_speedup,
         "policy_diff": diff_policy_plans(_plan_from_suite_result(base), _plan_from_suite_result(compare)),
     }
-
-
 

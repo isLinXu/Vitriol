@@ -23,10 +23,10 @@ def test_cache_hook_get_mask_sizes_accepts_int_cache_position() -> None:
             return key_states, value_states
 
         def get_seq_length(self, layer_idx=0):
-            return 0
+            return 5
 
         def get_mask_sizes(self, cache_position, layer_idx):
-            return 0, 0
+            return self.get_seq_length(layer_idx) + cache_position.shape[0], 0
 
     backend = KVStoreBackend(KVCacheStoreConfig(enable_turbo_quant=False))
     patcher = CacheHookPatcher(CacheHookConfig(enabled=True), backend)

@@ -54,8 +54,13 @@ class KVStoreBackend:
 
     def write_kv(self, handle: Any, layer_idx: int, key_new: torch.Tensor, value_new: torch.Tensor, info: Dict[str, Any]) -> None:
         store = self._ensure_store(handle, int(layer_idx))
-        if store.seq_len == 0 and int(info.get("q_len", 0)) > 1:
-            store.set_prefill(key_new, value_new)
+        native_key, native_value = info.get("native_key"), info.get("native_value")
+        if native_key is not None and native_value is not None and (
+            store.seq_len == 0 or store.seq_len + key_new.shape[-2] != native_key.shape[-2]
+        ):
+            # Warm cache attachment, crop/reset/reorder, or a native sliding
+            # window may require rebuilding from the authoritative native KV.
+            store.set_prefill(native_key, native_value)
         elif store.seq_len == 0:
             store.set_prefill(key_new, value_new)
         else:
@@ -71,7 +76,9 @@ class KVStoreBackend:
         scale: Optional[float],
         info: Dict[str, Any],
     ) -> torch.Tensor:
-        store = self._ensure_store(handle, int(layer_idx))
+        store = (getattr(handle, "_vitriol_kv_stores", None) or {}).get(int(layer_idx))
+        if store is None:
+            raise RuntimeError(f"KV layer {layer_idx} has not been written")
         return store.attention(
             query,
             attn_mask=attn_mask,
@@ -91,6 +98,8 @@ class KVStoreBackend:
             for k, v in stores.items()
         }
         return {
+            "native_cache_retained": bool(getattr(handle, "_vitriol_native_cache_retained", False)),
+            "fallback_layers": sorted(getattr(handle, "_vitriol_disabled_layers", set())),
             "layers": len(stores),
             "seq_lens": {k: item["seq_len"] for k, item in layer_stats.items()},
             "estimated_kv_bytes": int(sum(item["estimated_kv_bytes"] for item in layer_stats.values())),
