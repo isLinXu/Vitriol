@@ -128,6 +128,8 @@ pip install -e ".[api]"
 
 ### Common Tasks
 
+Generation holds exclusive ownership of its output directory until it finishes. A concurrent generation targeting the same directory fails immediately; retry after completion or choose another directory. Leave `.vitriol-generation.lock` in place: its presence alone does not mean a task is still running.
+
 ```bash
 # Theoretical CIS ranking
 python -m vitriol.cli.main cis rank

@@ -130,6 +130,8 @@ pip install -e ".[api]"
 
 ### 常用命令
 
+生成任务运行期间独占其输出目录。另一个任务同时写入同一目录时会立即报错，请在前一任务完成后重试，或使用其他目录。请保留 `.vitriol-generation.lock`；该文件存在并不表示任务仍在运行。
+
 ```bash
 # 理论 CIS 排行
 python -m vitriol.cli.main cis rank

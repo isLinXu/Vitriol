@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- Close inherited output-lock descriptors after Python fork without unlocking the parent; serialize descriptor registration with fork and preserve active registrations across module reloads.
+- Prevent inherited context cleanup from closing reused child descriptors, and preserve the original generation error when explicit unlock also fails.
+
+- Exclude concurrent generators from the same output directory with a nonblocking OS lock covering the full public generation call, including aliases and reentrant calls.
+- Release directory ownership after generation errors and clean reserved orphan temporary artifacts only after acquiring the lock.
+
+- Journal final shard renames before moving files, recover partially completed renames, and synchronize checkpoint/index/generator paths after publication.
+- Replace stale final shard destinations, publish index JSON atomically, and stop generation when required checkpoint commits fail.
+- Account sparse descriptors through their nbytes protocol while preserving compact tensor storage accounting across module reloads.
+
+- Restore default RNG streams at committed shard boundaries; validate checkpoint digests, accounting, ordered progress and runtime compatibility before resuming.
+- Read Safetensors checkpoint metadata without materializing weights, account SparseSpec output correctly, and preserve completed empty shards.
+- Make Quantum scaling stable across processes without reseeding global RNG, and include standard PyTorch format metadata for Transformers loading.
+- Regenerate learned strategies on restart when their network state is absent, avoiding mixed-generator artifacts.
+
+- Preserve every generated tensor across shard flushes and validate persisted checkpoints before resuming; write shards and checkpoints atomically.
+- Reject generation into the source model directory and non-local shard filenames.
+- Reject missing, unexpected, or mismatched weights during validation instead of certifying automatically initialized replacements; reset reports between attempts.
+- Preserve offline policy when resolving trusted custom model classes and restore active configuration after visualization errors.
+- Restore lazy public exports used by the `bench` CLI after module extraction.
+- Correct QJL attention dimensions and mixed precision, sliding-window proxy invalidation, masked/padded attention, dropout scaling, and adaptive single-token quantization.
+- Make shape-preserving Hadamard rotations invertible for non-power-of-two dimensions, with float32 accumulation for half precision.
+- Keep adaptive KV precision per batch across incremental appends, restore the original rotation basis, and reallocate after cache rebuilds; support GQA and distinct key/value dimensions.
+- Compute adaptive precision from original Q/K coordinates in float32, avoiding half-precision overflow and zero-entropy NaNs.
+- Bound sliding-window recent-token reserves by the cache budget and handle a zero allocation for older tokens correctly.
+- Preserve SDPA and automatic attention selection when FlashAttention is unavailable, so compatibility initialization does not silently bypass KV runtime patches.
+- Validate runtime preprocessing cache entries against live tensor identity, version and layout; bypass reuse for untracked inference tensors, autograd graphs and autocast contexts, and release entries on restore.
+- Make runtime patch ownership explicit, reject conflicting active instances, preserve external wrappers, and support exception-safe nested contexts without repopulating caches after restoration.
+- Forward positional attention arguments, custom scaling and GQA through compute-skip/sparse paths; preserve batched masks, dropout scaling, double precision and finite gradients for fully masked rows.
+- Give each runtime configuration its own mutable adaptive codec.
+- Support both mapping-based and legacy Transformers attention registries; bind backend reads to the actual returned K/V tensors instead of a thread-global cache handle.
+- Retain complete native KV history for reliable backend-failure fallback, invalidate sidecar stores after cache mutations, seed warm caches from native history, and keep handles usable after hooks are removed.
+- Make cache/attention hook ownership and combined installation rollback explicit, preserve external wrappers and native mask offsets, and expose fallback layers and native-cache retention in benchmark metadata.
+- Score generated tokens using their causal logits, restore inference patches on failure, and report unmeasured KL/layer metrics as unavailable.
+- Honor API defaults and nested security overrides, return HTTP 429 for rate limits, keep generation off the event loop, and fix job counts and log streaming after buffer overflow.
+- Use supplied NAS evaluator scores instead of random quality scores.
+- Support low-precision and degenerate model fingerprints; keep weight-statistics sampling bounded for noncontiguous and broadcast tensors.
+- Install API test dependencies in CI and separate the integration suite from the full-suite coverage threshold.
+
+### Changed
+
+- Concurrent generation into an active output directory raises recoverable OutputDirectoryBusyError. The persistent .vitriol-generation.lock marker is retained; OS locking determines whether it is busy.
+
+- New checkpoint content digests use a versioned, allocation-independent chunked SHA-256 format that skips sparse holes when supported; previous whole-file SHA-256 checkpoints remain readable.
+
+- Generation checkpoints now use a versioned signature with RNG state and SHA-256 shard digests. Pre-RNG checkpoints regenerate; dense files and filesystems without extent support still require sequential reads.
+
+- PPL reports now label self-generated continuations and estimated KV payload memory explicitly. Unknown KL values serialize as `null` rather than synthetic numbers.
+- Preserve the existing configuration precedence: explicit/CLI values > YAML > environment > defaults.
+- Non-power-of-two shape-preserving KV rotations now use consecutive power-of-two blocks (e.g. 80 = 64 + 16). Rebuild experimental rotated caches produced by older code; the signed, padded TurboQuant/TurboQuantum transforms retain their existing layouts.
+- Generic cache hooks now always update native KV, including legacy `passthrough_update=False` requests (which log a warning). Store payload estimates exclude this native copy and must not be interpreted as total KV memory savings.
+
+---
+
 ## [0.3.1] - 2026-06-18
 
 ### Added
