@@ -25,6 +25,6 @@ jobs:
 
       - name: Run golden-path integration tests
         run: |
-          pytest tests/integration -v --tb=short
+          pytest tests/integration -o addopts='' -v --tb=short
         env:
           PYTHONPATH: src

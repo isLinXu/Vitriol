@@ -127,8 +127,15 @@ class TestEvolutionTree:
     def test_build(self):
         tree = EvolutionTree()
         tree.add_model("test", config={"hidden_size": 128})
-        tree.build()
+        config = MagicMock()
+        config.to_dict.return_value = {"hidden_size": 128}
+        # Building known families loads configs; unit tests must not depend on
+        # Hub availability or leave dozens of remote downloads running in CI.
+        with patch("vitriol.evolution.tree_builder.hf_load_config", return_value=config):
+            tree.build()
         assert "test" in tree.nodes
+        for family in tree.families.values():
+            assert family["root"] in tree.nodes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -319,4 +326,3 @@ class TestArchitectureRecommender:
         mock_tree_class.return_value = mock_tree
         rec = ArchitectureRecommender()
         assert rec.VRAM_COEFFICIENT == 2.0
-

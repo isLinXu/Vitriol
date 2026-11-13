@@ -13,7 +13,6 @@ from .autokv import default_prompt_suite, prefix_match_tokens
 
 _RUNNER_EXPORTS = {
     "RunConfig",
-    "analyze_kv_quantization",
     "build_policy_plan",
     "compare_long_context_preset",
     "compare_short_suite",
@@ -24,7 +23,11 @@ _RUNNER_EXPORTS = {
     "run_long_context_preset",
     "run_short_suite",
     "run_smoke",
-    # TurboQuantum
+}
+
+_KV_EXPORTS = {"analyze_kv_quantization"}
+
+_TURBOQUANT_EXPORTS = {
     "run_turboquantum_synthetic",
     "compare_turboquantum_modes",
     "run_turboquantum_on_model_kv",
@@ -34,6 +37,16 @@ _PPL_EXPORTS = {"PPLConfig", "PPLResult", "PPLEvaluator"}
 
 
 def __getattr__(name: str):  # pragma: no cover
+    if name in _KV_EXPORTS:
+        from . import runner_kv as _runner_kv
+
+        return getattr(_runner_kv, name)
+
+    if name in _TURBOQUANT_EXPORTS:
+        from . import runner_turboquant as _runner_turboquant
+
+        return getattr(_runner_turboquant, name)
+
     if name in _RUNNER_EXPORTS:
         from . import runner as _runner
 
@@ -51,6 +64,8 @@ __all__ = [
     "prefix_match_tokens",
     # runner exports (lazy)
     *_RUNNER_EXPORTS,
+    *_KV_EXPORTS,
+    *_TURBOQUANT_EXPORTS,
     # ppl exports (lazy)
     *_PPL_EXPORTS,
 ]
