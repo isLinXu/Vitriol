@@ -146,7 +146,9 @@ class ArchitectureHasher:
                 "normalized_shape": getattr(module, 'normalized_shape', None),
                 "num_features": getattr(module, 'num_features', None),
                 "eps": module.eps,
-                "elementwise_affine": module.elementwise_affine
+                "elementwise_affine": (
+                    module.elementwise_affine if isinstance(module, nn.LayerNorm) else module.affine
+                )
             })
 
         else:
@@ -198,7 +200,12 @@ class WeightsHasher:
     def _compute_weight_stats(self, name: str, param: torch.Tensor) -> Dict:
         """Compute statistics for a weight tensor."""
         # Convert to numpy for processing
-        weights = param.detach().cpu().numpy()
+        tensor = param.detach().cpu()
+        # NumPy lacks bfloat16; float16 rounding can overflow its accumulator.
+        # Float32 preserves the original values for both low-precision formats.
+        if tensor.dtype in (torch.float16, torch.bfloat16):
+            tensor = tensor.float()
+        weights = tensor.numpy()
 
         # Round to specified precision for robustness
         weights = np.round(weights, self.precision)
@@ -207,12 +214,12 @@ class WeightsHasher:
         stats = {
             "name": name,
             "shape": list(param.shape),
-            "mean": round(float(np.mean(weights)), self.precision),
-            "std": round(float(np.std(weights)), self.precision),
-            "min": round(float(np.min(weights)), self.precision),
-            "max": round(float(np.max(weights)), self.precision),
-            "median": round(float(np.median(weights)), self.precision),
-            "sparsity": round(float(np.mean(weights == 0)), self.precision),
+            "mean": round(float(np.mean(weights)), self.precision) if weights.size else 0.0,
+            "std": round(float(np.std(weights)), self.precision) if weights.size else 0.0,
+            "min": round(float(np.min(weights)), self.precision) if weights.size else 0.0,
+            "max": round(float(np.max(weights)), self.precision) if weights.size else 0.0,
+            "median": round(float(np.median(weights)), self.precision) if weights.size else 0.0,
+            "sparsity": round(float(np.mean(weights == 0)), self.precision) if weights.size else 0.0,
             # Perceptual features
             "histogram": self._compute_histogram(weights),
             "gradient_stats": self._compute_gradient_stats(weights)
@@ -237,8 +244,8 @@ class WeightsHasher:
         dy = np.diff(weights, axis=1) if weights.ndim > 1 else np.array([0])
 
         return {
-            "dx_mean": round(float(np.mean(np.abs(dx))), self.precision),
-            "dy_mean": round(float(np.mean(np.abs(dy))), self.precision)
+            "dx_mean": round(float(np.mean(np.abs(dx))), self.precision) if dx.size else 0.0,
+            "dy_mean": round(float(np.mean(np.abs(dy))), self.precision) if dy.size else 0.0,
         }
 
 
@@ -402,8 +409,14 @@ class FingerprintEngine:
 
         similarities = []
         for name in common_params:
-            p1 = params1[name].detach().cpu().numpy().flatten()
-            p2 = params2[name].detach().cpu().numpy().flatten()
+            p1_tensor = params1[name].detach().cpu()
+            p2_tensor = params2[name].detach().cpu()
+            if p1_tensor.dtype in (torch.float16, torch.bfloat16):
+                p1_tensor = p1_tensor.float()
+            if p2_tensor.dtype in (torch.float16, torch.bfloat16):
+                p2_tensor = p2_tensor.float()
+            p1 = p1_tensor.numpy().flatten()
+            p2 = p2_tensor.numpy().flatten()
 
             # Cosine similarity
             if len(p1) == len(p2):

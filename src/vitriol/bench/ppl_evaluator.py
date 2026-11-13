@@ -1,8 +1,9 @@
 """
 End-to-End Perplexity (PPL) Evaluation Framework for Vitriol.
 
-Replaces the old "proxy metrics" (MSE, cosine similarity of attention outputs)
-with a real, interpretable evaluation metric that the research community trusts.
+Scores prompts and greedy continuations with causal negative log-likelihood.
+This diagnostic is not a held-out corpus evaluation: each run scores its own
+continuation. Distribution metrics remain unavailable without aligned logits.
 
 Core Idea:
     Instead of measuring "how close are quantized KV tensors to originals"
@@ -20,9 +21,9 @@ Architecture:
 Metrics:
     1. Perplexity (PPL): exp(average negative log-likelihood)
     2. Token Match Rate: Exact / Prefix match percentages
-    3. Logit KL Divergence: Distributional shift per layer
-    4. Memory Savings: Actual VRAM reduction
-    5. Throughput: Tokens/sec before/after
+    3. Logit KL Divergence: Available only when logits are explicitly supplied
+    4. Memory Savings: Estimated KV payload reduction, not actual VRAM
+    5. Throughput: Tokens/sec including prefill
 
 Usage:
     >>> from src.vitriol.bench.ppl_evaluator import PPLEvaluator, PPLConfig
@@ -114,8 +115,8 @@ class PPLResult:
 
     # Per-layer analysis
     layers: List[LayerPPLResult]
-    avg_logit_kl: float
-    worst_layer_kl: Tuple[int, float]  # (layer_idx, kl_div)
+    avg_logit_kl: Optional[float]
+    worst_layer_kl: Optional[Tuple[int, float]]  # (layer_idx, kl_div), if measured
 
     # Timing
     eval_time_seconds: float
@@ -133,8 +134,11 @@ class PPLResult:
             "token_prefix_match_avg": round(self.token_prefix_match_avg, 4),
             "memory_savings_pct": round(self.memory_savings_pct, 1),
             "speedup_ratio": round(self.speedup_ratio, 3),
-            "avg_logit_kl": round(self.avg_logit_kl, 6),
-            "worst_layer_kl": list(self.worst_layer_kl),
+            "avg_logit_kl": round(self.avg_logit_kl, 6) if self.avg_logit_kl is not None else None,
+            "worst_layer_kl": list(self.worst_layer_kl) if self.worst_layer_kl is not None else None,
+            "ppl_scope": "prompt_and_self_generated_continuation",
+            "memory_scope": "estimated_kv_payload_bytes",
+            "throughput_scope": "prefill_and_decode",
             "num_layers_evaluated": len(self.layers),
             "eval_time_seconds": round(self.eval_time_seconds, 2),
         }
@@ -145,6 +149,11 @@ class PPLResult:
         return f"""# 📊 PPL Evaluation Report: {self.model_id}
 
 ## Summary {stars}
+
+PPL scores the prompt and each run's own greedy continuation, not a shared held-out corpus.
+Memory figures estimate KV payload size; throughput includes prefill.
+Without cache telemetry, memory savings conservatively default to 0%.
+{"Logit KL and per-layer attention metrics were not measured." if self.avg_logit_kl is None else ""}
 
 | Metric | Value |
 |--------|-------|
@@ -213,8 +222,8 @@ class PPLEvaluator:
     """
     End-to-End Perplexity Evaluator for Vitriol's KV Cache compression.
 
-    This replaces proxy metrics (attention MSE, cosine sim) with real,
-    publication-quality evaluation metrics.
+    PPL is a diagnostic on the prompt and self-generated continuation; it does
+    not substitute for evaluation on a shared held-out corpus.
 
     Pipeline:
         1. Load model + tokenizer
@@ -285,12 +294,17 @@ class PPLEvaluator:
         max_new_tokens: int,
     ) -> Tuple[float, List[int], List[Dict[str, float]]]:
         """
-        Run greedy generation and compute perplexity.
+        Score the prompt and greedy continuation under their causal distributions.
+
+        This is self-generation PPL, not held-out corpus PPL. Runs with different
+        continuations score different targets and should be interpreted accordingly.
 
         Returns:
             (perplexity, generated_token_ids, per_token_losses)
         """
         self._model.eval()
+        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise ValueError("Generation PPL evaluation requires a single sequence")
         total_loss = 0.0
         total_tokens = 0
         generated_ids = []
@@ -307,37 +321,32 @@ class PPLEvaluator:
         next_token_logits = out.logits[:, -1:, :]
 
         # Compute prefill loss
-        labels = input_ids[:, 1:]  # Shifted by one
+        labels = input_ids[:, 1:].clone()  # Shifted by one
         shift_logits = out.logits[:, :-1, :]
-        if labels.shape[1] > 0:
+        if attention_mask is not None:
+            valid = attention_mask[:, 1:].bool() & attention_mask[:, :-1].bool()
+            labels.masked_fill_(~valid, -100)
+        label_count = int((labels != -100).sum().item())
+        if label_count > 0:
             loss = F.cross_entropy(
-                shift_logits.reshape(-1, shift_logits.size(-1)),
+                shift_logits.float().reshape(-1, shift_logits.size(-1)),
                 labels.reshape(-1),
                 reduction='sum',
             )
             total_loss += loss.item()
-            total_tokens += labels.numel()
-            per_token_nlls.append({"phase": "prefill", "nll_sum": loss.item(), "tokens": labels.numel()})
+            total_tokens += label_count
+            per_token_nlls.append({"phase": "prefill", "nll_sum": loss.item(), "tokens": label_count})
 
         # Autoregressive decode
-        current_input = next_token_logits.argmax(dim=-1)
-
         for step in range(max_new_tokens):
-            step_out = self._model(
-                input_ids=current_input,
-                past_key_values=past_kv,
-                return_dict=True,
-                use_cache=True,
-            )
-            past_kv = step_out.past_key_values
-            step_logits = step_out.logits[:, -1, :]
-
-            # Loss for this step (predicting this token was part of training)
-            # For PPL during generation, we measure how well the model predicts
-            # each next token given context
+            current_input = next_token_logits.argmax(dim=-1)
+            # Score the token with the distribution that selected it, before
+            # feeding it back into the model to predict the following token.
             token_id = current_input.item()
-            token_nll = F.cross_entropy(step_logits.reshape(-1, step_logits.size(-1)),
-                                          torch.tensor([token_id], device=self.device))
+            token_nll = F.cross_entropy(
+                next_token_logits.float().reshape(-1, next_token_logits.size(-1)),
+                current_input.reshape(-1),
+            )
             total_loss += token_nll.item()
             total_tokens += 1
             per_token_nlls.append({
@@ -347,7 +356,6 @@ class PPLEvaluator:
             })
 
             generated_ids.append(token_id)
-            current_input = step_logits.argmax(dim=-1, keepdim=True)
 
             # Stop at EOS
             eos_ids = set()
@@ -356,8 +364,23 @@ class PPLEvaluator:
             cfg_eos = getattr(getattr(self._model, 'config', None), 'eos_token_id', None)
             if isinstance(cfg_eos, int):
                 eos_ids.add(cfg_eos)
-            if token_id in eos_ids:
+            if token_id in eos_ids or step + 1 == max_new_tokens:
                 break
+
+            if attention_mask is not None:
+                attention_mask = torch.cat([
+                    attention_mask,
+                    attention_mask.new_ones((attention_mask.shape[0], 1)),
+                ], dim=-1)
+            step_out = self._model(
+                input_ids=current_input,
+                attention_mask=attention_mask,
+                past_key_values=past_kv,
+                return_dict=True,
+                use_cache=True,
+            )
+            past_kv = step_out.past_key_values
+            next_token_logits = step_out.logits[:, -1:, :]
 
         ppl = math.exp(total_loss / total_tokens) if total_tokens > 0 else float('inf')
         return ppl, generated_ids, per_token_nlls
@@ -461,24 +484,26 @@ class PPLEvaluator:
             backend = None
 
         # ── Phase 3: Tuned (with KV quantization) ──
-        sync_device(self.device)
-        t1 = time.perf_counter()
-        ppl_tuned, gen_ids_tuned, nlls_tuned = self._compute_ppl_for_generation(
-            *self._tokenize(prompt),
-            max_new_tokens=self.cfg.max_new_tokens,
-        )
-        sync_device(self.device)
-        t_tuned = time.perf_counter() - t1
-        text_tuned = self._tokenizer.decode(gen_ids_tuned, skip_special_tokens=True)
-
-        # Memory estimate for tuned
-        mem_tuned = self._estimate_kv_memory_tuned(backend)
-
-        # Restore patches
-        if cache_patcher is not None:
-            cache_patcher.restore()
-        if attn_patcher is not None:
-            attn_patcher.restore()
+        try:
+            sync_device(self.device)
+            t1 = time.perf_counter()
+            ppl_tuned, gen_ids_tuned, nlls_tuned = self._compute_ppl_for_generation(
+                *self._tokenize(prompt),
+                max_new_tokens=self.cfg.max_new_tokens,
+            )
+            sync_device(self.device)
+            t_tuned = time.perf_counter() - t1
+            text_tuned = self._tokenizer.decode(gen_ids_tuned, skip_special_tokens=True)
+            mem_tuned = self._estimate_kv_memory_tuned(backend)
+        finally:
+            # Hooks patch shared Transformers classes; never leak them into a
+            # subsequent run when inference or tokenization raises.
+            try:
+                if attn_patcher is not None:
+                    attn_patcher.restore()
+            finally:
+                if cache_patcher is not None:
+                    cache_patcher.restore()
 
         # ── Phase 4: Compute comparison metrics ──
         kl_div, layer_results = self._compute_overall_metrics(
@@ -522,7 +547,7 @@ class PPLEvaluator:
 
             layers=layer_results,
             avg_logit_kl=kl_div,
-            worst_layer_kl=(0, kl_div),
+            worst_layer_kl=(0, kl_div) if kl_div is not None else None,
 
             eval_time_seconds=eval_time,
         )
@@ -584,11 +609,14 @@ class PPLEvaluator:
             return self._estimate_kv_memory()
         try:
             stats = backend.stats(None) if hasattr(backend, 'stats') else {}
-            return int(stats.get("estimated_kv_bytes", 0) or 0)
+            measured = int(stats.get("estimated_kv_bytes", 0) or 0)
+            if measured > 0:
+                return measured
         except Exception as exc:
             logger.debug("KV memory stats query failed, using estimate: %s", exc)
-            # Estimate based on compression ratio
-            return int(self._estimate_kv_memory() * 0.25)  # Rough 4× estimate
+        # A missing cache handle does not prove zero allocation (or 4x savings).
+        # Keep the baseline estimate until actual cache telemetry is available.
+        return self._estimate_kv_memory()
 
     def _compute_overall_metrics(
         self,
@@ -596,23 +624,13 @@ class PPLEvaluator:
         ids_tuned: List[int],
         text_base: str,
         text_tuned: str,
-    ) -> Tuple[float, List[LayerPPLResult]]:
-        """Compute overall comparison metrics."""
-        # Simple overall metrics when we can't hook into internal layers
-        match_count = sum(a == b for a, b in zip(ids_base, ids_tuned))
-        total = max(len(ids_base), len(ids_tuned))
+    ) -> Tuple[Optional[float], List[LayerPPLResult]]:
+        """Generated token IDs cannot determine logit KL or attention MSE.
 
-        # Use token mismatch rate as a pseudo-KL metric
-        kl_approx = (total - match_count) / total * 0.1  # Scaled to reasonable range
-
-        layer_result = LayerPPLResult(
-            layer_idx=0, layer_type="overall",
-            logit_kl_divergence=kl_approx,
-            logit_cosine_similarity=match_count / total,
-            attention_mse=kl_approx,
-            kv_compression_ratio=0.25,
-        )
-        return kl_approx, [layer_result]
+        Leave these metrics unavailable until aligned logits/activations are
+        collected. Token agreement is reported separately by evaluate().
+        """
+        return None, []
 
     def compare_presets(
         self,

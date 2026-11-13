@@ -387,12 +387,14 @@ def _compute_tensor_stats(
                 "max": 0.0,
                 "sparsity": 1.0,
                 "l2_norm": 0.0,
+                "sampled": False,
+                "sample_size": 0,
             }
 
         # Sample to avoid OOM: if numel > sample_size, sample with a fixed seed for reproducibility.
         # Keep the source tensor in its native dtype until after sampling so we don't
         # materialize a full float32 copy for very large tensors.
-        flat = tensor.detach().reshape(-1)
+        source = tensor.detach()
         if sample_size <= 0:
             sample_size = 1_000_000
 
@@ -401,9 +403,20 @@ def _compute_tensor_stats(
             gen = torch.Generator(device="cpu")
             gen.manual_seed(int(seed))
             indices = torch.randint(0, numel, (int(sample_size),), generator=gen)
-            sample_t = flat.index_select(0, indices.to(device=flat.device)).to(torch.float32).cpu()
+            if source.is_contiguous():
+                sample = source.view(-1).index_select(0, indices.to(device=source.device))
+            else:
+                # Flattening a transpose or a partially expanded tensor can copy
+                # its entire logical contents. Index the original view instead.
+                coordinates = []
+                remaining = indices
+                for dimension in reversed(source.shape):
+                    coordinates.append((remaining % dimension).to(device=source.device))
+                    remaining = torch.div(remaining, dimension, rounding_mode="floor")
+                sample = source[tuple(reversed(coordinates))]
+            sample_t = sample.to(torch.float32).cpu()
         else:
-            sample_t = flat.to(torch.float32).cpu()
+            sample_t = source.reshape(-1).to(torch.float32).cpu()
 
         mean_val = float(sample_t.mean().item())
         std_val = float(sample_t.std(unbiased=False).item())
@@ -432,6 +445,8 @@ def _compute_tensor_stats(
             "max": max_val,
             "sparsity": sparsity,
             "l2_norm": l2_norm,
+            "sampled": numel > sample_size,
+            "sample_size": int(sample_t.numel()),
         }
     except Exception as e:
         logger.debug("Stats computation failed: %s", e)
@@ -551,7 +566,7 @@ def inspect_weights(
             if regex and not regex.search(name):
                 continue
 
-            stats = _compute_tensor_stats(tensor)
+            stats = _compute_tensor_stats(tensor, sample_size=max_per_layer_sample)
             stats["name"] = name
             stats["layer_type"] = _classify_layer(name)
             stats["shard_file"] = wf.name
