@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use monotonic elapsed time and remaining wait budgets for distributed task waits; make nonpositive timeouts immediate and reject NaN without cancelling task execution.
+- Copy submitted shard lists and return detached task status snapshots, including nested results, so caller mutations cannot change queued work through those interfaces.
+
 - Make distributed coordinator and worker startup idempotent, join owned coroutines on shutdown, and preserve unfinished tasks for restart.
 - Retire disconnected or timed-out execution attempts before retry so late results cannot overwrite reassigned work or double-count completion; handle zero start timestamps in timeout checks.
 
