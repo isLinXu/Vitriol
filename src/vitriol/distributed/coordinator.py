@@ -10,8 +10,10 @@ Enables distributed model weight generation across multiple nodes:
 
 import asyncio
 import logging
+import math
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
@@ -260,7 +262,7 @@ class DistributedCoordinator:
         task = GenerationTask(
             id=task_id,
             model_id=model_id,
-            shard_indices=shard_indices,
+            shard_indices=list(shard_indices),
             strategy=strategy,
             dtype=dtype
         )
@@ -274,7 +276,7 @@ class DistributedCoordinator:
         return task_id
 
     async def get_task_status(self, task_id: str) -> Optional[Dict]:
-        """Get task status."""
+        """Get a detached status snapshot, including shards and nested results."""
         if task_id not in self.tasks:
             return None
 
@@ -283,19 +285,26 @@ class DistributedCoordinator:
             "id": task.id,
             "status": task.status,
             "model_id": task.model_id,
-            "shard_indices": task.shard_indices,
+            "shard_indices": list(task.shard_indices),
             "assigned_worker": task.assigned_worker,
             "created_at": task.created_at,
             "started_at": task.started_at,
             "completed_at": task.completed_at,
-            "result": task.result,
+            "result": deepcopy(task.result),
             "error": task.error,
             "retry_count": task.retry_count
         }
 
     async def wait_for_task(self, task_id: str, timeout: Optional[float] = None) -> Optional[GenerationTask]:
-        """Wait for task completion."""
-        start = time.time()
+        """Wait for completion without cancelling the underlying task.
+
+        None or positive infinity waits indefinitely. Nonpositive timeouts only
+        inspect the current status. NaN is rejected. The returned terminal task
+        is the live task object; use get_task_status() for a detached snapshot.
+        """
+        if timeout is not None and math.isnan(timeout):
+            raise ValueError("timeout must not be NaN")
+        start = time.monotonic()
 
         while True:
             task = self.tasks.get(task_id)
@@ -305,10 +314,14 @@ class DistributedCoordinator:
             if task.status in ["completed", "failed"]:
                 return task
 
-            if timeout and (time.time() - start) > timeout:
-                return None
+            delay = 0.1
+            if timeout is not None:
+                remaining = timeout - (time.monotonic() - start)
+                if remaining <= 0:
+                    return None
+                delay = min(delay, remaining)
 
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(delay)
 
     async def _heartbeat_monitor(self):
         """Monitor worker heartbeats."""
