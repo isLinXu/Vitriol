@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Measure distributed heartbeat and execution watchdogs with monotonic clocks while keeping public timestamps in Unix time; reset and release execution timing across retries, disconnects, completion, and restart.
+- Respect short execution timeouts with a bounded watchdog polling interval, expire attempts at the deadline, and reject nonpositive or nonfinite watchdog configuration.
+
 - Use monotonic elapsed time and remaining wait budgets for distributed task waits; make nonpositive timeouts immediate and reject NaN without cancelling task execution.
 - Copy submitted shard lists and return detached task status snapshots, including nested results, so caller mutations cannot change queued work through those interfaces.
 
