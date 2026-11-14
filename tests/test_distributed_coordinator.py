@@ -308,6 +308,10 @@ class TestDistributedCoordinator:
             id="t1", model_id="test", shard_indices=[0], strategy="compact", dtype="bfloat16"
         )
 
+        task.status = "running"
+        task.assigned_worker = worker.id
+        worker.current_task = task.id
+        coord._executions[task.id] = asyncio.current_task()
         await coord._execute_task(task, worker)
 
         assert task.status == "completed"
@@ -327,6 +331,8 @@ class TestDistributedCoordinator:
             id="t1", model_id="test", shard_indices=[0], strategy="compact", dtype="bfloat16"
         )
         task.status = "running"
+        task.assigned_worker = worker.id
+        worker.current_task = task.id
 
         await coord._handle_task_failure(task, worker, "Error")
 
@@ -345,6 +351,9 @@ class TestDistributedCoordinator:
             id="t1", model_id="test", shard_indices=[0], strategy="compact", dtype="bfloat16"
         )
         task.retry_count = 2
+        task.status = "running"
+        task.assigned_worker = worker.id
+        worker.current_task = task.id
 
         await coord._handle_task_failure(task, worker, "Error")
 

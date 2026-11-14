@@ -14,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,8 @@ class DistributedCoordinator:
     Coordinator for distributed weight generation.
 
     Manages a cluster of worker nodes for parallel generation.
+    Execution is currently simulated; network transport is not implemented.
+    Async operations, including stop/restart, must share one event loop.
     """
 
     def __init__(
@@ -92,6 +94,11 @@ class DistributedCoordinator:
         self._pending_tasks: Optional[asyncio.Queue] = None
         self._deferred_tasks: List[GenerationTask] = []
         self.running = False
+        self._background_tasks: Set[asyncio.Task] = set()
+        self._executions: Dict[str, asyncio.Task] = {}
+        # Retired attempts stay owned until cancellation has finished.
+        self._execution_tasks: Set[asyncio.Task] = set()
+        self._stop_task: Optional[asyncio.Task] = None
 
         # Statistics
         self.stats = {
@@ -117,19 +124,60 @@ class DistributedCoordinator:
 
     async def start(self) -> None:
         """Start the coordinator."""
+        while self._stop_task is not None and not self._stop_task.done():
+            await asyncio.shield(self._stop_task)
+        if self.running:
+            return
         self.running = True
 
         # Start background tasks
-        asyncio.create_task(self._heartbeat_monitor())
-        asyncio.create_task(self._task_scheduler())
-        asyncio.create_task(self._task_timeout_monitor())
+        self._background_tasks = {
+            asyncio.create_task(self._heartbeat_monitor()),
+            asyncio.create_task(self._task_scheduler()),
+            asyncio.create_task(self._task_timeout_monitor()),
+        }
 
         logger.info("Coordinator started")
 
     async def stop(self) -> None:
-        """Stop the coordinator."""
+        """Cancel and join owned coroutines, preserving unfinished work for restart."""
+        if self._stop_task is None or self._stop_task.done():
+            self.running = False
+            self._stop_task = asyncio.create_task(self._shutdown())
+        # A cancelled caller must not interrupt shared shutdown cleanup.
+        await asyncio.shield(self._stop_task)
+
+    async def _shutdown(self) -> None:
         self.running = False
+        owned = self._background_tasks | self._execution_tasks
+        self._executions.clear()
+        for execution in owned:
+            execution.cancel()
+        for task in self.tasks.values():
+            if task.status == "running":
+                worker = self.workers.get(task.assigned_worker)
+                if worker is not None and worker.current_task == task.id:
+                    worker.status = WorkerStatus.IDLE
+                    worker.current_task = None
+                self._requeue(task)
+        await asyncio.gather(*owned, return_exceptions=True)
+        self._background_tasks.clear()
+        self._execution_tasks.clear()
         logger.info("Coordinator stopped")
+
+    def _requeue(self, task: GenerationTask) -> None:
+        task.status = "pending"
+        task.assigned_worker = None
+        task.started_at = None
+        if self._pending_tasks is None:
+            self._deferred_tasks.append(task)
+        else:
+            self._pending_tasks.put_nowait(task)
+
+    def _retire_execution(self, task_id: str) -> None:
+        execution = self._executions.pop(task_id, None)
+        if execution is not None and execution is not asyncio.current_task():
+            execution.cancel()
 
     def register_worker(
         self,
@@ -176,13 +224,8 @@ class DistributedCoordinator:
             if worker.current_task:
                 task = self.tasks.get(worker.current_task)
                 if task and task.status == "running":
-                    task.status = "pending"
-                    task.assigned_worker = None
-                    if self._pending_tasks is None:
-                        self._deferred_tasks.append(task)
-                    else:
-                        # The queue is unbounded; no background task is needed.
-                        self._pending_tasks.put_nowait(task)
+                    self._retire_execution(task.id)
+                    self._requeue(task)
                     logger.warning(f"Reassigned task {task.id} from disconnected worker")
 
             del self.workers[worker_id]
@@ -288,7 +331,14 @@ class DistributedCoordinator:
         while self.running:
             try:
                 # Get pending task
-                task = await asyncio.wait_for(self.pending_tasks.get(), timeout=1)
+                # Direct queue waits are cancelled by stop(); no polling task can
+                # consume an item just as the scheduler itself is cancelled.
+                task = await self.pending_tasks.get()
+                if task.status != "pending":
+                    continue
+                if not self.running:
+                    self.pending_tasks.put_nowait(task)
+                    break
 
                 # Find available worker
                 worker = self._select_worker()
@@ -298,6 +348,9 @@ class DistributedCoordinator:
                     task.status = "running"
                     task.assigned_worker = worker.id
                     task.started_at = time.time()
+                    task.error = None
+                    task.completed_at = None
+                    task.result = None
 
                     worker.status = WorkerStatus.BUSY
                     worker.current_task = task.id
@@ -305,14 +358,15 @@ class DistributedCoordinator:
                     logger.info(f"Task {task.id} assigned to worker {worker.id}")
 
                     # Simulate task execution (in real implementation, send to worker)
-                    asyncio.create_task(self._execute_task(task, worker))
+                    execution = asyncio.create_task(self._execute_task(task, worker))
+                    self._executions[task.id] = execution
+                    self._execution_tasks.add(execution)
+                    execution.add_done_callback(self._execution_tasks.discard)
                 else:
                     # No worker available, requeue
-                    await self.pending_tasks.put(task)
+                    self.pending_tasks.put_nowait(task)
                     await asyncio.sleep(1)
 
-            except asyncio.TimeoutError:
-                continue
             except Exception as e:
                 logger.error(f"Task scheduler error: {e}")
 
@@ -326,7 +380,7 @@ class DistributedCoordinator:
         if not available:
             return None
 
-        # Select worker with most completed tasks (load balancing)
+        # Select worker with fewest completed tasks (load balancing)
         return min(available, key=lambda w: w.completed_tasks)
 
     async def _execute_task(self, task: GenerationTask, worker: WorkerInfo):
@@ -334,6 +388,9 @@ class DistributedCoordinator:
         try:
             # Simulate work
             await asyncio.sleep(len(task.shard_indices) * 2)
+
+            if self._executions.get(task.id) is not asyncio.current_task():
+                return
 
             # Mark complete
             task.status = "completed"
@@ -352,7 +409,11 @@ class DistributedCoordinator:
             logger.info(f"Task {task.id} completed")
 
         except Exception as e:
-            await self._handle_task_failure(task, worker, str(e))
+            if self._executions.get(task.id) is asyncio.current_task():
+                await self._handle_task_failure(task, worker, str(e))
+        finally:
+            if self._executions.get(task.id) is asyncio.current_task():
+                self._executions.pop(task.id)
 
     async def _handle_task_failure(
         self,
@@ -361,6 +422,9 @@ class DistributedCoordinator:
         error: str
     ):
         """Handle task failure with retry."""
+        if task.status != "running" or task.assigned_worker != worker.id:
+            return
+        self._retire_execution(task.id)
         task.error = error
         task.retry_count += 1
 
@@ -370,15 +434,14 @@ class DistributedCoordinator:
 
         if task.retry_count < self.max_retries:
             # Retry
-            task.status = "pending"
-            task.assigned_worker = None
-            await self.pending_tasks.put(task)
+            self._requeue(task)
 
             self.stats["retried_tasks"] += 1
             logger.warning(f"Task {task.id} failed, retrying ({task.retry_count}/{self.max_retries})")
         else:
             # Max retries reached
             task.status = "failed"
+            task.completed_at = time.time()
             self.stats["failed_tasks"] += 1
             logger.error(f"Task {task.id} failed permanently after {self.max_retries} retries")
 
@@ -390,7 +453,7 @@ class DistributedCoordinator:
             now = time.time()
 
             for task in self.tasks.values():
-                if task.status == "running" and task.started_at:
+                if task.status == "running" and task.started_at is not None:
                     if now - task.started_at > self.task_timeout:
                         logger.warning(f"Task {task.id} timed out")
 
@@ -424,6 +487,7 @@ class WorkerNode:
     Worker node for distributed generation.
 
     Connects to coordinator and executes generation tasks.
+    Currently a simulation without network transport. Start/stop share one loop.
     """
 
     def __init__(
@@ -441,6 +505,8 @@ class WorkerNode:
         self.port = port
 
         self.running = False
+        self._background_tasks: Set[asyncio.Task] = set()
+        self._stop_task: Optional[asyncio.Task] = None
         self.capabilities = {
             "cpu_count": 4,
             "memory_gb": 16,
@@ -450,21 +516,34 @@ class WorkerNode:
 
     async def start(self) -> None:
         """Start worker node."""
+        while self._stop_task is not None and not self._stop_task.done():
+            await asyncio.shield(self._stop_task)
+        if self.running:
+            return
         self.running = True
 
         # Register with coordinator
         # In real implementation, use HTTP/gRPC
         logger.info(f"Worker {self.worker_id} started")
 
-        # Start heartbeat
-        asyncio.create_task(self._heartbeat_loop())
-
-        # Start task processor
-        asyncio.create_task(self._task_processor())
+        self._background_tasks = {
+            asyncio.create_task(self._heartbeat_loop()),
+            asyncio.create_task(self._task_processor()),
+        }
 
     async def stop(self) -> None:
-        """Stop worker node."""
+        """Stop worker node and join its background coroutines."""
+        if self._stop_task is None or self._stop_task.done():
+            self.running = False
+            self._stop_task = asyncio.create_task(self._shutdown())
+        await asyncio.shield(self._stop_task)
+
+    async def _shutdown(self) -> None:
         self.running = False
+        for task in self._background_tasks:
+            task.cancel()
+        await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        self._background_tasks.clear()
         logger.info(f"Worker {self.worker_id} stopped")
 
     async def _heartbeat_loop(self):
