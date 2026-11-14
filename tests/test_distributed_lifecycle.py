@@ -228,7 +228,7 @@ async def test_timeout_monitor_retires_attempt_and_exhausts_retry_budget(monkeyp
     original_sleep = asyncio.sleep
 
     async def controlled_sleep(delay):
-        if delay == 10:
+        if delay == coord.task_timeout:
             await check_timeout.wait()
             check_timeout.clear()
         elif delay == 2:
@@ -244,7 +244,7 @@ async def test_timeout_monitor_retires_attempt_and_exhausts_retry_budget(monkeyp
     try:
         await coord.start()
         await asyncio.wait_for(execution_started.wait(), 2)
-        task.started_at = 0
+        coord._task_start_times[task_id] = 0
         check_timeout.set()
         await asyncio.wait_for(execution_cancelled.wait(), 2)
         assert task.status == "failed"

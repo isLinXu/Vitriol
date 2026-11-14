@@ -78,10 +78,13 @@ class DistributedCoordinator:
         self,
         host: str = "0.0.0.0",
         port: int = 5555,
-        heartbeat_interval: int = 30,
-        task_timeout: int = 300,
+        heartbeat_interval: float = 30,
+        task_timeout: float = 300,
         max_retries: int = 3
     ):
+        for name, interval in (("heartbeat_interval", heartbeat_interval), ("task_timeout", task_timeout)):
+            if not math.isfinite(interval) or interval <= 0:
+                raise ValueError(f"{name} must be finite and greater than zero")
         self.host = host
         self.port = port
         self.heartbeat_interval = heartbeat_interval
@@ -91,6 +94,9 @@ class DistributedCoordinator:
         # State
         self.workers: Dict[str, WorkerInfo] = {}
         self.tasks: Dict[str, GenerationTask] = {}
+        # Process-local elapsed clocks; public timestamps remain Unix time.
+        self._heartbeat_times: Dict[str, float] = {}
+        self._task_start_times: Dict[str, float] = {}
         # Python 3.9 binds Queue to the current loop at construction time.
         # The coordinator itself may be constructed before asyncio.run().
         self._pending_tasks: Optional[asyncio.Queue] = None
@@ -153,6 +159,7 @@ class DistributedCoordinator:
         self.running = False
         owned = self._background_tasks | self._execution_tasks
         self._executions.clear()
+        self._task_start_times.clear()
         for execution in owned:
             execution.cancel()
         for task in self.tasks.values():
@@ -168,6 +175,7 @@ class DistributedCoordinator:
         logger.info("Coordinator stopped")
 
     def _requeue(self, task: GenerationTask) -> None:
+        self._task_start_times.pop(task.id, None)
         task.status = "pending"
         task.assigned_worker = None
         task.started_at = None
@@ -177,6 +185,7 @@ class DistributedCoordinator:
             self._pending_tasks.put_nowait(task)
 
     def _retire_execution(self, task_id: str) -> None:
+        self._task_start_times.pop(task_id, None)
         execution = self._executions.pop(task_id, None)
         if execution is not None and execution is not asyncio.current_task():
             execution.cancel()
@@ -214,6 +223,7 @@ class DistributedCoordinator:
         )
 
         self.workers[worker_id] = worker
+        self._heartbeat_times[worker_id] = time.monotonic()
         logger.info(f"Worker registered: {worker_id} at {host}:{port}")
         return True
 
@@ -231,12 +241,14 @@ class DistributedCoordinator:
                     logger.warning(f"Reassigned task {task.id} from disconnected worker")
 
             del self.workers[worker_id]
+            self._heartbeat_times.pop(worker_id, None)
             logger.info(f"Worker unregistered: {worker_id}")
 
     def update_heartbeat(self, worker_id: str) -> None:
         """Update worker heartbeat."""
         if worker_id in self.workers:
             self.workers[worker_id].last_heartbeat = time.time()
+            self._heartbeat_times[worker_id] = time.monotonic()
 
     async def submit_task(
         self,
@@ -328,11 +340,12 @@ class DistributedCoordinator:
         while self.running:
             await asyncio.sleep(self.heartbeat_interval)
 
-            now = time.time()
+            now = time.monotonic()
             dead_workers = []
 
-            for worker_id, worker in self.workers.items():
-                if now - worker.last_heartbeat > self.heartbeat_interval * 2:
+            for worker_id in self.workers:
+                last_seen = self._heartbeat_times.get(worker_id)
+                if last_seen is not None and now - last_seen > self.heartbeat_interval * 2:
                     logger.warning(f"Worker {worker_id} missed heartbeat")
                     dead_workers.append(worker_id)
 
@@ -361,6 +374,7 @@ class DistributedCoordinator:
                     task.status = "running"
                     task.assigned_worker = worker.id
                     task.started_at = time.time()
+                    self._task_start_times[task.id] = time.monotonic()
                     task.error = None
                     task.completed_at = None
                     task.result = None
@@ -426,7 +440,7 @@ class DistributedCoordinator:
                 await self._handle_task_failure(task, worker, str(e))
         finally:
             if self._executions.get(task.id) is asyncio.current_task():
-                self._executions.pop(task.id)
+                self._retire_execution(task.id)
 
     async def _handle_task_failure(
         self,
@@ -461,13 +475,14 @@ class DistributedCoordinator:
     async def _task_timeout_monitor(self):
         """Monitor for timed out tasks."""
         while self.running:
-            await asyncio.sleep(10)
+            await asyncio.sleep(min(10, self.task_timeout))
 
-            now = time.time()
+            now = time.monotonic()
 
             for task in self.tasks.values():
-                if task.status == "running" and task.started_at is not None:
-                    if now - task.started_at > self.task_timeout:
+                started = self._task_start_times.get(task.id)
+                if task.status == "running" and started is not None:
+                    if now - started >= self.task_timeout:
                         logger.warning(f"Task {task.id} timed out")
 
                         # Mark worker as failed

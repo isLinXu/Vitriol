@@ -261,8 +261,8 @@ class TestDistributedCoordinator:
         """Test heartbeat monitor removes dead workers."""
         coord = DistributedCoordinator(heartbeat_interval=0.001)
         coord.register_worker("w1", "host1", 8080, {})
-        # Set heartbeat to very old
-        coord.workers["w1"].last_heartbeat = 0
+        # Age the internal elapsed clock; public timestamps are display-only.
+        coord._heartbeat_times["w1"] -= 1
 
         coord.running = True
         # Run one iteration then stop
@@ -375,6 +375,7 @@ class TestDistributedCoordinator:
         task.started_at = 0  # Very old start time
         task.assigned_worker = "w1"
         coord.tasks["t1"] = task
+        coord._task_start_times["t1"] = 0
 
         coord.running = True
         call_count = 0
