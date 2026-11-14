@@ -417,3 +417,17 @@ OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests/integration -o addopts='' -v 
 ## 覆盖率摘要
 
 生成/持久化/验证、API/配置、安全加载、KV/PPL、NAS 评分、指纹及权重抽样完成定向源码检查与回归。其他 adapter、架构解析、进化、可视化、CLI、插件、遥测模块以完整既有测试加关键调用链检查覆盖。该范围是模块级覆盖声明，不是每行代码都获得形式化证明；详细模块清单与跳过理由分别见项目地图及模块审计。
+
+## 11. 第十四轮：后台循环监督补充
+
+2026-11-14 对分布式协调器和 worker 的后台任务做异常注入。修前新测试为 **5 failed、1 passed**：协调器心跳/超时监控及 worker 心跳/任务处理器抛错后会退出，而对象仍报告 `running=True`；worker 心跳循环捕获错误后没有等待便立即重试；循环正常返回时也会静默停止。
+
+现在四类循环均由共享监督协程管理。未捕获异常与运行期间的意外正常返回都会记录并重启，间隔从 1 秒指数增长，最大 30 秒；循环稳定运行至少 60 秒后退避重置。`CancelledError` 继续传递，stop 仍取消并等待拥有的任务。worker 心跳不再吞掉异常，从而避免在循环内部快速重试。
+
+修后分布式定向套件 **114 passed**；全量非集成套件 **2995 passed、19 skipped、18 warnings**，耗时 80.92 秒，语句覆盖率 **71.98%**（25,374 条语句）。全源码及新增回归文件 Ruff、CI 范围 API/CLI/security 的 MyPy 检查和 `git diff --check` 通过。修前日志 `/tmp/vitriol-phase14-before.log`，全量日志 `/tmp/vitriol-phase14-full.log`，JUnit `/tmp/vitriol-phase14-full.xml`，Coverage XML `/tmp/vitriol-phase14-coverage.xml`。
+
+跳过项仍属环境边界：Hub 下载与模型 smoke 13 项、HF 配置加载 1 项、空 tensor 评分 1 项、Transformers 当前版本缺少 Qwen3.5 模型类 1 项、TinyLlama 本地缓存缺失 1 项、可选 trace fixture 缺失 2 项；18 条 warning 未导致失败。CI 关键文件 MyPy 检查不代表全库类型检查。
+
+修复及回归测试已分第一批推送为 [3ba3d9d](https://github.com/isLinXu/Vitriol/commit/3ba3d9d391ca85da88fc755328c1199a761bfcfc)。对应 [Python CI run 43592539958](https://github.com/isLinXu/Vitriol/actions/runs/43592539958) 的 Python 3.9、3.10、3.11、3.12 测试与分发包构建全部成功；各 job 链接列于第十四轮单独审计记录。
+
+剩余范围：分布式执行仍为本地模拟，不含真实网络传输或跨进程故障恢复；协调器调度器内部已有的单次派发异常处理仍按现有一秒间隔继续，监督器处理的是从后台循环逸出的异常或意外返回。未做长时间运行、远端节点或进程级故障注入。
