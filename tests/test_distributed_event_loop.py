@@ -95,3 +95,31 @@ async def execute():
     assert coordinator.pending_tasks.empty()
 asyncio.run(execute())
 ''')
+
+
+def test_dispatch_event_is_created_on_execution_loop_after_synchronous_setup():
+    run_script('''
+import asyncio
+from vitriol.distributed.coordinator import DistributedCoordinator
+
+async def noop():
+    pass
+asyncio.run(noop())
+actual_event = asyncio.Event
+def require_running_loop():
+    asyncio.get_running_loop()
+    return actual_event()
+asyncio.Event = require_running_loop
+coordinator = DistributedCoordinator()
+coordinator.register_worker('worker', 'localhost', 5555, {})
+assert coordinator.get_stats()['pending_tasks'] == 0
+async def execute():
+    await coordinator.start()
+    try:
+        task_id = await coordinator.submit_task('model', [])
+        task = await asyncio.wait_for(coordinator.wait_for_task(task_id), 2)
+        assert task.status == 'completed'
+    finally:
+        await coordinator.stop()
+asyncio.run(execute())
+''')

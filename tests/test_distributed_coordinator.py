@@ -284,17 +284,16 @@ class TestDistributedCoordinator:
         await coord.pending_tasks.put(task)
         coord.running = True
 
-        call_count = 0
-        original_sleep = asyncio.sleep
-        async def controlled_sleep(delay):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 2:
-                coord.running = False
-        with patch("vitriol.distributed.coordinator.asyncio.sleep", side_effect=controlled_sleep):
-            await coord._task_scheduler()
-
-        coord.running = False
+        scheduler = asyncio.create_task(coord._task_scheduler())
+        try:
+            await asyncio.sleep(0)
+            assert not scheduler.done()
+            assert coord.pending_tasks.qsize() == 1
+            assert coord.pending_tasks.get_nowait() is task
+        finally:
+            coord.running = False
+            scheduler.cancel()
+            await asyncio.gather(scheduler, return_exceptions=True)
 
     @pytest.mark.asyncio
     async def test_execute_task(self):

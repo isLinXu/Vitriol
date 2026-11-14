@@ -16,7 +16,7 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,18 @@ class GenerationTask:
             self.created_at = time.time()
 
 
+class _PendingTaskQueue(asyncio.Queue):
+    """Keep normal Queue insertion semantics while notifying the scheduler."""
+
+    def __init__(self, on_put: Callable[[], None]):
+        super().__init__()
+        self._on_put = on_put
+
+    def put_nowait(self, item):
+        super().put_nowait(item)
+        self._on_put()
+
+
 class DistributedCoordinator:
     """
     Coordinator for distributed weight generation.
@@ -101,6 +113,7 @@ class DistributedCoordinator:
         # The coordinator itself may be constructed before asyncio.run().
         self._pending_tasks: Optional[asyncio.Queue] = None
         self._deferred_tasks: List[GenerationTask] = []
+        self._dispatch_ready: Optional[asyncio.Event] = None
         self.running = False
         self._background_tasks: Set[asyncio.Task] = set()
         self._executions: Dict[str, asyncio.Task] = {}
@@ -123,12 +136,16 @@ class DistributedCoordinator:
         """Access the pending queue from the coordinator's execution loop."""
         if self._pending_tasks is None:
             asyncio.get_running_loop()
-            queue = asyncio.Queue()
+            queue = _PendingTaskQueue(self._wake_scheduler)
             for task in self._deferred_tasks:
                 queue.put_nowait(task)
             self._deferred_tasks.clear()
             self._pending_tasks = queue
         return self._pending_tasks
+
+    def _wake_scheduler(self) -> None:
+        if self._dispatch_ready is not None:
+            self._dispatch_ready.set()
 
     async def start(self) -> None:
         """Start the coordinator."""
@@ -224,6 +241,7 @@ class DistributedCoordinator:
 
         self.workers[worker_id] = worker
         self._heartbeat_times[worker_id] = time.monotonic()
+        self._wake_scheduler()
         logger.info(f"Worker registered: {worker_id} at {host}:{port}")
         return True
 
@@ -353,49 +371,49 @@ class DistributedCoordinator:
                 self.unregister_worker(worker_id)
 
     async def _task_scheduler(self):
-        """Schedule tasks to available workers."""
+        """Dispatch FIFO work when both a pending task and an idle worker exist."""
+        # Like Queue, Event must be created on the execution loop for Python 3.9.
+        if self._dispatch_ready is None:
+            self._dispatch_ready = asyncio.Event()
+        ready = self._dispatch_ready
         while self.running:
             try:
-                # Get pending task
-                # Direct queue waits are cancelled by stop(); no polling task can
-                # consume an item just as the scheduler itself is cancelled.
-                task = await self.pending_tasks.get()
+                # Clear before checking state. All checks and assignment below
+                # are synchronous, so same-loop notifications cannot be lost.
+                ready.clear()
+                worker = self._select_worker()
+                if worker is None:
+                    await ready.wait()
+                    continue
+                try:
+                    task = self.pending_tasks.get_nowait()
+                except asyncio.QueueEmpty:
+                    await ready.wait()
+                    continue
                 if task.status != "pending":
                     continue
-                if not self.running:
-                    self.pending_tasks.put_nowait(task)
-                    break
 
-                # Find available worker
-                worker = self._select_worker()
+                task.status = "running"
+                task.assigned_worker = worker.id
+                task.started_at = time.time()
+                self._task_start_times[task.id] = time.monotonic()
+                task.error = None
+                task.completed_at = None
+                task.result = None
 
-                if worker:
-                    # Assign task
-                    task.status = "running"
-                    task.assigned_worker = worker.id
-                    task.started_at = time.time()
-                    self._task_start_times[task.id] = time.monotonic()
-                    task.error = None
-                    task.completed_at = None
-                    task.result = None
+                worker.status = WorkerStatus.BUSY
+                worker.current_task = task.id
+                logger.info(f"Task {task.id} assigned to worker {worker.id}")
 
-                    worker.status = WorkerStatus.BUSY
-                    worker.current_task = task.id
-
-                    logger.info(f"Task {task.id} assigned to worker {worker.id}")
-
-                    # Simulate task execution (in real implementation, send to worker)
-                    execution = asyncio.create_task(self._execute_task(task, worker))
-                    self._executions[task.id] = execution
-                    self._execution_tasks.add(execution)
-                    execution.add_done_callback(self._execution_tasks.discard)
-                else:
-                    # No worker available, requeue
-                    self.pending_tasks.put_nowait(task)
-                    await asyncio.sleep(1)
+                # Simulate task execution (in real implementation, send to worker)
+                execution = asyncio.create_task(self._execute_task(task, worker))
+                self._executions[task.id] = execution
+                self._execution_tasks.add(execution)
+                execution.add_done_callback(self._execution_tasks.discard)
 
             except Exception as e:
                 logger.error(f"Task scheduler error: {e}")
+                await asyncio.sleep(1)
 
     def _select_worker(self) -> Optional[WorkerInfo]:
         """Select best available worker."""
@@ -432,6 +450,7 @@ class DistributedCoordinator:
             worker.completed_tasks += 1
 
             self.stats["completed_tasks"] += 1
+            self._wake_scheduler()
 
             logger.info(f"Task {task.id} completed")
 
@@ -458,6 +477,7 @@ class DistributedCoordinator:
         worker.failed_tasks += 1
         worker.status = WorkerStatus.IDLE
         worker.current_task = None
+        self._wake_scheduler()
 
         if task.retry_count < self.max_retries:
             # Retry
