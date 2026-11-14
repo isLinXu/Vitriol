@@ -443,6 +443,7 @@ class DistributedCoordinator:
                 await ready.wait()
                 continue
             if task.status != "pending":
+                self.pending_tasks.task_done()
                 continue
 
             task_state = (
@@ -482,12 +483,18 @@ class DistributedCoordinator:
         try:
             self._executions[task.id] = execution
             self._execution_tasks.add(execution)
-            execution.add_done_callback(self._execution_tasks.discard)
+            execution.add_done_callback(self._execution_finished)
         except BaseException:
             self._executions.pop(task.id, None)
             self._execution_tasks.discard(execution)
             execution.cancel()
             raise
+
+    def _execution_finished(self, execution: asyncio.Task) -> None:
+        """Release queue.join accounting only after this attempt has ended."""
+        self._execution_tasks.discard(execution)
+        if self._pending_tasks is not None:
+            self._pending_tasks.task_done()
 
     def _restore_pending_dispatch(
         self,
