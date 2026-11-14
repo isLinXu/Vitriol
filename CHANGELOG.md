@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Make distributed coordinator and worker startup idempotent, join owned coroutines on shutdown, and preserve unfinished tasks for restart.
+- Retire disconnected or timed-out execution attempts before retry so late results cannot overwrite reassigned work or double-count completion; handle zero start timestamps in timeout checks.
+
 - Initialize distributed task queues on their execution loop so Python 3.9 supports synchronous coordinator construction after asyncio.run; preserve pending tasks when a worker unregisters before the loop starts.
 - Keep the Python CI matrix on Ubuntu 24.04 for Python 3.9 availability, and install declared build dependencies through isolated distribution builds.
 - Allow machine-level rounding in the identical-architecture cosine similarity regression.
