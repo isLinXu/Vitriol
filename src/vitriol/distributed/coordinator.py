@@ -115,6 +115,14 @@ class _PendingTaskQueue(asyncio.Queue):
         super().put_nowait(item)
         self._on_put()
 
+    def put_front_nowait(self, item):
+        """Restore a dequeued, unfinished item without changing queue accounting."""
+        if self.full():
+            raise asyncio.QueueFull
+        self._queue.appendleft(item)
+        self._wakeup_next(self._getters)
+        self._on_put()
+
 
 class DistributedCoordinator:
     """
@@ -422,22 +430,31 @@ class DistributedCoordinator:
             self._dispatch_ready = asyncio.Event()
         ready = self._dispatch_ready
         while self.running:
+            # Clear before checking state. All checks and assignment below are
+            # synchronous, so same-loop notifications cannot be lost.
+            ready.clear()
+            worker = self._select_worker()
+            if worker is None:
+                await ready.wait()
+                continue
             try:
-                # Clear before checking state. All checks and assignment below
-                # are synchronous, so same-loop notifications cannot be lost.
-                ready.clear()
-                worker = self._select_worker()
-                if worker is None:
-                    await ready.wait()
-                    continue
-                try:
-                    task = self.pending_tasks.get_nowait()
-                except asyncio.QueueEmpty:
-                    await ready.wait()
-                    continue
-                if task.status != "pending":
-                    continue
+                task = self.pending_tasks.get_nowait()
+            except asyncio.QueueEmpty:
+                await ready.wait()
+                continue
+            if task.status != "pending":
+                continue
 
+            task_state = (
+                task.status,
+                task.assigned_worker,
+                task.started_at,
+                task.error,
+                task.completed_at,
+                task.result,
+            )
+            worker_state = (worker.status, worker.current_task)
+            try:
                 task.status = "running"
                 task.assigned_worker = worker.id
                 task.started_at = time.time()
@@ -449,16 +466,52 @@ class DistributedCoordinator:
                 worker.status = WorkerStatus.BUSY
                 worker.current_task = task.id
                 logger.info(f"Task {task.id} assigned to worker {worker.id}")
+                self._start_task_execution(task, worker)
+            except Exception:
+                self._restore_pending_dispatch(task, worker, task_state, worker_state)
+                raise
 
-                # Simulate task execution (in real implementation, send to worker)
-                execution = asyncio.create_task(self._execute_task(task, worker))
-                self._executions[task.id] = execution
-                self._execution_tasks.add(execution)
-                execution.add_done_callback(self._execution_tasks.discard)
+    def _start_task_execution(self, task: GenerationTask, worker: WorkerInfo) -> None:
+        """Create and own one execution attempt for an assigned task."""
+        coroutine = self._execute_task(task, worker)
+        try:
+            execution = asyncio.create_task(coroutine)
+        except BaseException:
+            coroutine.close()
+            raise
+        try:
+            self._executions[task.id] = execution
+            self._execution_tasks.add(execution)
+            execution.add_done_callback(self._execution_tasks.discard)
+        except BaseException:
+            self._executions.pop(task.id, None)
+            self._execution_tasks.discard(execution)
+            execution.cancel()
+            raise
 
-            except Exception as e:
-                logger.error(f"Task scheduler error: {e}")
-                await asyncio.sleep(1)
+    def _restore_pending_dispatch(
+        self,
+        task: GenerationTask,
+        worker: WorkerInfo,
+        task_state,
+        worker_state,
+    ) -> None:
+        """Roll back an unstarted dispatch and put its task back at the FIFO head."""
+        execution = self._executions.pop(task.id, None)
+        if execution is not None and execution is not asyncio.current_task():
+            execution.cancel()
+        self._task_start_times.pop(task.id, None)
+
+        (
+            task.status,
+            task.assigned_worker,
+            task.started_at,
+            task.error,
+            task.completed_at,
+            task.result,
+        ) = task_state
+        worker.status, worker.current_task = worker_state
+        self.pending_tasks.put_front_nowait(task)
 
     def _select_worker(self) -> Optional[WorkerInfo]:
         """Select best available worker."""

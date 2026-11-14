@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+import vitriol.distributed.coordinator as coordinator_module
 from vitriol.distributed.coordinator import DistributedCoordinator, GenerationTask
 
 
@@ -193,5 +194,82 @@ async def test_reassigned_work_goes_behind_existing_pending_tasks(reason, monkey
         assert [await asyncio.wait_for(dispatched.get(), 2) for _ in range(2)] == [second, first]
         assert (await asyncio.wait_for(coord.wait_for_task(first), 2)).status == "completed"
         assert coord.stats["completed_tasks"] == 2
+    finally:
+        await coord.stop()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_setup_failure_restores_fifo_task_and_worker_state(monkeypatch, caplog):
+    coord = DistributedCoordinator()
+    coord.register_worker("w1", "localhost", 1, {})
+    task_ids = [await coord.submit_task("model", []) for _ in range(2)]
+    first_task = coord.tasks[task_ids[0]]
+    launch_failed = asyncio.Event()
+    execution_order = []
+    original_create_task = asyncio.create_task
+    original_execute = coord._execute_task
+    injected = False
+
+    async def record_execution(task, worker):
+        execution_order.append(task.id)
+        await original_execute(task, worker)
+
+    def create_task(coro, *args, **kwargs):
+        nonlocal injected
+        if not injected and first_task.status == "running":
+            injected = True
+            coro.close()
+            launch_failed.set()
+            raise RuntimeError("injected dispatch setup failure")
+        return original_create_task(coro, *args, **kwargs)
+
+    monkeypatch.setattr(coordinator_module, "_BACKGROUND_RETRY_INITIAL", 0.05)
+    monkeypatch.setattr(coord, "_execute_task", record_execution)
+    monkeypatch.setattr(asyncio, "create_task", create_task)
+    try:
+        with caplog.at_level("ERROR"):
+            await coord.start()
+            await asyncio.wait_for(launch_failed.wait(), 1)
+        assert first_task.status == "pending"
+        assert first_task.assigned_worker is None
+        assert coord.workers["w1"].status.value == "idle"
+        assert coord.workers["w1"].current_task is None
+        assert coord.get_stats()["pending_tasks"] == 2
+        assert "injected dispatch setup failure" in caplog.text
+
+        await asyncio.wait_for(
+            coord.wait_for_task(task_ids[1]), 2
+        )
+        assert execution_order == task_ids
+        assert first_task.retry_count == 0
+        assert coord.stats["completed_tasks"] == 2
+    finally:
+        await coord.stop()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_failures_use_supervised_exponential_backoff(monkeypatch, caplog):
+    coord = DistributedCoordinator()
+    monkeypatch.setattr(coordinator_module, "_BACKGROUND_RETRY_INITIAL", 0.1)
+    monkeypatch.setattr(coordinator_module, "_BACKGROUND_RETRY_MAX", 0.4)
+    calls = []
+    third_attempt = asyncio.Event()
+
+    def fail_worker_selection():
+        calls.append(asyncio.get_running_loop().time())
+        if len(calls) == 3:
+            third_attempt.set()
+        raise RuntimeError("injected persistent scheduler failure")
+
+    monkeypatch.setattr(coord, "_select_worker", fail_worker_selection)
+    try:
+        with caplog.at_level("ERROR"):
+            await coord.start()
+            await asyncio.wait_for(third_attempt.wait(), 1.5)
+        assert len(calls) == 3
+        assert "restarting in 0.1s" in caplog.text
+        assert "restarting in 0.2s" in caplog.text
+        await coord.stop()
+        assert len(calls) == 3  # Stop cancels the supervisor's next backoff wait.
     finally:
         await coord.stop()
