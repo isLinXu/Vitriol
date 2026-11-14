@@ -451,3 +451,13 @@ OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests/integration -o addopts='' -v 
 修后分布式专项 **120 passed**，全量非集成套件 **3001 passed、19 skipped、18 warnings**，74.88 秒，覆盖率 **72.00%**（25,408 条语句）。新增四项回归、全 `src/` Ruff、CI 范围 API/CLI/security MyPy 与 `git diff --check` 通过。完整日志 `/tmp/vitriol-phase16-full.log`，JUnit `/tmp/vitriol-phase16-full.xml`，Coverage XML `/tmp/vitriol-phase16-coverage.xml`。
 
 代码与回归测试已先推送为 [c94dde0](https://github.com/isLinXu/Vitriol/commit/c94dde0)。对应 [Python CI run 43612034226](https://github.com/isLinXu/Vitriol/actions/runs/43612034226) 全部成功： [Python 3.9](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950401)、[Python 3.10](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950165)、[Python 3.11](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950497)、[Python 3.12](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950460)、[分发包构建](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132500141672)。剩余范围：worker 执行仍是模拟；未覆盖真实网络传输、跨进程恢复及长期压力。
+
+## 14. 第十七轮：重试预算语义
+
+2026-11-14 再核对分布式执行失败路径时发现，`max_retries` 实际被当作“总尝试次数”：设为 1 时首次失败即终止；`retry_count` 也统计失败，而不是已安排的重试。修前 6 项参数化回归为 **5 failed、1 passed**，同时负数、浮点数和布尔型预算均可通过构造器。
+
+现在 `max_retries` 明确表示初次执行之外的重试数，`retry_count` 只在真正重新入队时增加。零表示只执行初始尝试；设为 1 最多执行两次。构造器拒绝负数、非整数和布尔值。该修复会改变依赖旧含义的调用方行为：旧代码若将值用作最大总尝试数，应减一后配置，或按可重试次数重设。
+
+修后分布式专项 **125 passed**，全量非集成套件 **3006 passed、19 skipped、18 warnings**，80.33 秒，语句覆盖率 **72.00%**（25,410 条语句）。全源码与本轮测试 Ruff、CI 范围 API/CLI/security MyPy 及空白检查通过。修前日志 `/tmp/vitriol-phase17-before.log`；修后日志 `/tmp/vitriol-phase17-full.log`，JUnit `/tmp/vitriol-phase17-full.xml`，Coverage XML `/tmp/vitriol-phase17-coverage.xml`。
+
+代码与回归测试已先推送为 [b364f01](https://github.com/isLinXu/Vitriol/commit/b364f01)。对应 [Python CI run 43617805682](https://github.com/isLinXu/Vitriol/actions/runs/43617805682) 全部成功：[Python 3.9](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516591273)、[Python 3.10](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516591315)、[Python 3.11](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516590980)、[Python 3.12](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516591226)、[分发包构建](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132517817449)。worker 断连重分配和主动 stop 不消耗执行失败重试预算；超时消耗预算。分布式执行仍是本地模拟，本轮不覆盖真实网络或跨进程恢复。

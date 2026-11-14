@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Interpret distributed `max_retries` as additional attempts after the initial execution, and make `retry_count` count those scheduled retries. `max_retries=1` can now run twice; values must be non-negative integers.
 - Publish pytest failures as GitHub annotations and retain JUnit/coverage reports for seven days, including failed CI runs.
 
 - Concurrent generation into an active output directory raises recoverable OutputDirectoryBusyError. The persistent .vitriol-generation.lock marker is retained; OS locking determines whether it is busy.
