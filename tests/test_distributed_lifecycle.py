@@ -218,7 +218,7 @@ async def test_stop_while_scheduler_waits_does_not_lose_queued_task():
 
 @pytest.mark.asyncio
 async def test_timeout_monitor_retires_attempt_and_exhausts_retry_budget(monkeypatch):
-    coord = DistributedCoordinator(task_timeout=1, max_retries=1)
+    coord = DistributedCoordinator(task_timeout=1, max_retries=0)
     coord.register_worker("w1", "localhost", 1, {})
     task_id = await coord.submit_task("model", [0])
     task = coord.tasks[task_id]
@@ -250,7 +250,7 @@ async def test_timeout_monitor_retires_attempt_and_exhausts_retry_budget(monkeyp
         assert task.status == "failed"
         assert task.completed_at is not None
         assert task.error == "Task timed out"
-        assert task.retry_count == 1
+        assert task.retry_count == 0
         assert coord.stats["failed_tasks"] == 1
         assert coord.stats["completed_tasks"] == 0
         assert coord.workers["w1"].status == WorkerStatus.IDLE

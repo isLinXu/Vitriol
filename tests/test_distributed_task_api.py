@@ -184,8 +184,13 @@ async def test_abandoning_running_waiter_preserves_execution_and_other_waiters(a
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("max_retries", [1, 2])
-async def test_execution_failure_reaches_waiter_with_correct_retry_accounting(max_retries, monkeypatch):
+@pytest.mark.parametrize(
+    ("max_retries", "expected_attempts", "expected_status", "expected_retry_count"),
+    [(0, 1, "failed", 0), (1, 2, "completed", 1), (2, 2, "completed", 1)],
+)
+async def test_execution_failure_reaches_waiter_with_correct_retry_accounting(
+    max_retries, expected_attempts, expected_status, expected_retry_count, monkeypatch
+):
     coord = DistributedCoordinator(max_retries=max_retries)
     coord.register_worker("w1", "localhost", 1, {})
     task_id = await coord.submit_task("model", [0])
@@ -205,14 +210,44 @@ async def test_execution_failure_reaches_waiter_with_correct_retry_accounting(ma
     try:
         await coord.start()
         result = await asyncio.wait_for(coord.wait_for_task(task_id), 2)
-        assert attempts == max_retries
-        assert result.status == ("failed" if max_retries == 1 else "completed")
-        assert result.retry_count == 1
+        assert attempts == expected_attempts
+        assert result.status == expected_status
+        assert result.retry_count == expected_retry_count
         assert result.completed_at is not None
-        assert result.error == ("worker execution failed" if max_retries == 1 else None)
-        assert coord.stats["completed_tasks"] == (max_retries == 2)
-        assert coord.stats["failed_tasks"] == (max_retries == 1)
-        assert coord.stats["retried_tasks"] == (max_retries == 2)
+        assert result.error == ("worker execution failed" if max_retries == 0 else None)
+        assert coord.stats["completed_tasks"] == (max_retries > 0)
+        assert coord.stats["failed_tasks"] == (max_retries == 0)
+        assert coord.stats["retried_tasks"] == (max_retries > 0)
         assert coord.workers["w1"].failed_tasks == 1
+    finally:
+        await coord.stop()
+
+
+@pytest.mark.asyncio
+async def test_execution_failure_exhausts_retries_after_initial_attempt(monkeypatch):
+    coord = DistributedCoordinator(max_retries=1)
+    coord.register_worker("w1", "localhost", 1, {})
+    task_id = await coord.submit_task("model", [0])
+    attempts = 0
+    original_sleep = asyncio.sleep
+
+    async def always_fail(delay):
+        nonlocal attempts
+        if delay == 2:
+            attempts += 1
+            raise RuntimeError(f"worker execution failed {attempts}")
+        await original_sleep(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", always_fail)
+    try:
+        await coord.start()
+        result = await asyncio.wait_for(coord.wait_for_task(task_id), 2)
+        assert attempts == 2
+        assert result.status == "failed"
+        assert result.retry_count == 1
+        assert result.error == "worker execution failed 2"
+        assert coord.stats["retried_tasks"] == 1
+        assert coord.stats["failed_tasks"] == 1
+        assert coord.workers["w1"].failed_tasks == 2
     finally:
         await coord.stop()

@@ -67,7 +67,7 @@ async def test_reregistered_worker_gets_fresh_heartbeat_budget(clock, monkeypatc
 @pytest.mark.asyncio
 @pytest.mark.parametrize("elapsed,wall,expired", [(1, 11001, False), (11, -8989, True), (10, 1010, True)])
 async def test_execution_deadline_ignores_wall_clock_jumps(elapsed, wall, expired, clock, monkeypatch):
-    coord = DistributedCoordinator(task_timeout=10, max_retries=1)
+    coord = DistributedCoordinator(task_timeout=10, max_retries=0)
     coord.register_worker("w1", "localhost", 1, {})
     task_id = await coord.submit_task("model", [0])
     entered = asyncio.Event()
@@ -121,6 +121,12 @@ async def test_short_task_timeout_has_matching_watchdog_cadence(monkeypatch):
 def test_invalid_watchdog_intervals_fail_at_construction(setting, value):
     with pytest.raises(ValueError, match=setting):
         DistributedCoordinator(**{setting: value})
+
+
+@pytest.mark.parametrize("max_retries", [-1, 1.5, True])
+def test_invalid_retry_budgets_fail_at_construction(max_retries):
+    with pytest.raises(ValueError, match="max_retries"):
+        DistributedCoordinator(max_retries=max_retries)
 
 
 @pytest.mark.asyncio

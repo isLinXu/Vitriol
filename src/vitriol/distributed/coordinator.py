@@ -84,7 +84,10 @@ class WorkerInfo:
 
 @dataclass
 class GenerationTask:
-    """Task for distributed generation."""
+    """Task for distributed generation.
+
+    ``retry_count`` tracks re-attempts beyond the initial execution.
+    """
     id: str
     model_id: str
     shard_indices: List[int]
@@ -144,6 +147,9 @@ class DistributedCoordinator:
         for name, interval in (("heartbeat_interval", heartbeat_interval), ("task_timeout", task_timeout)):
             if not math.isfinite(interval) or interval <= 0:
                 raise ValueError(f"{name} must be finite and greater than zero")
+        # max_retries counts attempts after the initial execution.
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
+            raise ValueError("max_retries must be a non-negative integer")
         self.host = host
         self.port = port
         self.heartbeat_interval = heartbeat_interval
@@ -577,7 +583,6 @@ class DistributedCoordinator:
             return
         self._retire_execution(task.id)
         task.error = error
-        task.retry_count += 1
 
         worker.failed_tasks += 1
         worker.status = WorkerStatus.IDLE
@@ -586,6 +591,7 @@ class DistributedCoordinator:
 
         if task.retry_count < self.max_retries:
             # Retry
+            task.retry_count += 1
             self._requeue(task)
 
             self.stats["retried_tasks"] += 1
