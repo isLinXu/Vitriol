@@ -16,9 +16,48 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+_BACKGROUND_RETRY_INITIAL = 1.0
+_BACKGROUND_RETRY_MAX = 30.0
+_BACKGROUND_STABLE_RUNTIME = 60.0
+
+
+async def _supervise_background_loop(
+    is_running: Callable[[], bool],
+    runner: Callable[[], Awaitable[None]],
+    name: str,
+) -> None:
+    """Restart a failed or unexpectedly returned loop with bounded backoff."""
+    delay = _BACKGROUND_RETRY_INITIAL
+    while is_running():
+        started_at = time.monotonic()
+        try:
+            await runner()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Background loop %s failed; restarting in %.1fs", name, delay
+            )
+        else:
+            if not is_running():
+                return
+            logger.warning(
+                "Background loop %s exited unexpectedly; restarting in %.1fs",
+                name,
+                delay,
+            )
+
+        if not is_running():
+            return
+        await asyncio.sleep(delay)
+        if time.monotonic() - started_at >= _BACKGROUND_STABLE_RUNTIME:
+            delay = _BACKGROUND_RETRY_INITIAL
+        else:
+            delay = min(delay * 2, _BACKGROUND_RETRY_MAX)
 
 
 class WorkerStatus(Enum):
@@ -157,9 +196,15 @@ class DistributedCoordinator:
 
         # Start background tasks
         self._background_tasks = {
-            asyncio.create_task(self._heartbeat_monitor()),
-            asyncio.create_task(self._task_scheduler()),
-            asyncio.create_task(self._task_timeout_monitor()),
+            asyncio.create_task(_supervise_background_loop(
+                lambda: self.running, self._heartbeat_monitor, "coordinator heartbeat monitor"
+            )),
+            asyncio.create_task(_supervise_background_loop(
+                lambda: self.running, self._task_scheduler, "coordinator task scheduler"
+            )),
+            asyncio.create_task(_supervise_background_loop(
+                lambda: self.running, self._task_timeout_monitor, "coordinator task timeout monitor"
+            )),
         }
 
         logger.info("Coordinator started")
@@ -575,8 +620,12 @@ class WorkerNode:
         logger.info(f"Worker {self.worker_id} started")
 
         self._background_tasks = {
-            asyncio.create_task(self._heartbeat_loop()),
-            asyncio.create_task(self._task_processor()),
+            asyncio.create_task(_supervise_background_loop(
+                lambda: self.running, self._heartbeat_loop, f"worker {self.worker_id} heartbeat"
+            )),
+            asyncio.create_task(_supervise_background_loop(
+                lambda: self.running, self._task_processor, f"worker {self.worker_id} task processor"
+            )),
         }
 
     async def stop(self) -> None:
@@ -597,12 +646,9 @@ class WorkerNode:
     async def _heartbeat_loop(self):
         """Send heartbeats to coordinator."""
         while self.running:
-            try:
-                # In real implementation, send HTTP request
-                logger.debug(f"Worker {self.worker_id} heartbeat")
-                await asyncio.sleep(30)
-            except Exception as e:
-                logger.error(f"Heartbeat failed: {e}")
+            # In real implementation, send HTTP request
+            logger.debug(f"Worker {self.worker_id} heartbeat")
+            await asyncio.sleep(30)
 
     async def _task_processor(self):
         """Process tasks from coordinator."""
