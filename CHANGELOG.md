@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Restart failed or unexpectedly exited distributed coordinator and worker loops with bounded exponential backoff; propagate worker heartbeat failures to the supervisor and retain cancellation-aware shutdown.
+- Roll back partial distributed dispatch failures, restore tasks at the FIFO head without charging task retries, and route scheduler errors through supervised exponential backoff.
 - Preserve distributed pending-task FIFO order while workers are unavailable, and wake dispatch on queued work or newly available capacity instead of polling every second.
 - Preserve direct Queue.put/put_nowait notifications and Python 3.9 event-loop initialization while keeping retried or reassigned work behind existing pending tasks.
 

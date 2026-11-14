@@ -430,4 +430,14 @@ OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests/integration -o addopts='' -v 
 
 修复及回归测试已分第一批推送为 [3ba3d9d](https://github.com/isLinXu/Vitriol/commit/3ba3d9d391ca85da88fc755328c1199a761bfcfc)。对应 [Python CI run 43592539958](https://github.com/isLinXu/Vitriol/actions/runs/43592539958) 的 Python 3.9、3.10、3.11、3.12 测试与分发包构建全部成功；各 job 链接列于第十四轮单独审计记录。
 
-剩余范围：分布式执行仍为本地模拟，不含真实网络传输或跨进程故障恢复；协调器调度器内部已有的单次派发异常处理仍按现有一秒间隔继续，监督器处理的是从后台循环逸出的异常或意外返回。未做长时间运行、远端节点或进程级故障注入。
+剩余范围：分布式执行仍为本地模拟，不含真实网络传输或跨进程故障恢复。未做长时间运行、远端节点或进程级故障注入。
+
+## 12. 第十五轮：调度派发失败回滚
+
+第十四轮统一监督后台循环后，本轮沿该审计记录留下的固定一秒调度器恢复逻辑继续验证。修前两项故障注入均失败：执行任务创建失败会把任务留在 `running`、worker 留在 `BUSY`，且任务已从队列丢失；调度器连续异常被内部捕获，每秒重试，没有进入共享监督器的指数退避。
+
+现在调度器错误会逸出到共享监督器处理。派发准备阶段如果失败，代码会撤销执行登记和单调计时，恢复 task 与 worker 原状态，并把未执行的任务放回 FIFO 队首；该基础设施错误不增加 task 的 retry_count。队列恢复通过内部队列的队首插入完成，不重复增加 unfinished-task 计数，并触发调度唤醒。执行协程创建或登记失败时会取消已创建的句柄并关闭未调度协程。
+
+修后分布式专项 **116 passed**；全量非集成套件 **2997 passed、19 skipped、18 warnings**，82.51 秒，覆盖率 **71.99%**。全源码及调度回归 Ruff、CI 范围 MyPy 与 diff 空白检查通过。修前失败已在新增回归的原实现运行结果中确认；修后全量日志 `/tmp/vitriol-phase15-full.log`，JUnit `/tmp/vitriol-phase15-full.xml`，Coverage XML `/tmp/vitriol-phase15-coverage.xml`。
+
+代码与测试已先推送为 [95d964c](https://github.com/isLinXu/Vitriol/commit/95d964c)。对应 [Python CI run 43595133361](https://github.com/isLinXu/Vitriol/actions/runs/43595133361) 的 Python 3.9、3.10、3.11、3.12 测试及分发包构建全部成功；job 链接见第十五轮审计记录。
