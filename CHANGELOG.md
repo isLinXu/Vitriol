@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Roll back partial distributed dispatch failures, restore tasks at the FIFO head without charging task retries, and route scheduler errors through supervised exponential backoff.
 - Preserve distributed pending-task FIFO order while workers are unavailable, and wake dispatch on queued work or newly available capacity instead of polling every second.
 - Preserve direct Queue.put/put_nowait notifications and Python 3.9 event-loop initialization while keeping retried or reassigned work behind existing pending tasks.
+- Balance distributed pending-queue unfinished-task counts across successful execution, retries, shutdown requeue, and stale duplicate entries so `Queue.join()` waits for all attempts to finish.
 
 - Measure distributed heartbeat and execution watchdogs with monotonic clocks while keeping public timestamps in Unix time; reset and release execution timing across retries, disconnects, completion, and restart.
 - Respect short execution timeouts with a bounded watchdog polling interval, expire attempts at the deadline, and reject nonpositive or nonfinite watchdog configuration.

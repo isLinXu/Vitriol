@@ -441,3 +441,13 @@ OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests/integration -o addopts='' -v 
 修后分布式专项 **116 passed**；全量非集成套件 **2997 passed、19 skipped、18 warnings**，82.51 秒，覆盖率 **71.99%**。全源码及调度回归 Ruff、CI 范围 MyPy 与 diff 空白检查通过。修前失败已在新增回归的原实现运行结果中确认；修后全量日志 `/tmp/vitriol-phase15-full.log`，JUnit `/tmp/vitriol-phase15-full.xml`，Coverage XML `/tmp/vitriol-phase15-coverage.xml`。
 
 代码与测试已先推送为 [95d964c](https://github.com/isLinXu/Vitriol/commit/95d964c)。对应 [Python CI run 43595133361](https://github.com/isLinXu/Vitriol/actions/runs/43595133361) 的 Python 3.9、3.10、3.11、3.12 测试及分发包构建全部成功；job 链接见第十五轮审计记录。
+
+## 13. 第十六轮：队列完成计数
+
+2026-11-14 检查 `asyncio.Queue.join()` 的 unfinished-task 计数。调度器原先只 `get_nowait()`，没有在执行完成、失败重试或停止期间为条目调用 `task_done()`；因此提交任务后 `pending_tasks.join()` 会永久等待。新增四项修前回归均失败，日志 `/tmp/vitriol-phase16-before.log`。
+
+现在每个派发条目的计数保留到执行 task 完成回调才结清。失败重试、stop 重入队会先增加新条目的计数，旧尝试结束时结清旧条目；过期重复条目在调度器丢弃时结清；派发回滚则保持原计数不变。这样 `join()` 在任务运行或重试尚未完成时仍会等待。
+
+修后分布式专项 **120 passed**，全量非集成套件 **3001 passed、19 skipped、18 warnings**，74.88 秒，覆盖率 **72.00%**（25,408 条语句）。新增四项回归、全 `src/` Ruff、CI 范围 API/CLI/security MyPy 与 `git diff --check` 通过。完整日志 `/tmp/vitriol-phase16-full.log`，JUnit `/tmp/vitriol-phase16-full.xml`，Coverage XML `/tmp/vitriol-phase16-coverage.xml`。
+
+代码与回归测试已先推送为 [c94dde0](https://github.com/isLinXu/Vitriol/commit/c94dde0)。对应 [Python CI run 43612034226](https://github.com/isLinXu/Vitriol/actions/runs/43612034226) 全部成功： [Python 3.9](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950401)、[Python 3.10](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950165)、[Python 3.11](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950497)、[Python 3.12](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132498950460)、[分发包构建](https://github.com/isLinXu/Vitriol/actions/runs/43612034226/job/132500141672)。剩余范围：worker 执行仍是模拟；未覆盖真实网络传输、跨进程恢复及长期压力。
