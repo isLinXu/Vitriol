@@ -62,6 +62,19 @@ class AdaptiveInjectionScheduler:
             window_size: Rolling window for running average PPL
             min_injection_rate: Minimum fraction of steps that must be injected
         """
+        if not math.isfinite(ppl_threshold) or ppl_threshold < 0:
+            raise ValueError("ppl_threshold must be a finite non-negative number")
+        if not math.isfinite(entropy_threshold) or entropy_threshold < 0:
+            raise ValueError("entropy_threshold must be a finite non-negative number")
+        if not math.isfinite(relative_alpha) or relative_alpha <= 0:
+            raise ValueError("relative_alpha must be a positive finite number")
+        if not isinstance(warmup_steps, int) or isinstance(warmup_steps, bool) or warmup_steps < 0:
+            raise ValueError("warmup_steps must be a non-negative integer")
+        if not isinstance(window_size, int) or isinstance(window_size, bool) or window_size <= 0:
+            raise ValueError("window_size must be a positive integer")
+        if not math.isfinite(min_injection_rate) or not 0 <= min_injection_rate <= 1:
+            raise ValueError("min_injection_rate must be finite and between 0 and 1")
+
         self.strategy = strategy
         self.ppl_threshold = ppl_threshold
         self.entropy_threshold = entropy_threshold
@@ -91,6 +104,11 @@ class AdaptiveInjectionScheduler:
         Returns:
             True if injection should proceed
         """
+        if ppl is not None and (not math.isfinite(ppl) or ppl < 0):
+            raise ValueError("ppl must be a finite non-negative number")
+        if entropy is not None and (not math.isfinite(entropy) or entropy < 0):
+            raise ValueError("entropy must be a finite non-negative number")
+
         self._step_count += 1
 
         # Always inject during warmup
@@ -133,6 +151,8 @@ class AdaptiveInjectionScheduler:
         Call this AFTER each decode step, regardless of injection decision.
         """
         if ppl is not None:
+            if not math.isfinite(ppl) or ppl < 0:
+                raise ValueError("ppl must be a finite non-negative number")
             self._ppl_history.append(ppl)
             # Keep only recent history
             if len(self._ppl_history) > self.window_size:
@@ -160,7 +180,7 @@ class AdaptiveInjectionScheduler:
     @property
     def stats(self) -> Dict[str, Any]:
         """Return scheduler statistics."""
-        injection_rate = self._injection_count / max(self._step_count, 1)
+        injection_rate = self._injection_count / self._step_count if self._step_count else 0.0
         skipped = self._step_count - self._injection_count
         return {
             "strategy": self.strategy,
@@ -168,7 +188,7 @@ class AdaptiveInjectionScheduler:
             "injection_steps": self._injection_count,
             "skipped_steps": skipped,
             "injection_rate": injection_rate,
-            "skip_rate": 1.0 - injection_rate,
+            "skip_rate": skipped / self._step_count if self._step_count else 0.0,
             "avg_ppl": self._get_running_avg_ppl() if self._ppl_history else None,
         }
 
@@ -184,27 +204,47 @@ def compute_perplexity_from_logits(
     Args:
         logits: [batch, seq_len, vocab_size] — model output logits
         target_ids: [batch, seq_len] — target token IDs
-        eps: Small value to avoid log(0)
+        eps: Minimum token probability used to bound extreme losses
 
     Returns:
         Perplexity value (float)
     """
+    if not logits.is_floating_point():
+        raise ValueError("logits must use a floating-point dtype")
+    if logits.ndim != 3:
+        raise ValueError("logits must have shape [batch, seq_len, vocab_size]")
+    if target_ids.ndim != 2 or tuple(target_ids.shape) != tuple(logits.shape[:2]):
+        raise ValueError("target_ids must match logits batch and sequence dimensions")
+    if logits.shape[1] == 0 or logits.shape[2] == 0:
+        raise ValueError("logits and targets must contain at least one token and vocabulary entry")
+    if target_ids.numel() == 0:
+        raise ValueError("target_ids must contain at least one token")
+    if target_ids.dtype not in {
+        torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+    }:
+        raise ValueError("target_ids must contain integer token IDs")
+    if not math.isfinite(eps) or not 0 < eps <= 1:
+        raise ValueError("eps must be finite and between 0 and 1")
+
+    vocab_size = logits.shape[-1]
+    if target_ids.min().item() < 0 or target_ids.max().item() >= vocab_size:
+        raise ValueError("target_ids contain token IDs outside the logits vocabulary")
+
     # Get log probabilities
     log_probs = F.log_softmax(logits.float(), dim=-1)
 
     # Gather log probs for target tokens
     # target_ids: [batch, seq_len] → [batch, seq_len, 1]
-    target_ids_expanded = target_ids.unsqueeze(-1)
-
-    # Clamp target_ids to valid range
-    vocab_size = logits.shape[-1]
-    target_ids_clamped = target_ids_expanded.clamp(0, vocab_size - 1)
+    target_ids_expanded = target_ids.to(device=logits.device, dtype=torch.long).unsqueeze(-1)
 
     # Gather: [batch, seq_len, 1] → squeeze → [batch, seq_len]
-    selected_log_probs = log_probs.gather(dim=-1, index=target_ids_clamped).squeeze(-1)
+    selected_log_probs = log_probs.gather(dim=-1, index=target_ids_expanded).squeeze(-1)
+    selected_log_probs = selected_log_probs.clamp_min(math.log(eps))
 
     # Mean negative log likelihood
     avg_nll = -selected_log_probs.mean().item()
+    if not math.isfinite(avg_nll):
+        raise ValueError("logits must produce finite token probabilities")
 
     # Perplexity = exp(NLL)
     perplexity = math.exp(min(avg_nll, 20.0))  # Cap to avoid overflow
@@ -225,12 +265,15 @@ class BrainKVCompressor:
     - For seq_len=1024, head_dim=128, num_heads=32: ~512 MB per prompt
     - This is prohibitive for memory-constrained deployment
 
-    Solution: Compress the KV before injection using:
-    1. "topk_spatial": Keep only top-K most important KV positions per head
-       (based on attention weight magnitude). Reduces seq_len dimension.
-    2. "quantize_8bit": Quantize FP32/FP16 KV to INT8. Reduces memory by 2-4×.
+    Solution: Reduce the KV sequence length or apply an approximation before injection using:
+    1. "topk_spatial": Keep only top-K KV positions per head using key-vector
+       magnitude as a query-independent importance heuristic. Reduces seq_len.
+    2. "quantize_8bit": Apply symmetric 4- or 8-bit fake quantization while
+       retaining the input floating-point dtype. This rounds values but does
+       not reduce the in-memory tensor size.
     3. "mean_pool": Mean-pool KV over non-overlapping windows. Reduces seq_len.
-    4. "svd_lowrank": SVD-based low-rank approximation of the KV matrix.
+    4. "svd_lowrank": SVD-based low-rank approximation reconstructed to a dense
+       tensor. This reduces rank but not the returned tensor's storage size.
     5. "none": No compression (backward compatible, baseline)
 
     Decompression is implicit — the compressed KV is used directly in
@@ -258,6 +301,24 @@ class BrainKVCompressor:
             pool_window: Window size for mean_pool method
             svd_rank: Rank for SVD low-rank approximation
         """
+        valid_methods = {"none", "topk_spatial", "quantize_8bit", "mean_pool", "svd_lowrank"}
+        if method not in valid_methods:
+            raise ValueError(f"unknown compression method '{method}'")
+        if method == "topk_spatial" and (
+            not math.isfinite(compression_ratio) or not 0 < compression_ratio <= 1
+        ):
+            raise ValueError("compression_ratio must be finite and in (0, 1]")
+        if method == "quantize_8bit" and quantize_bits not in {4, 8}:
+            raise ValueError("quantize_bits must be 4 or 8")
+        if method == "mean_pool" and (
+            not isinstance(pool_window, int) or isinstance(pool_window, bool) or pool_window <= 0
+        ):
+            raise ValueError("pool_window must be a positive integer")
+        if method == "svd_lowrank" and (
+            not isinstance(svd_rank, int) or isinstance(svd_rank, bool) or svd_rank <= 0
+        ):
+            raise ValueError("svd_rank must be a positive integer")
+
         self.method = method
         self.compression_ratio = compression_ratio
         self.quantize_bits = quantize_bits
@@ -289,6 +350,18 @@ class BrainKVCompressor:
         Returns:
             (compressed_key, compressed_value)
         """
+        if key.ndim != 4 or value.ndim != 4:
+            raise ValueError("key and value must have shape [batch, heads, seq_len, dim]")
+        if key.shape[:3] != value.shape[:3]:
+            raise ValueError("key and value batch, head, and sequence dimensions must match")
+        if key.device != value.device:
+            raise ValueError("key and value must be on the same device")
+        if not key.is_floating_point() or not value.is_floating_point():
+            raise ValueError("key and value must use floating-point dtypes")
+
+        if key.shape[2] == 0:
+            return key, value
+
         original_bytes = key.numel() * key.element_size() + value.numel() * value.element_size()
 
         if self.method == "none":
@@ -321,8 +394,8 @@ class BrainKVCompressor:
         """
         Keep only top-K positions per head based on key magnitude.
 
-        Selects the K positions with highest L2 norm in the key tensor,
-        which correspond to the most "important" attention targets.
+        Selects the K positions with highest L2 norm in the key tensor. This
+        query-independent score is a heuristic, not the model's attention weight.
         """
         # key: [batch, heads, seq_len, dim]
         seq_len = key.shape[2]
@@ -333,14 +406,16 @@ class BrainKVCompressor:
 
         # Select top-K positions
         _, top_indices = key_magnitude.topk(k, dim=-1)  # [B, H, K]
+        top_indices = top_indices.sort(dim=-1).values  # Preserve original sequence order.
 
         # Gather selected positions
         # top_indices: [B, H, K] → [B, H, K, 1] → [B, H, K, dim]
         dim = key.shape[-1]
-        index = top_indices.unsqueeze(-1).expand(-1, -1, -1, dim)
+        key_index = top_indices.unsqueeze(-1).expand(-1, -1, -1, dim)
+        value_index = top_indices.unsqueeze(-1).expand(-1, -1, -1, value.shape[-1])
 
-        compressed_key = torch.gather(key, dim=2, index=index)
-        compressed_value = torch.gather(value, dim=2, index=index)
+        compressed_key = torch.gather(key, dim=2, index=key_index)
+        compressed_value = torch.gather(value, dim=2, index=value_index)
 
         return compressed_key, compressed_value
 
@@ -352,7 +427,8 @@ class BrainKVCompressor:
         """
         Quantize KV to lower bit width.
 
-        Maps FP32/FP16 → INT8 using symmetric quantization:
+        Applies symmetric fake quantization and dequantizes back to the input
+        floating-point dtype. This changes values but does not reduce storage.
         q = round(x / scale), where scale = max(|x|) / (2^(bits-1) - 1)
         """
         if self.quantize_bits == 8:
@@ -369,9 +445,8 @@ class BrainKVCompressor:
             if scale < 1e-8:
                 return t
             quantized = torch.clamp(torch.round(t / scale), qmin, qmax)
-            # Store as float (still saves memory conceptually, but actual
-            # INT8 storage requires specialized packing — we keep as float
-            # for compatibility with attention computation)
+            # Keep dequantized floats for direct attention compatibility; this
+            # fake-quantization path does not reduce actual storage.
             return quantized * scale
 
         return quantize_tensor(key), quantize_tensor(value)
@@ -393,7 +468,7 @@ class BrainKVCompressor:
         if seq_len < w:
             return key, value
 
-        # Truncate to multiple of window
+        # Pool full windows and summarize any incomplete tail as one final token.
         trimmed_len = (seq_len // w) * w
 
         # Reshape: [B, H, trimmed_len, D] → [B, H, trimmed_len//w, w, D]
@@ -411,6 +486,12 @@ class BrainKVCompressor:
         compressed_key = key_reshaped.mean(dim=3)   # [B, H, trimmed_len//w, D]
         compressed_value = value_reshaped.mean(dim=3)
 
+        if trimmed_len < seq_len:
+            tail_key = key[:, :, trimmed_len:, :].mean(dim=2, keepdim=True)
+            tail_value = value[:, :, trimmed_len:, :].mean(dim=2, keepdim=True)
+            compressed_key = torch.cat([compressed_key, tail_key], dim=2)
+            compressed_value = torch.cat([compressed_value, tail_value], dim=2)
+
         return compressed_key, compressed_value
 
     def _compress_svd(
@@ -424,28 +505,28 @@ class BrainKVCompressor:
         Decomposes key/value into low-rank factors:
         K ≈ U_K @ S_K @ V_K^T, keeping only top-rank singular values.
 
-        This is more expensive but provides the best quality-compression tradeoff.
+        The result is a lossy approximation returned in the original dense shape.
         """
-        rank = min(self.svd_rank, min(key.shape[2], key.shape[-1]))
-
         def svd_compress(t: torch.Tensor) -> torch.Tensor:
             # t: [B, H, S, D]
-            B, H, S, D = t.shape
+            batch, heads, seq_len, dim = t.shape
+            rank = min(self.svd_rank, seq_len, dim)
             # Reshape to 2D for SVD: [B*H, S, D]
-            t_flat = t.reshape(B * H, S, D)
+            t_flat = t.reshape(batch * heads, seq_len, dim)
 
             try:
-                U, S, Vh = torch.linalg.svd(t_flat.float(), full_matrices=False)
+                U, singular_values, Vh = torch.linalg.svd(t_flat.float(), full_matrices=False)
                 # Keep top-rank components
                 U_r = U[:, :, :rank]          # [B*H, S, rank]
-                S_r = torch.diag_embed(S[:, :rank])  # [B*H, rank, rank]
+                S_r = torch.diag_embed(singular_values[:, :rank])  # [B*H, rank, rank]
                 Vh_r = Vh[:, :rank, :]        # [B*H, rank, D]
 
                 # Reconstruct: [B*H, S, rank] @ [B*H, rank, rank] @ [B*H, rank, D]
                 compressed = U_r @ S_r @ Vh_r
-                return compressed.reshape(B, H, S, D).to(t.dtype)
-            except Exception:
+                return compressed.reshape(batch, heads, seq_len, dim).to(t.dtype)
+            except RuntimeError as exc:
                 # SVD failed (e.g., numerical issues) — return original
+                logger.warning("SVD KV compression failed; retaining original tensor: %s", exc)
                 return t
 
         return svd_compress(key), svd_compress(value)
