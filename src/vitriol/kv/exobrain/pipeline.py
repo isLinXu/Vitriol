@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any, Dict, List, Optional
 
@@ -50,6 +51,13 @@ class ExoBrainInferencePipeline:
         max_new_tokens: int = 64,
         head_dim_projection: str = "pad_or_truncate",
     ) -> None:
+        if fusion_mode not in {"replace", "residual", "gated"}:
+            raise ValueError(
+                f"invalid fusion_mode '{fusion_mode}'; choose from: replace, residual, gated"
+            )
+        if not math.isfinite(gate_temperature) or gate_temperature <= 0:
+            raise ValueError("gate_temperature must be a positive finite number")
+
         self.shell_model_path = shell_model_path
         self.teacher_model_id = teacher_model_id
         self.fusion_mode = fusion_mode
@@ -422,23 +430,62 @@ class ExoBrainInferencePipeline:
             if teacher_kv is not None:
                 t_key, t_value = teacher_kv
 
+                if (
+                    t_key.ndim != key.ndim
+                    or t_value.ndim != value.ndim
+                    or t_key.shape[:2] != key.shape[:2]
+                    or t_value.shape[:2] != value.shape[:2]
+                ):
+                    logger.warning(
+                        "Skipping teacher KV fusion at layer %d because batch/head counts differ "
+                        "(shell key/value=%s/%s, teacher key/value=%s/%s)",
+                        layer_idx,
+                        tuple(key.shape),
+                        tuple(value.shape),
+                        tuple(t_key.shape),
+                        tuple(t_value.shape),
+                    )
+                    new_layers.append((key, value))
+                    continue
+
                 # Apply KV projector if dimensions still mismatch
                 # (should already be projected in _build_brain, but as a safety net)
                 if (self._kv_projector is not None
-                        and t_key.shape[-1] != key.shape[-1]):
+                        and (t_key.shape[-1] != key.shape[-1]
+                             or t_value.shape[-1] != value.shape[-1])):
                     t_key, t_value = self._kv_projector.project_kv_pair(t_key, t_value)
+
+                if (
+                    t_key.shape[-1] != key.shape[-1]
+                    or t_value.shape[-1] != value.shape[-1]
+                    or t_key.shape[2] != t_value.shape[2]
+                    or key.shape[2] != value.shape[2]
+                ):
+                    logger.warning(
+                        "Skipping teacher KV fusion at layer %d because key/value dimensions are incompatible "
+                        "(shell key/value=%s/%s, teacher key/value=%s/%s)",
+                        layer_idx,
+                        tuple(key.shape),
+                        tuple(value.shape),
+                        tuple(t_key.shape),
+                        tuple(t_value.shape),
+                    )
+                    new_layers.append((key, value))
+                    continue
 
                 if self.fusion_mode == "replace":
                     shell_seq = key.shape[2]
                     teacher_seq = t_key.shape[2]
 
-                    if teacher_seq >= shell_seq:
-                        new_key = t_key[:, :, :shell_seq, :]
-                        new_value = t_value[:, :, :shell_seq, :]
-                    else:
-                        pad_len = shell_seq - teacher_seq
-                        new_key = torch.cat([t_key, key[:, :, :pad_len, :]], dim=2)
-                        new_value = torch.cat([t_value, value[:, :, :pad_len, :]], dim=2)
+                    shared_seq = min(shell_seq, teacher_seq)
+                    new_key = torch.cat(
+                        [t_key[:, :, :shared_seq, :], key[:, :, shared_seq:, :]],
+                        dim=2,
+                    )
+                    new_value = torch.cat(
+                        [t_value[:, :, :shared_seq, :], value[:, :, shared_seq:, :]],
+                        dim=2,
+                    )
 
                     new_layers.append((new_key, new_value))
 
@@ -448,21 +495,29 @@ class ExoBrainInferencePipeline:
                     blended_key = alpha * key[:, :, :seq_len, :] + (1 - alpha) * t_key[:, :, :seq_len, :]
                     blended_value = alpha * value[:, :, :seq_len, :] + (1 - alpha) * t_value[:, :, :seq_len, :]
 
-                    new_layers.append((blended_key, blended_value))
+                    new_key = torch.cat([blended_key, key[:, :, seq_len:, :]], dim=2)
+                    new_value = torch.cat([blended_value, value[:, :, seq_len:, :]], dim=2)
+                    new_layers.append((new_key, new_value))
 
                 else:  # gated
-                    shell_norm = key.norm(dim=-1, keepdim=True)
-                    teacher_norm = t_key.norm(dim=-1, keepdim=True)
-                    gate = torch.sigmoid(teacher_norm - shell_norm)
-
                     seq_len = min(key.shape[2], t_key.shape[2])
+                    shell_key_overlap = key[:, :, :seq_len, :]
+                    shell_value_overlap = value[:, :, :seq_len, :]
+                    teacher_key_overlap = t_key[:, :, :seq_len, :]
+                    teacher_value_overlap = t_value[:, :, :seq_len, :]
+                    gate = torch.sigmoid(
+                        (
+                            teacher_key_overlap.norm(dim=-1, keepdim=True)
+                            - shell_key_overlap.norm(dim=-1, keepdim=True)
+                        )
+                        / self.gate_temperature
+                    )
 
-                    gated_key = gate[..., :seq_len, :1] * t_key[:, :, :seq_len, :] + \
-                                (1 - gate[..., :seq_len, :1]) * key[:, :, :seq_len, :]
-                    gated_value = gate[..., :seq_len, :1] * t_value[:, :, :seq_len, :] + \
-                                  (1 - gate[..., :seq_len, :1]) * value[:, :, :seq_len, :]
-
-                    new_layers.append((gated_key, gated_value))
+                    gated_key = gate * teacher_key_overlap + (1 - gate) * shell_key_overlap
+                    gated_value = gate * teacher_value_overlap + (1 - gate) * shell_value_overlap
+                    new_key = torch.cat([gated_key, key[:, :, seq_len:, :]], dim=2)
+                    new_value = torch.cat([gated_value, value[:, :, seq_len:, :]], dim=2)
+                    new_layers.append((new_key, new_value))
             else:
                 new_layers.append((key, value))
 
@@ -480,16 +535,28 @@ class ExoBrainInferencePipeline:
         from transformers.cache_utils import DynamicCache
 
         if isinstance(shell_cache, DynamicCache):
-            new_cache = DynamicCache()
-            for layer_idx, (k, v) in enumerate(new_layers):
+            cache_config = getattr(self._shell_model, "config", None)
+            new_cache = DynamicCache(
+                config=cache_config,
+                offloading=getattr(shell_cache, "offloading", False),
+                offload_only_non_sliding=getattr(shell_cache, "only_non_sliding", False),
+            )
+            for layer_idx, layer in enumerate(new_layers):
+                if layer is None:
+                    continue
+                k, v = layer
                 new_cache.update(k, v, layer_idx)
             return new_cache
         else:
             # Preserve original tuple structure (2-tuple or 3-tuple)
             result = []
             for layer_idx in range(len(new_layers)):
-                new_k, new_v = new_layers[layer_idx]
                 orig = cache_layers[layer_idx]
+                if new_layers[layer_idx] is None:
+                    result.append(None)
+                    continue
+
+                new_k, new_v = new_layers[layer_idx]
                 if orig is not None and len(orig) > 2:
                     # Preserve 3rd element (e.g., flash attention mask)
                     result.append((new_k, new_v) + orig[2:])
