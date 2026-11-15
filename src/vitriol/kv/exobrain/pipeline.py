@@ -1,6 +1,7 @@
 """ExoBrain inference pipeline."""
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import time
@@ -536,10 +537,14 @@ class ExoBrainInferencePipeline:
 
         if isinstance(shell_cache, DynamicCache):
             cache_config = getattr(self._shell_model, "config", None)
+            cache_options = {
+                "config": cache_config,
+                "offloading": getattr(shell_cache, "offloading", False),
+                "offload_only_non_sliding": getattr(shell_cache, "only_non_sliding", False),
+            }
+            supported_options = inspect.signature(DynamicCache).parameters
             new_cache = DynamicCache(
-                config=cache_config,
-                offloading=getattr(shell_cache, "offloading", False),
-                offload_only_non_sliding=getattr(shell_cache, "only_non_sliding", False),
+                **{name: value for name, value in cache_options.items() if name in supported_options}
             )
             for layer_idx, layer in enumerate(new_layers):
                 if layer is None:

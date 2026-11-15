@@ -94,6 +94,26 @@ def test_dynamic_cache_rebuild_preserves_sliding_layer_types():
     assert [layer.sliding_window for layer in result.layers] == [4, 4, 4]
 
 
+def test_dynamic_cache_rebuild_supports_legacy_constructor(monkeypatch):
+    import transformers.cache_utils as cache_utils
+
+    current_dynamic_cache = cache_utils.DynamicCache
+
+    class LegacyDynamicCache(current_dynamic_cache):
+        def __init__(self):
+            super().__init__()
+
+    monkeypatch.setattr(cache_utils, "DynamicCache", LegacyDynamicCache)
+    pipeline, shell_key, shell_value, _, _ = _make_pipeline("replace")
+    cache = LegacyDynamicCache()
+    cache.update(shell_key, shell_value, 0)
+
+    result = pipeline._inject_teacher_kv_into_cache(cache)
+
+    assert isinstance(result, LegacyDynamicCache)
+    assert result[0][0].shape == shell_key.shape
+
+
 def test_incompatible_teacher_head_count_falls_back_to_shell_layer():
     pipeline, shell_key, shell_value, _, _ = _make_pipeline("replace")
     pipeline._brain_bus = _BrainBus(
