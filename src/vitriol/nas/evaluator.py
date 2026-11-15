@@ -14,6 +14,35 @@ from .search_space import ArchitectureGene
 
 logger = logging.getLogger(__name__)
 
+
+def _effective_rank(hidden_states: torch.Tensor) -> float:
+    """Return effective rank, treating a fully collapsed representation as zero."""
+    if hidden_states.numel() == 0:
+        return 0.0
+
+    representations = hidden_states.reshape(-1, hidden_states.size(-1))
+    representations = representations - representations.mean(dim=0, keepdim=True)
+    singular_values = torch.linalg.svdvals(representations.to(torch.float32))
+    total = singular_values.sum()
+    if not torch.isfinite(total) or total.item() <= 0.0:
+        return 0.0
+
+    probabilities = singular_values / total
+    positive_probabilities = probabilities[probabilities > 0]
+    entropy = -(positive_probabilities * torch.log(positive_probabilities)).sum()
+    return float(torch.exp(entropy).item())
+
+
+def _dirichlet_energy(hidden_states: torch.Tensor) -> float:
+    """Measure adjacent-token representation changes, returning zero for length < 2."""
+    if hidden_states.size(-2) < 2:
+        return 0.0
+
+    normalized = torch.nn.functional.normalize(hidden_states, p=2, dim=-1)
+    differences = normalized[..., 1:, :] - normalized[..., :-1, :]
+    return float((differences.square().sum(dim=-1).mean()).item())
+
+
 class ZeroCostProxy:
     """Base class for zero-cost proxies."""
     def score(self, gene: ArchitectureGene, model: Optional[torch.nn.Module] = None, inputs: Optional[torch.Tensor] = None, targets: Optional[torch.Tensor] = None) -> float:
@@ -207,26 +236,7 @@ class RankMeProxy(ZeroCostProxy):
             # Use the last hidden state (before LM head)
             hidden_states = outputs.hidden_states[-1] # shape: (batch, seq_len, hidden_dim)
 
-            # Flatten to (batch * seq_len, hidden_dim)
-            Z = hidden_states.view(-1, hidden_states.size(-1))
-
-            # Center the representations
-            Z = Z - Z.mean(dim=0, keepdim=True)
-
-            # Compute singular values
-            # Use float32 for SVD stability
-            _, S, _ = torch.linalg.svd(Z.to(torch.float32), full_matrices=False)
-
-            # Compute normalized singular values (probabilities)
-            p = (S / S.sum()) + 1e-9
-
-            # Compute Shannon Entropy of singular values
-            entropy = -torch.sum(p * torch.log(p))
-
-            # Effective rank is exp(entropy)
-            effective_rank = torch.exp(entropy).item()
-
-        return effective_rank
+            return _effective_rank(hidden_states)
 
 class VitriolExpressivityProxy(ZeroCostProxy):
     """
@@ -249,13 +259,8 @@ class VitriolExpressivityProxy(ZeroCostProxy):
             hidden_states = outputs.hidden_states[-1] # Shape: (Batch, SeqLen, HiddenDim)
             logits = outputs.logits                   # Shape: (Batch, SeqLen, VocabSize)
 
-            # 1. Calculate Dirichlet Energy (Token distinguishability)
-            # Normalize hidden states to make it scale-invariant
-            h_norm = torch.nn.functional.normalize(hidden_states, p=2, dim=-1)
-            # Differences between adjacent tokens in the sequence
-            diffs = h_norm[:, 1:, :] - h_norm[:, :-1, :]
-            # Mean energy across batch and sequence
-            dirichlet_energy = (diffs ** 2).sum(dim=-1).mean().item()
+            # 1. Calculate Dirichlet Energy (Token distinguishability).
+            dirichlet_energy = _dirichlet_energy(hidden_states)
 
             # Calculate Vocabulary Entropy (Output distribution health)
             # Convert logits to probabilities
@@ -364,32 +369,38 @@ class HybridEvaluator:
             if Path(dataset_name).exists():
                 logger.info(f"Loading local dataset from {dataset_name}...")
                 import datasets
-                # Recursively find parquet or json files
-                data_files = list(Path(dataset_name).glob("**/*.parquet"))
-                if not data_files:
-                     data_files = list(Path(dataset_name).glob("**/*.json"))
+                dataset_path = Path(dataset_name)
+                supported_suffixes = {".parquet", ".json", ".jsonl"}
+                if dataset_path.is_file():
+                    data_files = [dataset_path] if dataset_path.suffix.lower() in supported_suffixes else []
+                else:
+                    # Prefer parquet when a directory contains both formats, matching
+                    # the previous behavior while also accepting JSON Lines datasets.
+                    data_files = sorted(dataset_path.rglob("*.parquet"))
+                    if not data_files:
+                        data_files = sorted(dataset_path.rglob("*.json")) + sorted(dataset_path.rglob("*.jsonl"))
 
                 if not data_files:
-                    logger.warning(f"No parquet/json files found in {dataset_name}")
+                    logger.warning("No supported parquet/json/jsonl files found in %s", dataset_name)
                     return None
 
                 data_file_strs = [str(f) for f in data_files]
                 logger.info(f"Found {len(data_file_strs)} data files.")
 
-                # Use local path
-                # Check file type
-                # Handle single file or directory logic better
-
-                # Check file type from the first file found
-                if data_file_strs[0].endswith(".parquet"):
+                suffixes = {Path(file_path).suffix.lower() for file_path in data_file_strs}
+                if suffixes == {".parquet"}:
                     load_type = "parquet"
-                elif data_file_strs[0].endswith(".json") or data_file_strs[0].endswith(".jsonl"):
+                elif suffixes <= {".json", ".jsonl"}:
                     load_type = "json"
                 else:
-                    logger.warning(f"Unknown file type: {data_file_strs[0]}")
+                    logger.warning("Unsupported or mixed local dataset file types: %s", sorted(suffixes))
                     return None
 
-                dataset = datasets.load_dataset(load_type, data_files=data_file_strs, split="train")
+                dataset = datasets.load_dataset(
+                    load_type,
+                    data_files={split: data_file_strs},
+                    split=split,
+                )
 
                 n_avail = len(dataset)
                 n_take = min(n_samples, n_avail)
@@ -606,16 +617,10 @@ class HybridEvaluator:
 
                 # 2. RankMe (Effective Rank)
                 hidden_states = outputs_fwd.hidden_states[-1]
-                Z = hidden_states.view(-1, hidden_states.size(-1))
-                Z = Z - Z.mean(dim=0, keepdim=True)
-                _, S, _ = torch.linalg.svd(Z.to(torch.float32), full_matrices=False)
-                p_svd = (S / S.sum()) + 1e-9
-                rankme = torch.exp(-torch.sum(p_svd * torch.log(p_svd))).item()
+                rankme = _effective_rank(hidden_states)
 
                 # 3. Vitriol Expressivity
-                h_norm = torch.nn.functional.normalize(hidden_states, p=2, dim=-1)
-                diffs = h_norm[:, 1:, :] - h_norm[:, :-1, :]
-                dirichlet_energy = (diffs ** 2).sum(dim=-1).mean().item()
+                dirichlet_energy = _dirichlet_energy(hidden_states)
                 probs = torch.nn.functional.softmax(outputs_fwd.logits, dim=-1)
                 entropy_vocab = -(probs * torch.log(probs + 1e-9)).sum(dim=-1).mean().item()
                 vocab_size = outputs_fwd.logits.size(-1)
