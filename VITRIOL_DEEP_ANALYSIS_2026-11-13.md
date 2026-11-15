@@ -460,4 +460,15 @@ OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests/integration -o addopts='' -v 
 
 修后分布式专项 **125 passed**，全量非集成套件 **3006 passed、19 skipped、18 warnings**，80.33 秒，语句覆盖率 **72.00%**（25,410 条语句）。全源码与本轮测试 Ruff、CI 范围 API/CLI/security MyPy 及空白检查通过。修前日志 `/tmp/vitriol-phase17-before.log`；修后日志 `/tmp/vitriol-phase17-full.log`，JUnit `/tmp/vitriol-phase17-full.xml`，Coverage XML `/tmp/vitriol-phase17-coverage.xml`。
 
+
 代码与回归测试已先推送为 [b364f01](https://github.com/isLinXu/Vitriol/commit/b364f01)。对应 [Python CI run 43617805682](https://github.com/isLinXu/Vitriol/actions/runs/43617805682) 全部成功：[Python 3.9](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516591273)、[Python 3.10](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516591315)、[Python 3.11](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516590980)、[Python 3.12](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132516591226)、[分发包构建](https://github.com/isLinXu/Vitriol/actions/runs/43617805682/job/132517817449)。worker 断连重分配和主动 stop 不消耗执行失败重试预算；超时消耗预算。分布式执行仍是本地模拟，本轮不覆盖真实网络或跨进程恢复。
+
+## 15. 第十八轮：NAS 评分边界与本地数据集
+
+2026-11-15 对上一轮覆盖率仅 11% 的 NAS evaluator 补做边界审计。修前 6 个新增回归全部失败：退化表示的有效秩、单 token 序列的相邻 token 能量返回 NaN；本地加载器拒绝直接文件路径、漏掉目录内 JSONL，并忽略请求的 split。NaN 会进入搜索器最优候选比较，可能导致搜索没有可用最佳 gene。
+
+现在有效秩在空或零/非有限奇异值总量时返回 0，长度不足两个 token 的 Dirichlet 能量也返回 0；独立 proxy 与融合评估共用同一计算。本地加载支持 parquet、JSON 和 JSONL 文件或目录，优先 parquet，并按请求 split 加载。相关修复与回归测试已推送为 [cb91e98](https://github.com/isLinXu/Vitriol/commit/cb91e98798dc2e64ccecd9c37828f585c0e49cb5)。
+
+NAS 定向测试 **32 passed**；完整非集成套件 **3012 passed、19 skipped、18 warnings**，75.52 秒，覆盖率 **72.26%**（25,420 条语句）。修改文件 Ruff、CI 指定 MyPy、CLI 冒烟、sdist/wheel 构建和空白检查通过。完整日志 `/tmp/vitriol-phase18-full.log`，JUnit `/tmp/vitriol-phase18-full.xml`，Coverage XML `/tmp/vitriol-phase18-coverage.xml`。[Python CI run 43676636779](https://github.com/isLinXu/Vitriol/actions/runs/43676636779) 全部成功：[Python 3.9](https://github.com/isLinXu/Vitriol/actions/runs/43676636779/job/132698114198)、[Python 3.10](https://github.com/isLinXu/Vitriol/actions/runs/43676636779/job/132698113986)、[Python 3.11](https://github.com/isLinXu/Vitriol/actions/runs/43676636779/job/132698114139)、[Python 3.12](https://github.com/isLinXu/Vitriol/actions/runs/43676636779/job/132698114160)、[分发包构建](https://github.com/isLinXu/Vitriol/actions/runs/43676636779/job/132698984230)。
+
+限制：本地未安装可选 `datasets` 依赖，真实 Hub/local 数据集读取没有端到端执行；没有下载模型做真实 NAS 搜索或 GPU 压测。全 evaluator MyPy 检查受第三方 Pydantic 语法与 Python 3.9 目标不兼容影响；CI 范围 MyPy 通过。构建发出项目现有 license 元数据弃用警告，但构建成功，本轮未改动该发布元数据。
